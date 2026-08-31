@@ -96,7 +96,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  // We log the error but don't throw to prevent crashing the app during transient network issues
 }
 
 const STATE_DOC_PATH = 'appStates/main';
