@@ -295,8 +295,14 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
       </div>
 
       {/* Clean Matrix Table */}
-      <Card className="p-0 border border-slate-200 dark:border-slate-800 overflow-x-auto shadow-sm print:border-none print:shadow-none print:m-0 print:p-0">
-        <table className="w-full text-sm min-w-[800px] border-collapse print:text-xs">
+      <style>{`
+        @media print {
+          @page { size: landscape; margin: 1cm; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+      <Card className="p-0 border border-slate-200 dark:border-slate-800 overflow-x-auto shadow-sm print:border-none print:shadow-none print:m-0 print:p-0 print:overflow-visible">
+        <table className="w-full text-sm min-w-[800px] border-collapse print:text-[10px] print:min-w-0">
           <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 print:bg-white print:border-b-2 print:border-black">
             <tr>
               <th className="p-4 text-center w-12 font-bold print:p-2">№</th>
@@ -398,7 +404,7 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
               </div>
             </div>
 
-            <table className="w-full text-sm border-collapse border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+            <table className="w-full text-sm border-collapse border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm print:overflow-visible print:rounded-none print:shadow-none print:border-none">
               <thead className="bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th className="p-4 text-left font-bold">{t('subject')}</th>

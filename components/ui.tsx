@@ -392,9 +392,9 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, select
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) => {
   if (!isOpen) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative`}>
-        <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700">
+    <div className="fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200 print:absolute print:inset-0 print:h-auto print:block print:bg-white print:p-0">
+      <div className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}>
+        <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black">
           <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{title}</h3>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300">&times;</button>
         </div>
