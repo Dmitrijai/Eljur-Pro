@@ -390,6 +390,15 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, select
 // --- MODAL ---
 // Updated to use Portal for better z-index handling
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) => {
+  React.useEffect(() => {
+    if (isOpen) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+    return () => document.body.classList.remove('modal-open');
+  }, [isOpen]);
+
   if (!isOpen) return null;
   return createPortal(
     <div className="fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200 print:absolute print:inset-0 print:h-auto print:block print:bg-white print:p-0">

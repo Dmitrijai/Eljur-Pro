@@ -141,8 +141,8 @@ export const DICT: Record<string, Record<string, string>> = {
     place: 'Место',
     school: 'Школа',
     no_rating_data: 'Нет данных для рейтинга',
-    school_users: 'Пользователи школы',
-    global_list: 'Глобальный список',
+    
+    
     all_roles: 'Все роли',
     sort_manual: 'Сорт: Вручную',
     sort_role: 'Сорт: Роль',
@@ -273,7 +273,7 @@ export const DICT: Record<string, Record<string, string>> = {
     edit_school: 'Редактирование школы',
     school_id: 'ID Школы (Осторожно!)',
     current_performance: 'Текущая успеваемость',
-    final_grades: 'Итоговые оценки',
+    
     diary: 'Дневник',
     performance: 'Успеваемость',
     lesson: 'Урок',
@@ -328,7 +328,7 @@ export const DICT: Record<string, Record<string, string>> = {
     new_announcement: 'Новое объявление',
     new_message: 'Новое сообщение',
     sent_by_emp: 'Отправлено сотрудником',
-    class_teacher: 'Классный руководитель',
+    
     type_work: 'Тип работы',
     coefficient: 'Коэффициент',
     lesson_number: 'Номер урока',
@@ -509,7 +509,6 @@ export const DICT: Record<string, Record<string, string>> = {
     class_leadership: 'Классное руководство',
     homeroom_tab: 'Клас. рук.',
     my_class: 'Мой класс',
-    assign_class_teacher: 'Классный руководитель',
     not_assigned: 'Не назначен',
     max_2_classes_reached: 'Лимит: 2 класса',
     class_performance: 'Сводная ведомость успеваемости',
@@ -657,8 +656,8 @@ export const DICT: Record<string, Record<string, string>> = {
     place: 'Rank',
     school: 'School',
     no_rating_data: 'No rating data',
-    school_users: 'School Users',
-    global_list: 'Global List',
+    
+    
     all_roles: 'All Roles',
     sort_manual: 'Sort: Manual',
     sort_role: 'Sort: Role',
@@ -789,7 +788,7 @@ export const DICT: Record<string, Record<string, string>> = {
     edit_school: 'Edit School',
     school_id: 'School ID (Caution!)',
     current_performance: 'Current Performance',
-    final_grades: 'Final Grades',
+    
     diary: 'Diary',
     performance: 'Performance',
     lesson: 'Lesson',
@@ -844,7 +843,7 @@ export const DICT: Record<string, Record<string, string>> = {
     new_announcement: 'New Announcement',
     new_message: 'New Message',
     sent_by_emp: 'Sent by employee',
-    class_teacher: 'Homeroom Teacher',
+    
     type_work: 'Work Type',
     coefficient: 'Coefficient',
     lesson_number: 'Lesson Number',
@@ -1024,7 +1023,6 @@ export const DICT: Record<string, Record<string, string>> = {
     class_leadership: 'Homeroom Class',
     homeroom_tab: 'Class Leadership',
     my_class: 'My Class',
-    assign_class_teacher: 'Class Teacher',
     not_assigned: 'Not assigned',
     max_2_classes_reached: 'Limit: 2 classes',
     class_performance: 'Class Performance Sheet',

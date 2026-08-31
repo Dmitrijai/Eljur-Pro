@@ -304,6 +304,9 @@
             }
 
             /* Modals handling if printing from active modal */
+            body.modal-open #root {
+                display: none !important;
+            }
             .fixed.inset-0 {
                 position: static !important;
                 width: 100% !important;
