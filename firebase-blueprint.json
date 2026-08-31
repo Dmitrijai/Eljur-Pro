@@ -1,0 +1,17 @@
+{
+  "entities": {
+    "AppState": {
+      "title": "Application State",
+      "description": "Unified state for the entire ElZhur application",
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "firestore": {
+    "/appStates/{stateId}": {
+      "schema": "AppState",
+      "description": "The unified state document"
+    }
+  }
+}

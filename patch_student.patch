@@ -1,0 +1,44 @@
+--- views/StudentDashboard.tsx
++++ views/StudentDashboard.tsx
+@@ -20,17 +20,20 @@
+   const lang = state.settings.language || 'ru';
+   const t = (k: string) => H.t(k, lang);
+ 
++  const unreadMsg = H.getUnreadMessagesCount(state, user);
++  const unreadAnn = H.getUnreadAnnouncementsCount(state, user);
++
+   return (
+     <div className="space-y-8">
+        <div className="bg-white p-1.5 rounded-xl sm:rounded-2xl shadow-sm border border-slate-200 flex overflow-x-auto hide-scrollbar gap-1 no-print w-full dark:bg-slate-900 dark:border-slate-800 pb-2 sm:pb-1.5">
+         <TabButton active={view === 'schedule'} onClick={() => setView('schedule')} label={t('schedule')} />
+         <TabButton active={view === 'journal'} onClick={() => setView('journal')} label={t('diary')} />
+         <TabButton active={view === 'grades'} onClick={() => setView('grades')} label={t('performance')} />
+         <TabButton active={view === 'rating'} onClick={() => setView('rating')} label={t('rating')} />
+-        <TabButton active={view === 'messages'} onClick={() => setView('messages')} label={t('messages')} />
+-        <TabButton active={view === 'announcements'} onClick={() => setView('announcements')} label={t('announcements')} />
++        <TabButton active={view === 'messages'} onClick={() => setView('messages')} label={t('messages')} badge={unreadMsg} />
++        <TabButton active={view === 'announcements'} onClick={() => setView('announcements')} label={t('announcements')} badge={unreadAnn} />
+       </div>
+ 
+       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+@@ -43,15 +46,18 @@
+   );
+ }
+ 
+-const TabButton = ({ active, onClick, label }: any) => (
++const TabButton = ({ active, onClick, label, badge }: any) => (
+   <button
+     onClick={onClick}
+-    className={`flex-none px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 whitespace-nowrap ${
++    className={`flex-none flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 whitespace-nowrap ${
+       active 
+         ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 dark:bg-blue-600' 
+         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'
+     }`}
+   >
+     {label}
++    {badge > 0 && (
++      <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{badge}</span>
++    )}
+   </button>
+ );
