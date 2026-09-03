@@ -11,6 +11,7 @@ export interface School {
   gradeTypes?: GradeType[];
   scheduleSettings?: ScheduleSettings;
   subjectRequirements?: Record<string, Record<string, SubjectRequirement>>;
+  eljurInfo?: string;
 }
 
 export interface EmployeePermissions {
@@ -36,6 +37,8 @@ export interface User {
   
   // New permissions for employees
   employeePermissions?: EmployeePermissions;
+  theme?: 'light' | 'dark';
+  language?: 'ru' | 'en';
 }
 
 export interface SubgroupLesson {
@@ -123,6 +126,7 @@ export interface FinalGradeEntry {
 
 export interface Message {
   id: string;
+  schoolId?: string;
   fromId: string;
   realAuthorId?: string; // The actual user ID if sent on behalf of someone else (Director)
   toIds: string[];

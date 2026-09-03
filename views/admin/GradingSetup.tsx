@@ -131,14 +131,21 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
             // EXECUTE SAVE AND WIPE
             H.setSchoolGradingSystem(state, schoolId, gradingSettings);
             if (schoolId) {
-                const school = H.getSchool(state, schoolId);
-                if (school) {
-                    school.grades = {};
-                    school.finalGrades = {};
+                const prefix = `${schoolId}__`;
+                if (state.grades) {
+                    Object.keys(state.grades).forEach(k => {
+                        if (k.startsWith(prefix)) delete state.grades[k];
+                    });
                 }
+                if (state.finalGrades) {
+                    Object.keys(state.finalGrades).forEach(k => {
+                        if (k.startsWith(prefix)) delete state.finalGrades[k];
+                    });
+                }
+            } else {
+                state.grades = {}; // Wipe grades if global
+                state.finalGrades = {}; // Wipe final grades if global
             }
-            state.grades = {}; // Wipe grades
-            state.finalGrades = {}; // Wipe final grades
             onUpdate(state);
             
             setConfirmStep(0);

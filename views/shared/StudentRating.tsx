@@ -5,6 +5,34 @@ import * as H from '../../utils/helpers';
 import { Button, Select, Card } from '../../components/ui';
 import { Printer, ChevronUp, ChevronDown } from 'lucide-react';
 
+const isSubjectMatching = (subjName: string, targetSubj: string): boolean => {
+    const s1 = subjName.toLowerCase().trim().replace(/ё/g, 'e');
+    const s2 = targetSubj.toLowerCase().trim().replace(/ё/g, 'e');
+    if (s1 === s2) return true;
+    if (s1.includes(s2) || s2.includes(s1)) return true;
+
+    const synonyms: Record<string, string[]> = {
+        'математика': ['алгебра', 'геометрия', 'math', 'mathematics'],
+        'информатика': ['информатика и икт', 'computer science', 'программирование', 'ит', 'it'],
+        'английский': ['английский язык', 'english', 'иностранный язык'],
+        'русский': ['русский язык', 'russian'],
+        'физика': ['physics'],
+        'химия': ['chemistry'],
+        'биология': ['biology'],
+        'история': ['история россии', 'всеобщая история', 'history'],
+        'обществознание': ['общество', 'social studies', 'право'],
+        'литература': ['русская литература', 'literature'],
+        'география': ['geography']
+    };
+
+    for (const [key, list] of Object.entries(synonyms)) {
+        if ((s2 === key || list.includes(s2)) && (s1 === key || list.some(syn => s1.includes(syn)))) {
+            return true;
+        }
+    }
+    return false;
+};
+
 export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: AppState, schoolId?: string, isGlobal?: boolean }) => {
     const [selectedProfile, setSelectedProfile] = useState('');
     const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
@@ -21,8 +49,6 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
 
     const lang = state.settings.language || 'ru';
     const t = (k: string) => H.t(k, lang);
-    const useWeights = state.gradingSystem?.useWeights ?? true;
-    const gradeTypes = state.gradeTypes || [];
 
     const profiles = [
         { label: t('profile_phys_math'), subjects: ['Математика', 'Физика'] },
@@ -54,6 +80,9 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
     const ratingListRaw = students.map(s => {
         const classKey = `${s.class}_${s.letter}`;
         const allGrades = H.getSchoolClassGrades(state, s.schoolId, classKey);
+        const schoolGradingSystem = H.getSchoolGradingSystem(state, s.schoolId);
+        const schoolGradeTypes = H.getSchoolGradeTypes(state, s.schoolId);
+        const useWeights = schoolGradingSystem?.useWeights ?? true;
         let totalWeighted = 0;
         let totalWeights = 0;
         let subjectsToCount = new Set<string>();
@@ -67,7 +96,10 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
         
         const subjectArray = Array.from(subjectsToCount);
         Object.entries(allGrades).forEach(([subjName, grades]) => {
-            if (subjectArray.length > 0 && !subjectArray.includes(subjName)) return;
+            if (subjectArray.length > 0) {
+                const matches = subjectArray.some(target => isSubjectMatching(subjName, target));
+                if (!matches) return;
+            }
             grades.forEach(g => {
                 if (g.studentId === s.id) {
                     const val = parseFloat(g.value as string);
@@ -75,7 +107,7 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
                         // Dynamic Weight Lookup Logic
                         let weight = 1;
                         if (useWeights) {
-                            const typeDef = gradeTypes.find(t => t.key === g.type);
+                            const typeDef = schoolGradeTypes.find(t => t.key === g.type);
                             if (typeDef) {
                                 if (typeDef.isNoWeight) weight = 0;
                                 else if (typeDef.isDynamicWeight) weight = g.weight || 1;

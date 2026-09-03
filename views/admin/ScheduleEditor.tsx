@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppState, Lesson } from '../../types';
+import { AppState, Lesson, ScheduleSettings } from '../../types';
 import * as H from '../../utils/helpers';
 import { Button, Input, Select, Modal } from '../../components/ui';
 import { ChevronLeft, ChevronRight, Calendar, Settings, Copy, BookOpen, Printer, Lock, Trash2, MoreVertical, X as XIcon, Type, AlertCircle, CalendarRange } from 'lucide-react';
@@ -49,7 +49,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   const targetScheduleKey = activeClass ? H.getSchoolClassKey(user.schoolId, activeClass) : '';
   if (targetScheduleKey && !state.schedules[targetScheduleKey]) { state.schedules[targetScheduleKey] = {}; }
   const schedule = targetScheduleKey ? (state.schedules[targetScheduleKey] || {}) : {};
-  const classGroups = state.studentGroups.filter(g => g.classId === activeClass);
+  const classGroups = H.getSchoolStudentGroups(state, user.schoolId, activeClass);
   const visibleDayKeys = Object.keys(schedule).filter(key => H.isDateInWeek(schedule[key].date, currentWeekStart)).sort((a,b) => schedule[a].date.localeCompare(schedule[b].date));
   
   const goPrevWeek = () => setCurrentWeekStart(d => H.addDays(d, -7));
@@ -76,6 +76,15 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       const normExclude = normalizeClassKey(excludeClassKey);
 
       for (const [cKey, days] of Object.entries(state.schedules)) {
+          if (user.schoolId) {
+              if (cKey.includes('__')) {
+                  const [schId] = cKey.split('__');
+                  if (schId !== user.schoolId) continue;
+              } else {
+                  const isClassInThisSchool = schoolClasses.some(sc => `${sc.class}_${sc.letter}` === cKey);
+                  if (!isClassInThisSchool) continue;
+              }
+          }
           const normCKey = normalizeClassKey(cKey);
           const day = Object.values(days).find(d => d.date === date);
           if (day) {
@@ -92,29 +101,102 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       return null;
   };
   
+  const sourceClassGroups = H.getSchoolStudentGroups(state, user.schoolId, activeClass);
+  const allGroups = state.studentGroups || [];
+
+  const mapLessonsForTargetClass = (lessons: Lesson[], targetClsKey: string): Lesson[] => {
+      let targetGroups = H.getSchoolStudentGroups(state, user.schoolId, targetClsKey);
+      
+      const hasSubgroups = lessons.some(l => l.subgroups && l.subgroups.length > 0);
+      if (hasSubgroups && targetGroups.length === 0) {
+          const targetStudents = state.users.filter(u => u.schoolId === user.schoolId && u.role === 'student' && `${u.class}_${u.letter}` === targetClsKey);
+          const count = sourceClassGroups.length > 0 ? sourceClassGroups.length : 2;
+          const chunkSize = targetStudents.length > 0 ? Math.ceil(targetStudents.length / count) : 0;
+          for (let i = 0; i < count; i++) {
+              const groupStudents = targetStudents.slice(i * chunkSize, (i + 1) * chunkSize).map(u => u.id);
+              const newGroup = {
+                  id: H.uid('group'),
+                  schoolId: user.schoolId,
+                  classId: targetClsKey,
+                  name: sourceClassGroups[i]?.name || `Группа ${i + 1}`,
+                  studentIds: groupStudents
+              };
+              if (!state.studentGroups) state.studentGroups = [];
+              state.studentGroups.push(newGroup);
+              targetGroups.push(newGroup);
+          }
+      }
+
+      return lessons.map(l => ({
+          ...l,
+          id: H.uid('l'),
+          subgroups: l.subgroups ? l.subgroups.map((sg, sgIdx) => {
+              let targetGroupId = sg.groupId;
+              if (targetGroups.length > 0) {
+                  const alreadyBelongs = targetGroups.some(tg => tg.id === sg.groupId);
+                  if (!alreadyBelongs) {
+                      const srcGroupIdx = sourceClassGroups.findIndex(g => g.id === sg.groupId);
+                      const srcGroup = srcGroupIdx > -1 ? sourceClassGroups[srcGroupIdx] : allGroups.find(g => g.id === sg.groupId);
+                      if (srcGroup) {
+                          const matchedByName = targetGroups.find(tg => tg.name.trim().toLowerCase() === srcGroup.name.trim().toLowerCase());
+                          if (matchedByName) targetGroupId = matchedByName.id;
+                          else if (srcGroupIdx > -1 && targetGroups[srcGroupIdx]) targetGroupId = targetGroups[srcGroupIdx].id;
+                          else targetGroupId = targetGroups[0].id;
+                      } else {
+                          targetGroupId = targetGroups[sgIdx] ? targetGroups[sgIdx].id : targetGroups[0].id;
+                      }
+                  }
+              }
+              return { ...sg, groupId: targetGroupId };
+          }) : undefined
+      }));
+  };
+
   const copyScheduleBatch = () => {
     if (selectedClassesForCopy.length === 0) return alert(t('select_classes'));
     const prevWeekStart = H.addDays(currentWeekStart, -7);
     let updated = false;
+
+    const activeSchedule = targetScheduleKey ? (state.schedules[targetScheduleKey] || {}) : {};
+    const activeCurrentWeekDays = Object.values(activeSchedule).filter(d => H.isDateInWeek(d.date, currentWeekStart));
+    const activePrevWeekDays = Object.values(activeSchedule).filter(d => H.isDateInWeek(d.date, prevWeekStart));
+
     selectedClassesForCopy.forEach(clsKey => {
         const scopedKey = H.getSchoolClassKey(user.schoolId, clsKey);
         if (!state.schedules[scopedKey]) state.schedules[scopedKey] = {};
         const classSchedule = state.schedules[scopedKey];
         const prevWeekKeys = Object.keys(classSchedule).filter(key => H.isDateInWeek(classSchedule[key].date, prevWeekStart));
-        if (prevWeekKeys.length === 0) return;
-        prevWeekKeys.forEach(prevKey => {
-            const prevDay = classSchedule[prevKey];
-            const prevDate = new Date(prevDay.date);
-            const newDate = H.addDays(prevDate, 7);
-            const newDateStr = H.dateToIso(newDate);
-            const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
-            if (!exists) {
-                const newId = H.uid('day');
-                const newLessons = prevDay.lessons.map(l => ({ ...l, id: H.uid('l'), subgroups: l.subgroups ? l.subgroups.map(sg => ({...sg})) : undefined }));
-                state.schedules[scopedKey][newId] = { id: newId, title: prevDay.title, date: newDateStr, lessons: newLessons, showGroups: prevDay.showGroups };
-                updated = true;
-            }
-        });
+        
+        if (prevWeekKeys.length > 0) {
+            prevWeekKeys.forEach(prevKey => {
+                const prevDay = classSchedule[prevKey];
+                const prevDate = new Date(prevDay.date);
+                const newDate = H.addDays(prevDate, 7);
+                const newDateStr = H.dateToIso(newDate);
+                const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
+                if (!exists) {
+                    const newId = H.uid('day');
+                    const newLessons = mapLessonsForTargetClass(prevDay.lessons, clsKey);
+                    state.schedules[scopedKey][newId] = { id: newId, title: prevDay.title, date: newDateStr, lessons: newLessons, showGroups: prevDay.showGroups };
+                    updated = true;
+                }
+            });
+        } else if (clsKey !== activeClass && (activeCurrentWeekDays.length > 0 || activePrevWeekDays.length > 0)) {
+            const daysToCopy = activeCurrentWeekDays.length > 0 ? activeCurrentWeekDays : activePrevWeekDays;
+            const shiftDays = activeCurrentWeekDays.length > 0 ? 0 : 7;
+            daysToCopy.forEach(srcDay => {
+                const srcDate = new Date(srcDay.date);
+                const newDate = shiftDays !== 0 ? H.addDays(srcDate, shiftDays) : srcDate;
+                const newDateStr = H.dateToIso(newDate);
+                const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
+                if (!exists) {
+                    const newId = H.uid('day');
+                    const newLessons = mapLessonsForTargetClass(srcDay.lessons, clsKey);
+                    state.schedules[scopedKey][newId] = { id: newId, title: srcDay.title, date: newDateStr, lessons: newLessons, showGroups: srcDay.showGroups };
+                    updated = true;
+                }
+            });
+        }
     });
     if (updated) { onUpdate(state); setShowBatchCopyModal(false); setSelectedClassesForCopy([]); } else { alert(t('confirm_copy_empty')); }
   };
@@ -135,7 +217,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
             const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
             if (!exists) {
                 const newId = H.uid('day');
-                const newLessons = prevDay.lessons.map(l => ({ ...l, id: H.uid('l'), subgroups: l.subgroups ? l.subgroups.map(sg => ({...sg})) : undefined }));
+                const newLessons = mapLessonsForTargetClass(prevDay.lessons, activeClass);
                 state.schedules[targetScheduleKey][newId] = { id: newId, title: prevDay.title, date: newDateStr, lessons: newLessons, showGroups: prevDay.showGroups };
                 updated = true;
             }
@@ -310,15 +392,29 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       return `${u.fio}${uniqueSubjs.length > 0 ? ` (${uniqueSubjs.slice(0,2).join(', ')}${uniqueSubjs.length>2?'...':''})` : ''}`;
   };
 
+  const updateScheduleSettings = (updater: (s: ScheduleSettings) => void) => {
+    const current: ScheduleSettings = JSON.parse(JSON.stringify(H.getSchoolScheduleSettings(state, user.schoolId)));
+    if (!current.holidays) current.holidays = [];
+    if (!current.vacations) current.vacations = [];
+    if (!current.skippedWeekDays) current.skippedWeekDays = [0];
+    if (!current.quarterDefinitions) current.quarterDefinitions = { 'Q1': { start: '', end: '' }, 'Q2': { start: '', end: '' }, 'Q3': { start: '', end: '' }, 'Q4': { start: '', end: '' } };
+    updater(current);
+    H.setSchoolScheduleSettings(state, user.schoolId, current);
+    onUpdate(state);
+  };
+
   const handleQuarterDateChange = (q: string, type: 'start' | 'end', value: string) => {
-    if (!state.scheduleSettings.quarterDefinitions) state.scheduleSettings.quarterDefinitions = {};
-    if (!state.scheduleSettings.quarterDefinitions[q]) state.scheduleSettings.quarterDefinitions[q] = {start:'', end:''};
-    state.scheduleSettings.quarterDefinitions[q][type] = value;
+    const current = JSON.parse(JSON.stringify(H.getSchoolScheduleSettings(state, user.schoolId)));
+    if (!current.quarterDefinitions) current.quarterDefinitions = { 'Q1': { start: '', end: '' }, 'Q2': { start: '', end: '' }, 'Q3': { start: '', end: '' }, 'Q4': { start: '', end: '' } };
+    if (!current.quarterDefinitions[q]) current.quarterDefinitions[q] = {start:'', end:''};
+    current.quarterDefinitions[q][type] = value;
+    H.setSchoolScheduleSettings(state, user.schoolId, current);
+
     const allScheduleDates = new Set<string>();
     Object.values(state.schedules).forEach(classDays => { Object.values(classDays).forEach(day => { if(day.date) allScheduleDates.add(day.date); }); });
     const quarterKeys = ['Q1', 'Q2', 'Q3', 'Q4'];
     quarterKeys.forEach(qKey => {
-        const def = state.scheduleSettings.quarterDefinitions![qKey];
+        const def = current.quarterDefinitions![qKey];
         if (!state.quarters[qKey]) state.quarters[qKey] = [];
         if (def && def.start && def.end) {
             state.quarters[qKey] = state.quarters[qKey].filter(d => d >= def.start && d <= def.end);
@@ -330,7 +426,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   };
 
   const visibleDates = visibleDayKeys.map(k => schedule[k].date);
-  const vacationInfo = H.getVacationForWeek(currentWeekStart, state.scheduleSettings, visibleDates);
+  const vacationInfo = H.getVacationForWeek(currentWeekStart, scheduleSettings, visibleDates);
   const daysOfWeek = [t('days_sun_short'), t('days_mon_short'), t('days_tue_short'), t('days_wed_short'), t('days_thu_short'), t('days_fri_short'), t('days_sat_short')];
 
   return (
@@ -370,8 +466,8 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
         )}
         {visibleDayKeys.map(dayKey => {
            const day = schedule[dayKey];
-           const holidayInfo = H.isHoliday(day.date, state.scheduleSettings);
-           const vacForDay = H.getVacationForDay(day.date, state.scheduleSettings);
+           const holidayInfo = H.isHoliday(day.date, scheduleSettings);
+           const vacForDay = H.getVacationForDay(day.date, scheduleSettings);
            const isPast = isDayInPast(day.date);
            const isVacationDay = !!vacForDay;
            const isHolidayDay = !!holidayInfo;
@@ -419,7 +515,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                           <td className="p-2 pl-4 text-center align-top"><Input disabled={isPast} value={lesson.timeRange} onChange={e => updateLesson(dayKey, idx, 'timeRange', e.target.value)} className="text-sm font-mono font-medium text-center" /></td>
                           {isGroupColVisible && (<td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map(sg => { const groupName = classGroups.find(g => g.id === sg.groupId)?.name || t('subgroup_label'); return (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center justify-center text-[9px] font-bold text-blue-600 dark:text-blue-400 px-1 truncate bg-blue-50/10" title={groupName}>{groupName}</div>); })}</div>) : (<div className="min-h-[42px] flex items-center justify-center text-slate-300">-</div>)}</td>)}
                           <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Select disabled={isPast} value={sg.subject} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'subject', e.target.value)} className="text-sm text-center border-blue-100 dark:border-slate-700 w-full"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select></div>))}</div>) : (<div className="p-2"><Select disabled={isPast} value={lesson.lesson} onChange={e => updateLesson(dayKey, idx, 'lesson', e.target.value)} className="text-sm text-center"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select></div>)}</td>
-                          <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10 gap-0.5"><div className="flex gap-1 items-center w-full"><Select disabled={isPast} value={sg.teacherId} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', e.target.value)} className="text-sm text-center border-blue-100 dark:border-slate-700 w-full"><option value="">-- {t('teacher')} --</option>{state.users.filter(u => u.role === 'teacher').map(u => { const conflictClass = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id); return (<option key={u.id} value={u.id} disabled={!!conflictClass}>{getTeacherDisplay(u)} {conflictClass ? `🔒 (в ${conflictClass})` : ''}</option>); })}</Select>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, sgIdx)} className="p-1 hover:bg-blue-200 rounded text-blue-500 flex-shrink-0" title={t('add_label')}><Type size={12}/></button>}</div>{sg.teacherLabel && <div className="text-[9px] text-red-500 font-bold text-center leading-none mt-0.5">{sg.teacherLabel}</div>}</div>))}</div>) : (<div className="p-2 flex flex-col gap-0.5"><div className="flex gap-1 items-center w-full"><Select disabled={isPast} value={lesson.teacherId} onChange={e => updateLesson(dayKey, idx, 'teacherId', e.target.value)} className="text-sm text-center w-full"><option value="">-- {t('teacher')} --</option>{state.users.filter(u => u.role === 'teacher').map(u => { const conflictClass = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id); return (<option key={u.id} value={u.id} disabled={!!conflictClass}>{getTeacherDisplay(u)} {conflictClass ? `🔒 (в ${conflictClass})` : ''}</option>); })}</Select>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, null)} className="p-1.5 hover:bg-slate-200 rounded text-slate-400 hover:text-blue-500 flex-shrink-0" title={t('add_label')}><Type size={14}/></button>}</div>{lesson.teacherLabel && <div className="text-[10px] text-red-500 font-bold text-center">{lesson.teacherLabel}</div>}</div>)}</td>
+                          <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10 gap-0.5"><div className="flex gap-1 items-center w-full"><Select disabled={isPast} value={sg.teacherId} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', e.target.value)} className="text-sm text-center border-blue-100 dark:border-slate-700 w-full"><option value="">-- {t('teacher')} --</option>{state.users.filter(u => u.role === 'teacher' && (!user.schoolId || u.schoolId === user.schoolId)).map(u => { const conflictClass = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id); return (<option key={u.id} value={u.id} disabled={!!conflictClass}>{getTeacherDisplay(u)} {conflictClass ? `🔒 (в ${conflictClass})` : ''}</option>); })}</Select>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, sgIdx)} className="p-1 hover:bg-blue-200 rounded text-blue-500 flex-shrink-0" title={t('add_label')}><Type size={12}/></button>}</div>{sg.teacherLabel && <div className="text-[9px] text-red-500 font-bold text-center leading-none mt-0.5">{sg.teacherLabel}</div>}</div>))}</div>) : (<div className="p-2 flex flex-col gap-0.5"><div className="flex gap-1 items-center w-full"><Select disabled={isPast} value={lesson.teacherId} onChange={e => updateLesson(dayKey, idx, 'teacherId', e.target.value)} className="text-sm text-center w-full"><option value="">-- {t('teacher')} --</option>{state.users.filter(u => u.role === 'teacher' && (!user.schoolId || u.schoolId === user.schoolId)).map(u => { const conflictClass = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id); return (<option key={u.id} value={u.id} disabled={!!conflictClass}>{getTeacherDisplay(u)} {conflictClass ? `🔒 (в ${conflictClass})` : ''}</option>); })}</Select>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, null)} className="p-1.5 hover:bg-slate-200 rounded text-slate-400 hover:text-blue-500 flex-shrink-0" title={t('add_label')}><Type size={14}/></button>}</div>{lesson.teacherLabel && <div className="text-[10px] text-red-500 font-bold text-center">{lesson.teacherLabel}</div>}</div>)}</td>
                           <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Input disabled={isPast} value={sg.room} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'room', e.target.value)} className="text-sm w-full text-center border-blue-100 dark:border-slate-700" placeholder={t('room_placeholder')} /></div>))}</div>) : (<div className="p-2"><Input disabled={isPast} value={lesson.room} onChange={e => updateLesson(dayKey, idx, 'room', e.target.value)} className="text-sm w-full text-center" placeholder={t('room_placeholder')} /></div>)}</td>
                           <td className="p-2 no-print text-center align-middle">{!isPast && <button onClick={() => deleteLesson(dayKey, idx)} className="text-slate-300 hover:text-red-500 transition-colors dark:text-slate-600 dark:hover:text-red-400">&times;</button>}</td>
                         </tr>
@@ -436,7 +532,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       <Modal isOpen={showBatchCopyModal} onClose={() => setShowBatchCopyModal(false)} title={t('copy_schedule_title')}><div className="space-y-4"><p className="text-sm text-slate-600 dark:text-slate-300">{t('copy_schedule_body')}</p><div className="max-h-60 overflow-y-auto border border-slate-200 rounded-lg p-2 dark:border-slate-700"><div className="flex justify-between mb-2 px-2"><button onClick={() => setSelectedClassesForCopy(schoolClasses.map(c => `${c.class}_${c.letter}`))} className="text-xs text-blue-600 font-bold hover:underline">{t('select_all')}</button><button onClick={() => setSelectedClassesForCopy([])} className="text-xs text-slate-400 hover:text-slate-600">{t('reset')}</button></div>{schoolClasses.map(c => { const key = `${c.class}_${c.letter}`; return (<label key={key} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded cursor-pointer dark:hover:bg-slate-800"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" checked={selectedClassesForCopy.includes(key)} onChange={(e) => { if (e.target.checked) setSelectedClassesForCopy([...selectedClassesForCopy, key]); else setSelectedClassesForCopy(selectedClassesForCopy.filter(k => k !== key)); }} /><span className="font-medium text-slate-700 dark:text-slate-200">{c.class}{c.letter}</span></label>); })}</div><div className="flex gap-2 justify-end"><Button variant="ghost" onClick={() => setShowBatchCopyModal(false)}>{t('cancel')}</Button><Button variant="primary" onClick={copyScheduleBatch}>{t('copy')}</Button></div></div></Modal>
       <Modal isOpen={confirmCopyModal} onClose={() => setConfirmCopyModal(false)} title={t('copy_schedule_short')}><div className="space-y-6"><div className="bg-blue-50 text-blue-800 p-4 rounded-xl border border-blue-100 flex items-start gap-3"><AlertCircle className="flex-shrink-0 mt-0.5" size={20}/><div><p className="font-bold mb-1">{t('copy_from_prev_q')}</p><p className="text-sm opacity-90">{t('copy_warning_msg').replace('%s', activeClass.replace('_', ''))}</p></div></div><div className="flex gap-3 justify-end"><Button variant="ghost" onClick={() => setConfirmCopyModal(false)}>{t('cancel')}</Button><Button variant="primary" onClick={copyScheduleForCurrentClass}>{t('confirm')}</Button></div></div></Modal>
       <Modal isOpen={labelModal.isOpen} onClose={() => setLabelModal({...labelModal, isOpen: false})} title={t('add_label_title')}><div className="space-y-4"><p className="text-sm text-slate-600 dark:text-slate-300">{t('add_label_desc')}</p><div><label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">{t('label_text')}</label><Input autoFocus value={labelModal.text} onChange={e => setLabelModal({...labelModal, text: e.target.value})} placeholder={t('label_placeholder')} /></div><div><label className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${labelModal.canGrade ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700' : 'bg-slate-50 border-slate-200 dark:bg-slate-800 dark:border-slate-700'}`}><div className="pt-0.5"><input type="checkbox" checked={labelModal.canGrade} onChange={e => setLabelModal({...labelModal, canGrade: e.target.checked})} className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300" /></div><div><span className={`block text-sm font-bold mb-0.5 ${labelModal.canGrade ? 'text-blue-900 dark:text-blue-300' : 'text-slate-700 dark:text-slate-300'}`}>{t('substitution_confirm')}</span><span className={`text-xs font-medium ${labelModal.canGrade ? 'text-blue-700 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}>{labelModal.canGrade ? t('access_granted') : t('access_denied')}</span></div></label></div><div className="flex gap-2 justify-end pt-2"><Button variant="ghost" onClick={() => setLabelModal({...labelModal, isOpen: false})}>{t('cancel')}</Button><Button variant="primary" onClick={saveTeacherLabel}>{t('save')}</Button></div></div></Modal>
-      <Modal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t('setup_schedule')}><div className="space-y-6"><div><label className="block text-sm font-bold text-slate-700 mb-2 dark:text-slate-300">{t('days_batch')}</label><Input type="number" min="1" max="7" value={state.scheduleSettings.daysToAddBatch} onChange={e => { state.scheduleSettings.daysToAddBatch = parseInt(e.target.value); onUpdate(state); }} /></div><div><label className="block text-sm font-bold text-slate-700 mb-2 dark:text-slate-300">{t('skip_days')}</label><div className="flex flex-wrap gap-2">{daysOfWeek.map((day, idx) => { const isSkipped = state.scheduleSettings.skippedWeekDays.includes(idx); return (<button key={idx} onClick={() => { const current = state.scheduleSettings.skippedWeekDays; if (isSkipped) { state.scheduleSettings.skippedWeekDays = current.filter(d => d !== idx); } else { state.scheduleSettings.skippedWeekDays = [...current, idx]; } onUpdate(state); }} className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${isSkipped ? 'bg-red-100 text-red-600 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>{day} {isSkipped ? t('skipped_label') : ''}</button>); })}</div></div><div className="border-t border-slate-200 pt-4 dark:border-slate-700"><h4 className="font-bold text-slate-800 mb-4 dark:text-white">{t('quarter_dates')}</h4><div className="grid grid-cols-1 gap-3">{['Q1', 'Q2', 'Q3', 'Q4'].map((q) => { const def = state.scheduleSettings?.quarterDefinitions?.[q] || { start: '', end: '' }; return (<div key={q} className="flex items-center gap-2 text-sm"><span className="w-8 font-bold text-slate-600 dark:text-slate-400">{q}</span><div className="flex-1 flex gap-2"><Input type="date" value={def.start} onChange={e => handleQuarterDateChange(q, 'start', e.target.value)} /><span className="text-slate-400 self-center">—</span><Input type="date" value={def.end} onChange={e => handleQuarterDateChange(q, 'end', e.target.value)} /></div></div>); })}</div></div><div className="border-t border-slate-200 pt-4 dark:border-slate-700"><h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2 dark:text-white"><CalendarRange size={18}/> {t('holidays_vacations')}</h4><div className="mb-6"><label className="text-xs font-bold uppercase text-slate-500 mb-2 block">{t('holidays_daily')}</label><div className="flex gap-2 mb-2 items-end"><div className="w-1/2"><label className="text-[10px] text-slate-400">{t('select_date')}</label><Input type="date" id="newHolidayDate" className="h-[42px]" /></div><div className="w-1/2"><label className="text-[10px] text-slate-400">{t('holiday_name')}</label><Input type="text" id="newHolidayTitle" placeholder={t('example_holiday')} className="h-[42px]" /></div></div><Button size="sm" className="w-full mb-3" onClick={() => { const dateEl = document.getElementById('newHolidayDate') as HTMLInputElement; const titleEl = document.getElementById('newHolidayTitle') as HTMLInputElement; if (dateEl.value && !state.scheduleSettings.holidays.find(h => h.date === dateEl.value)) { state.scheduleSettings.holidays.push({ date: dateEl.value, title: titleEl.value || 'Выходной' }); state.scheduleSettings.holidays.sort((a,b) => a.date.localeCompare(b.date)); onUpdate(state); titleEl.value = ''; } }}>{t('add_holiday')}</Button><div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">{state.scheduleSettings.holidays.map(h => (<span key={h.date} className="bg-red-50 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-100 flex items-center gap-1 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400">{H.formatDateDDMMYYYY(h.date)}: {h.title} <button onClick={() => { state.scheduleSettings.holidays = state.scheduleSettings.holidays.filter(x => x.date !== h.date); onUpdate(state); }}>&times;</button></span>))}</div></div><div><label className="text-xs font-bold uppercase text-slate-500 mb-2 block">{t('vacation_periods')}</label><div className="grid grid-cols-3 gap-2 mb-2 items-end"><div><label className="text-[10px] text-slate-400">{t('from_date')}</label><Input type="date" id="vacStart" className="h-[42px]" /></div><div><label className="text-[10px] text-slate-400">{t('to_date')}</label><Input type="date" id="vacEnd" className="h-[42px]" /></div><div><label className="text-[10px] text-slate-400">{t('title')}</label><Input id="vacTitle" placeholder={t('example_vacation')} className="h-[42px]" /></div></div><Button size="sm" className="w-full mb-3" onClick={() => { const start = (document.getElementById('vacStart') as HTMLInputElement).value; const end = (document.getElementById('vacEnd') as HTMLInputElement).value; const title = (document.getElementById('vacTitle') as HTMLInputElement).value || t('example_vacation'); if (start && end) { state.scheduleSettings.vacations.push({ id: H.uid('vac'), start, end, title }); onUpdate(state); } }}>{t('add_period')}</Button><div className="space-y-2">{state.scheduleSettings.vacations.map(v => (<div key={v.id} className="flex justify-between items-center bg-green-50 p-2 rounded border border-green-100 text-xs dark:bg-green-900/20 dark:border-green-800"><span className="font-bold text-green-800 dark:text-green-300">{v.title}</span><span className="text-green-600 dark:text-green-400">{H.formatDateDDMMYYYY(v.start)} — {H.formatDateDDMMYYYY(v.end)}</span><button onClick={() => { state.scheduleSettings.vacations = state.scheduleSettings.vacations.filter(x => x.id !== v.id); onUpdate(state); }} className="text-red-500 font-bold">&times;</button></div>))}</div></div></div></div></Modal>
+      <Modal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t('setup_schedule')}><div className="space-y-6"><div><label className="block text-sm font-bold text-slate-700 mb-2 dark:text-slate-300">{t('days_batch')}</label><Input type="number" min="1" max="7" value={scheduleSettings.daysToAddBatch} onChange={e => { updateScheduleSettings(s => { s.daysToAddBatch = parseInt(e.target.value) || 1; }); }} /></div><div><label className="block text-sm font-bold text-slate-700 mb-2 dark:text-slate-300">{t('skip_days')}</label><div className="flex flex-wrap gap-2">{daysOfWeek.map((day, idx) => { const isSkipped = (scheduleSettings.skippedWeekDays || []).includes(idx); return (<button key={idx} onClick={() => { updateScheduleSettings(s => { const current = s.skippedWeekDays || []; if (isSkipped) { s.skippedWeekDays = current.filter(d => d !== idx); } else { s.skippedWeekDays = [...current, idx]; } }); }} className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${isSkipped ? 'bg-red-100 text-red-600 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>{day} {isSkipped ? t('skipped_label') : ''}</button>); })}</div></div><div className="border-t border-slate-200 pt-4 dark:border-slate-700"><h4 className="font-bold text-slate-800 mb-4 dark:text-white">{t('quarter_dates')}</h4><div className="grid grid-cols-1 gap-3">{['Q1', 'Q2', 'Q3', 'Q4'].map((q) => { const def = scheduleSettings.quarterDefinitions?.[q] || { start: '', end: '' }; return (<div key={q} className="flex items-center gap-2 text-sm"><span className="w-8 font-bold text-slate-600 dark:text-slate-400">{q}</span><div className="flex-1 flex gap-2"><Input type="date" value={def.start} onChange={e => handleQuarterDateChange(q, 'start', e.target.value)} /><span className="text-slate-400 self-center">—</span><Input type="date" value={def.end} onChange={e => handleQuarterDateChange(q, 'end', e.target.value)} /></div></div>); })}</div></div><div className="border-t border-slate-200 pt-4 dark:border-slate-700"><h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2 dark:text-white"><CalendarRange size={18}/> {t('holidays_vacations')}</h4><div className="mb-6"><label className="text-xs font-bold uppercase text-slate-500 mb-2 block">{t('holidays_daily')}</label><div className="flex gap-2 mb-2 items-end"><div className="w-1/2"><label className="text-[10px] text-slate-400">{t('select_date')}</label><Input type="date" id="newHolidayDate" className="h-[42px]" /></div><div className="w-1/2"><label className="text-[10px] text-slate-400">{t('holiday_name')}</label><Input type="text" id="newHolidayTitle" placeholder={t('example_holiday')} className="h-[42px]" /></div></div><Button size="sm" className="w-full mb-3" onClick={() => { const dateEl = document.getElementById('newHolidayDate') as HTMLInputElement; const titleEl = document.getElementById('newHolidayTitle') as HTMLInputElement; if (dateEl.value && !(scheduleSettings.holidays || []).find(h => h.date === dateEl.value)) { updateScheduleSettings(s => { if (!s.holidays) s.holidays = []; s.holidays.push({ date: dateEl.value, title: titleEl.value || 'Выходной' }); s.holidays.sort((a,b) => a.date.localeCompare(b.date)); }); titleEl.value = ''; } }}>{t('add_holiday')}</Button><div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">{(scheduleSettings.holidays || []).map(h => (<span key={h.date} className="bg-red-50 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-100 flex items-center gap-1 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400">{H.formatDateDDMMYYYY(h.date)}: {h.title} <button onClick={() => { updateScheduleSettings(s => { s.holidays = (s.holidays || []).filter(x => x.date !== h.date); }); }}>&times;</button></span>))}</div></div><div><label className="text-xs font-bold uppercase text-slate-500 mb-2 block">{t('vacation_periods')}</label><div className="grid grid-cols-3 gap-2 mb-2 items-end"><div><label className="text-[10px] text-slate-400">{t('from_date')}</label><Input type="date" id="vacStart" className="h-[42px]" /></div><div><label className="text-[10px] text-slate-400">{t('to_date')}</label><Input type="date" id="vacEnd" className="h-[42px]" /></div><div><label className="text-[10px] text-slate-400">{t('title')}</label><Input id="vacTitle" placeholder={t('example_vacation')} className="h-[42px]" /></div></div><Button size="sm" className="w-full mb-3" onClick={() => { const start = (document.getElementById('vacStart') as HTMLInputElement).value; const end = (document.getElementById('vacEnd') as HTMLInputElement).value; const title = (document.getElementById('vacTitle') as HTMLInputElement).value || t('example_vacation'); if (start && end) { updateScheduleSettings(s => { if (!s.vacations) s.vacations = []; s.vacations.push({ id: H.uid('vac'), start, end, title }); }); } }}>{t('add_period')}</Button><div className="space-y-2">{(scheduleSettings.vacations || []).map(v => (<div key={v.id} className="flex justify-between items-center bg-green-50 p-2 rounded border border-green-100 text-xs dark:bg-green-900/20 dark:border-green-800"><span className="font-bold text-green-800 dark:text-green-300">{v.title}</span><span className="text-green-600 dark:text-green-400">{H.formatDateDDMMYYYY(v.start)} — {H.formatDateDDMMYYYY(v.end)}</span><button onClick={() => { updateScheduleSettings(s => { s.vacations = (s.vacations || []).filter(x => x.id !== v.id); }); }} className="text-red-500 font-bold">&times;</button></div>))}</div></div></div></div></Modal>
       <Modal isOpen={showSubjModal} onClose={() => setShowSubjModal(false)} title={t('manage_subjects')}><div className="flex gap-2 mb-4"><Input value={newSubj} onChange={e => setNewSubj(e.target.value)} placeholder={t('subject_name')} /><Button onClick={handleAddSubject}>{t('add')}</Button></div><div className="max-h-60 overflow-y-auto border rounded-lg divide-y dark:border-slate-700 dark:divide-slate-700">{schoolSubjects.map(s => (<div key={s} className="p-2 flex justify-between items-center hover:bg-slate-50 dark:hover:bg-slate-800"><span>{s}</span><button onClick={() => deleteSubject(s)} className="text-red-500 hover:text-red-700 font-bold">&times;</button></div>))}</div></Modal>
     </div>
   );

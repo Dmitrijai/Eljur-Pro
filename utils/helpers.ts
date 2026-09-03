@@ -1291,9 +1291,13 @@ export const isAnnouncementUnreadByUser = (a: Announcement, user: User, allUsers
     // Announcements created by current user are not unread for them
     if (a.fromId === user.id || a.realAuthorId === user.id) return false;
     const sender = allUsers.find(u => u.id === a.fromId);
-    if (!sender) return false;
-    // Global announcements from creator or school-level announcements
-    if ((sender.role as string) !== 'creator' && sender.schoolId !== user.schoolId) return false;
+    if (a.schoolId) {
+        if (a.schoolId !== user.schoolId) return false;
+    } else if (sender) {
+        if ((sender.role as string) !== 'creator' && sender.schoolId !== user.schoolId) return false;
+    } else {
+        return false;
+    }
     // Check if user has read it
     if (a.readBy && a.readBy.includes(user.id)) return false;
     return true;
@@ -1381,20 +1385,39 @@ export const getSchoolSubjectRequirements = (state: AppState, schoolId?: string)
 };
 
 export const getSchoolClasses = (state: AppState, schoolId?: string): { class: string; letter: string; headmasterId?: string }[] => {
+    if (!schoolId || schoolId === 'global') {
+        const seen = new Set<string>();
+        const result: { class: string; letter: string; headmasterId?: string }[] = [];
+        (state.schools || []).forEach(s => {
+            (s.classes || []).forEach(c => {
+                const key = `${c.class}_${c.letter}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    result.push(c);
+                }
+            });
+        });
+        result.sort((a, b) => parseInt(a.class) - parseInt(b.class) || a.letter.localeCompare(b.letter));
+        return result;
+    }
     const school = getSchool(state, schoolId);
-    if (school && school.classes && school.classes.length > 0) return school.classes;
-    return state.classes || [];
+    if (school) {
+        if (!Array.isArray(school.classes)) {
+            school.classes = [];
+        }
+        return school.classes;
+    }
+    return [];
 };
 
 export const setSchoolClasses = (state: AppState, schoolId: string | undefined, classes: { class: string; letter: string; headmasterId?: string }[]) => {
-    if (schoolId) {
+    if (schoolId && schoolId !== 'global') {
         const school = getSchool(state, schoolId);
         if (school) {
             school.classes = classes;
             return;
         }
     }
-    state.classes = classes;
 };
 
 export const getUserLeadingClasses = (state: AppState, schoolId: string | undefined, userId: string): { class: string; letter: string; headmasterId?: string }[] => {
@@ -1447,20 +1470,15 @@ export const setClassHeadmaster = (
     classLetter: string, 
     headmasterId?: string
 ): void => {
-    if (schoolId) {
+    if (schoolId && schoolId !== 'global') {
         const school = getSchool(state, schoolId);
         if (school) {
-            if (!school.classes) school.classes = [...(state.classes || [])];
+            if (!Array.isArray(school.classes)) school.classes = [];
             const cls = school.classes.find(c => c.class === classNum && c.letter === classLetter);
             if (cls) {
                 cls.headmasterId = headmasterId || undefined;
             }
-        }
-    }
-    if (state.classes) {
-        const cls = state.classes.find(c => c.class === classNum && c.letter === classLetter);
-        if (cls) {
-            cls.headmasterId = headmasterId || undefined;
+            return;
         }
     }
 };
@@ -1504,6 +1522,7 @@ export const setSchoolSubjects = (state: AppState, schoolId: string | undefined,
         const school = getSchool(state, schoolId);
         if (school) {
             school.subjects = subjects;
+            return;
         }
     }
     state.subjects = subjects;
@@ -1675,13 +1694,56 @@ export const clearSchoolGrades = (state: AppState, schoolId: string | undefined)
         const scopedKey = `${schoolId}__${pureKey}`;
         if (state.grades) {
             delete state.grades[scopedKey];
-            delete state.grades[pureKey];
+            if (state.grades[pureKey]) {
+                const hasOtherSchoolGrades = Object.values(state.grades[pureKey]).some(gradeArr => 
+                    gradeArr.some(g => {
+                        const student = state.users.find(u => u.id === g.studentId);
+                        return student && student.schoolId && student.schoolId !== schoolId;
+                    })
+                );
+                if (!hasOtherSchoolGrades) {
+                    delete state.grades[pureKey];
+                }
+            }
         }
         if (state.finalGrades) {
             delete state.finalGrades[scopedKey];
-            delete state.finalGrades[pureKey];
+            if (state.finalGrades[pureKey]) {
+                const hasOtherSchoolFinalGrades = Object.values(state.finalGrades[pureKey]).some(fgArr => 
+                    fgArr.some(fg => {
+                        const student = state.users.find(u => u.id === fg.studentId);
+                        return student && student.schoolId && student.schoolId !== schoolId;
+                    })
+                );
+                if (!hasOtherSchoolFinalGrades) {
+                    delete state.finalGrades[pureKey];
+                }
+            }
         }
     });
+};
+
+export const getSchoolEljurInfo = (state: AppState, schoolId: string | undefined): string => {
+    if (schoolId) {
+        const school = getSchool(state, schoolId);
+        if (school && school.eljurInfo !== undefined) {
+            return school.eljurInfo;
+        }
+    }
+    return state.settings?.eljurInfo || '';
+};
+
+export const setSchoolEljurInfo = (state: AppState, schoolId: string | undefined, info: string): void => {
+    if (schoolId) {
+        const school = getSchool(state, schoolId);
+        if (school) {
+            school.eljurInfo = info;
+            return;
+        }
+    }
+    if (state.settings) {
+        state.settings.eljurInfo = info;
+    }
 };
 
 

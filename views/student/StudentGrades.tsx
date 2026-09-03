@@ -186,8 +186,16 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                 const currentGrades = grades.filter(g => g.studentId === user.id && g.date >= qStart && g.date <= qEnd);
                                 if (currentGrades.length === 0) return null;
                                 let wSum = 0, wCount = 0;
+                                const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
                                 currentGrades.forEach(g => { 
-                                    const val = parseFloat(String(g.value)); 
+                                    let val = parseFloat(String(g.value)); 
+                                    if (g.value === 'Н/У') {
+                                        const created = new Date(g.date);
+                                        const deadline = g.deadline ? new Date(g.deadline) : H.addDays(created, 7);
+                                        if (systemNow >= deadline) {
+                                            val = minGrade;
+                                        }
+                                    }
                                     if (!isNaN(val)) { 
                                         const weight = getEffectiveWeight(g); 
                                         wSum += val * weight; 
@@ -195,27 +203,28 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                     } 
                                 });
                                 const avg = wCount > 0 ? (wSum / wCount).toFixed(2) : '-';
-                                const avgNum = parseFloat(avg as string);
-                                let avgColor = 'text-blue-600';
-                                if (!isNaN(avgNum)) { 
-                                    if (avgNum >= 4.5) avgColor = 'text-green-600'; 
-                                    else if (avgNum >= 3.5) avgColor = 'text-blue-600'; 
-                                    else if (avgNum >= 2.5) avgColor = 'text-amber-600'; 
-                                    else avgColor = 'text-red-600'; 
-                                }
+                                const avgColor = avg !== '-' ? H.getGradeColorClass(avg, minGrade, maxGrade) : 'text-slate-400';
                                 return (
                                     <tr key={subj} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                         <td className="p-4 text-left font-bold text-slate-700 sticky left-0 bg-white border-r border-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800">{subj}</td>
                                         {quarterDates.map(d => { 
-                                            const g = currentGrades.find(gr => gr.date === d); 
+                                            const dayGrades = currentGrades.filter(gr => gr.date === d); 
                                             return (
                                                 <td key={d} className="p-2 text-center border-r border-slate-50 dark:border-slate-800">
-                                                    {g ? (
-                                                        <div className="flex flex-col items-center cursor-pointer group" onClick={() => { setSelectedGradeDetails({grade: g, subject: subj}); playGradeSound(g.value); }}>
-                                                            <span className={`font-bold ${H.getGradeColorClass(String(g.value), minGrade, maxGrade)}`}>{g.value}</span>
-                                                            {useWeights && getEffectiveWeight(g) > 1 && <span className="text-[8px] text-slate-400">x{getEffectiveWeight(g)}</span>}
+                                                    {dayGrades.length > 0 ? (
+                                                        <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                                            {dayGrades.map((g, gIdx) => {
+                                                                const isNU = g.value === 'Н/У';
+                                                                const isExpiredNU = isNU && systemNow >= (g.deadline ? new Date(g.deadline) : H.addDays(new Date(g.date), 7));
+                                                                return (
+                                                                <div key={g.id || gIdx} className="flex flex-col items-center cursor-pointer group hover:scale-110 transition-transform" onClick={() => { setSelectedGradeDetails({grade: g, subject: subj}); playGradeSound(g.value); }}>
+                                                                    <span className={`font-bold ${isExpiredNU ? 'text-red-600 line-through decoration-red-600/50' : H.getGradeColorClass(String(g.value), minGrade, maxGrade)}`} title={isExpiredNU ? `Просрочено (учитывается как ${minGrade})` : undefined}>{g.value}</span>
+                                                                    {useWeights && getEffectiveWeight(g) > 1 && <span className="text-[8px] text-slate-400">x{getEffectiveWeight(g)}</span>}
+                                                                </div>
+                                                                );
+                                                            })}
                                                         </div>
-                                                    ) : <span className="text-slate-200">-</span>}
+                                                    ) : <span className="text-slate-200 dark:text-slate-700">-</span>}
                                                 </td>
                                             );
                                         })}
@@ -294,6 +303,22 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                 {selectedGradeDetails.grade.value}
                             </div>
                         </div>
+                        {selectedGradeDetails.grade.value === 'Н/У' && (() => {
+                            const sysNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+                            const deadline = selectedGradeDetails.grade.deadline ? new Date(selectedGradeDetails.grade.deadline) : H.addDays(new Date(selectedGradeDetails.grade.date), 7);
+                            const isExpired = sysNow >= deadline;
+                            return (
+                                <div className={`p-3 rounded-xl border text-xs font-medium text-center ${
+                                    isExpired
+                                        ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:border-red-800'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800'
+                                }`}>
+                                    {isExpired
+                                        ? `Срок сдачи истек (${H.formatDateDDMMYYYY(H.dateToIso(deadline))}). Учитывается как ${minGrade}.`
+                                        : `Срок сдачи/исправления: до ${H.formatDateDDMMYYYY(H.dateToIso(deadline))}`}
+                                </div>
+                            );
+                        })()}
                         <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700">
                             <div>
                                 <div className="text-xs font-bold text-slate-400 uppercase mb-1">{t('type_work')}</div>

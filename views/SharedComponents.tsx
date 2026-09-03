@@ -461,7 +461,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
             <span className="flex items-center gap-2">
               {t('from')}:{' '}
               <span className="font-bold text-slate-700 dark:text-slate-300">
-                {H.formatShortName(sender?.fio || 'Unknown')}
+                {sender?.fio ? H.formatShortName(sender.fio) : (isAnnounce ? t('school_admin') : 'Unknown')}
               </span>
               {realAuthor && (
                 <span
@@ -768,6 +768,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
       // Create New
       const newItem: Message = {
         id: H.uid(isAnnounce ? 'ann' : 'msg'),
+        schoolId: currentUser.schoolId,
         fromId: fromId,
         realAuthorId: realAuthorId,
         toIds: isAnnounce ? [] : finalToIds, // Announcements are public/broadcast
@@ -845,8 +846,9 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
       // Inbox
       if (isAnnounce) {
         return list.filter(m => {
+            if (m.schoolId && m.schoolId === currentUser.schoolId) return true;
             const sender = state.users.find(u => u.id === m.fromId);
-            if (!sender) return false;
+            if (!sender) return !!(m.schoolId && m.schoolId === currentUser.schoolId);
             // Use cast to avoid type errors with Role 'creator'
             if ((sender.role as string) === 'creator') return true; // Global announcement
             if (sender.schoolId === currentUser.schoolId) return true; // My school
@@ -885,7 +887,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      }
      
      // Classes logic
-     const classes = state.classes.filter(c => {
+     const classes = H.getSchoolClasses(state, currentUser.schoolId).filter(c => {
          if (actingAsDirector || isAdministrationEmployee) return true; // Director/Admin sees all
          if (currentUser.role === 'teacher') return currentUser.classes?.includes(`${c.class}_${c.letter}`);
          if (actingAsRestrictedEmployee) {

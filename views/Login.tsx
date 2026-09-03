@@ -87,19 +87,12 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
     
     if (!login && !password) return; // Don't trigger on empty enter
 
-    // Filter users by credentials and specific role logic
-    const user = users.find(u => {
-        if (u.login !== login || u.password !== password) return false;
-        
-        if (role === 'employee') {
-            // Updated logic: Check explicitly for role 'employee'
-            // Backward compatibility: also check teacher with customRole if role is not strictly employee yet
-            return u.role === 'employee' || (u.role === 'teacher' && !!u.customRole);
-        }
-        
-        // Strict role matching for others
-        return u.role === role;
-    });
+    const normLogin = login.trim().toLowerCase();
+    // In our system, login + password is a globally unique credential pair
+    const user = users.find(u => 
+        (u.login?.trim().toLowerCase() === normLogin || u.login === login) && 
+        u.password === password
+    );
 
     if (user) {
       if (user.blockedUntil) {

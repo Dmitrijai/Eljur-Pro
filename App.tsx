@@ -239,6 +239,7 @@ export default function App() {
 
         // Ensure core arrays/objects exist to prevent .map/.forEach crashes
         if (!loaded.classes) { loaded.classes = []; migrationNeeded = true; }
+        if (!loaded.schools) { loaded.schools = []; migrationNeeded = true; }
         if (!loaded.subjects) { loaded.subjects = ['Математика', 'Русский язык', 'Физика']; migrationNeeded = true; }
         if (!loaded.users) { loaded.users = []; migrationNeeded = true; }
         if (!loaded.schedules) { loaded.schedules = {}; migrationNeeded = true; }
@@ -252,15 +253,33 @@ export default function App() {
         if (!loaded.subjectRequirements) { loaded.subjectRequirements = {}; migrationNeeded = true; }
         if (!loaded.quarters) { loaded.quarters = {Q1:[],Q2:[],Q3:[],Q4:[]}; migrationNeeded = true; }
 
-        // Clean up invalid/orphaned teacher classes and student classes that do not exist in the school or global classes
-        if (loaded.users) {
-            const validClasses = new Set<string>();
-            (loaded.classes || []).forEach((c: any) => validClasses.add(`${c.class}_${c.letter}`));
-            (loaded.schools || []).forEach((s: any) => {
-                (s.classes || []).forEach((c: any) => validClasses.add(`${c.class}_${c.letter}`));
+        // Ensure every school has an isolated classes array, and migrate any legacy global classes into the default school
+        if (loaded.schools && Array.isArray(loaded.schools)) {
+            loaded.schools.forEach((s: any) => {
+                if (!Array.isArray(s.classes)) {
+                    s.classes = [];
+                    migrationNeeded = true;
+                }
             });
+            if (Array.isArray(loaded.classes) && loaded.classes.length > 0) {
+                const defaultSchool = loaded.schools.find((s: any) => s.id === 'school_1') || loaded.schools[0];
+                if (defaultSchool) {
+                    if (!defaultSchool.classes || defaultSchool.classes.length === 0) {
+                        defaultSchool.classes = [...loaded.classes];
+                    }
+                }
+                loaded.classes = [];
+                migrationNeeded = true;
+            }
+        }
 
+        // Clean up invalid/orphaned teacher classes and student classes strictly within each user's school
+        if (loaded.users) {
             loaded.users.forEach((u: any) => {
+                const school = (loaded.schools || []).find((s: any) => s.id === u.schoolId);
+                const schoolClasses = school && Array.isArray(school.classes) ? school.classes : [];
+                const validClasses = new Set<string>(schoolClasses.map((c: any) => `${c.class}_${c.letter}`));
+
                 if (u.role === 'teacher' && u.classes) {
                     const originalLength = u.classes.length;
                     u.classes = u.classes.filter((cKey: string) => validClasses.has(cKey));
@@ -279,6 +298,22 @@ export default function App() {
             });
         }
 
+        // Migrate studentGroups to have schoolId if missing
+        if (loaded.studentGroups && Array.isArray(loaded.studentGroups)) {
+            loaded.studentGroups.forEach((g: any) => {
+                if (!g.schoolId) {
+                    const firstStudent = (loaded.users || []).find((u: any) => (g.studentIds || []).includes(u.id));
+                    if (firstStudent && firstStudent.schoolId) {
+                        g.schoolId = firstStudent.schoolId;
+                        migrationNeeded = true;
+                    } else if (loaded.schools && loaded.schools[0]) {
+                        g.schoolId = loaded.schools[0].id;
+                        migrationNeeded = true;
+                    }
+                }
+            });
+        }
+
         if (!loaded.settings) {
             loaded.settings = { theme: 'light', language: 'ru', showSeasonalAnimations: true };
             migrationNeeded = true;
@@ -286,6 +321,10 @@ export default function App() {
             if (loaded.settings.showSeasonalAnimations === undefined) loaded.settings.showSeasonalAnimations = true;
             if (!loaded.settings.language) loaded.settings.language = 'ru';
         }
+        const savedTheme = localStorage.getItem('eljur_theme') as 'light' | 'dark' | null;
+        if (savedTheme) loaded.settings.theme = savedTheme;
+        const savedLang = localStorage.getItem('eljur_lang') as 'ru' | 'en' | null;
+        if (savedLang) loaded.settings.language = savedLang;
 
         // Scope unscoped schedule keys to default school_1
         if (loaded.schedules) {
@@ -367,6 +406,14 @@ export default function App() {
                         if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= new Date())) {
                             setCurrentUser(u);
                             if (session.viewMode) setViewMode(session.viewMode);
+                            if (u.theme) {
+                                loaded.settings.theme = u.theme;
+                                try { localStorage.setItem('eljur_theme', u.theme); } catch (_) {}
+                            }
+                            if (u.language) {
+                                loaded.settings.language = u.language;
+                                try { localStorage.setItem('eljur_lang', u.language); } catch (_) {}
+                            }
                             
                             session.expires = Date.now() + 60 * 60 * 1000;
                             localStorage.setItem('eljur_session', JSON.stringify(session));
@@ -501,6 +548,20 @@ export default function App() {
   const handleLogin = (u: User) => {
     setCurrentUser(u);
     setViewMode('dashboard');
+    if (u.theme) {
+        try { localStorage.setItem('eljur_theme', u.theme); } catch (_) {}
+        if (appState) {
+            appState.settings.theme = u.theme;
+            setAppState({ ...appState });
+        }
+    }
+    if (u.language) {
+        try { localStorage.setItem('eljur_lang', u.language); } catch (_) {}
+        if (appState) {
+            appState.settings.language = u.language;
+            setAppState({ ...appState });
+        }
+    }
     
     const expires = Date.now() + 60 * 60 * 1000;
     localStorage.setItem('eljur_session', JSON.stringify({ userId: u.id, expires, viewMode: 'dashboard' }));

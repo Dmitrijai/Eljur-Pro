@@ -79,7 +79,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
       }
       
       if (loadedFonts.length > 0) {
-        const Font = ReactQuill.Quill.import('formats/font');
+        const Font = ReactQuill.Quill.import('formats/font') as any;
         const baseFonts = [false, 'serif', 'monospace'];
         Font.whitelist = [...baseFonts, ...loadedFonts.map(f => f.name)];
         ReactQuill.Quill.register(Font, true);
@@ -623,7 +623,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
         tabIndex={0}
       >
         <ReactQuill 
-          ref={quillRef}
+          {...({ ref: quillRef } as any)}
           theme="snow" 
           value={quillContent} 
           onChange={handleQuillChange} 

@@ -25,11 +25,21 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
             setError(t('fill_fields'));
             return;
         }
+
+        const normLogin = directorLogin.trim().toLowerCase();
+        const comboExists = state.users.some(u => 
+            u.login?.trim().toLowerCase() === normLogin && 
+            u.password === directorPass
+        );
+        if (comboExists) {
+            setError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
+            return;
+        }
         
         const schoolId = H.uid('school');
         const directorId = H.uid('u_dir');
         
-        const newSchool = { id: schoolId, name: newName, directorId };
+        const newSchool = { id: schoolId, name: newName, directorId, classes: [] };
         const newDirector = {
             id: directorId,
             schoolId: schoolId,
@@ -50,14 +60,73 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
     const deleteSchool = (schoolId: string, schoolName: string) => {
         if (!confirm(`ВНИМАНИЕ! Вы собираетесь удалить школу "${schoolName}" и ВСЕХ её пользователей (директора, учителей, учеников) и все их данные. Это действие необратимо. Продолжить?`)) return;
         
-        // Remove users of this school
-        state.users = state.users.filter(u => u.schoolId !== schoolId);
-        state.userOrder = state.userOrder.filter(uid => {
-            const u = state.users.find(usr => usr.id === uid);
-            return !!u; // Keep only if user still exists
-        });
+        const removedUserIds = new Set(state.users.filter(u => u.schoolId === schoolId).map(u => u.id));
 
-        // Remove school
+        // 1. Remove users of this school
+        state.users = state.users.filter(u => u.schoolId !== schoolId);
+        state.userOrder = (state.userOrder || []).filter(uid => !removedUserIds.has(uid));
+
+        // 2. Clean schedules
+        if (state.schedules) {
+            const prefix = `${schoolId}__`;
+            Object.keys(state.schedules).forEach(key => {
+                if (key.startsWith(prefix)) {
+                    delete state.schedules[key];
+                }
+            });
+        }
+
+        // 3. Clean grades
+        if (state.grades) {
+            const prefix = `${schoolId}__`;
+            Object.keys(state.grades).forEach(key => {
+                if (key.startsWith(prefix)) {
+                    delete state.grades[key];
+                }
+            });
+        }
+
+        // 4. Clean finalGrades
+        if (state.finalGrades) {
+            const prefix = `${schoolId}__`;
+            Object.keys(state.finalGrades).forEach(key => {
+                if (key.startsWith(prefix)) {
+                    delete state.finalGrades[key];
+                }
+            });
+        }
+
+        // 5. Clean homework
+        if (state.homework) {
+            state.homework = state.homework.filter(h => h.schoolId !== schoolId && !removedUserIds.has(h.fromId));
+        }
+
+        // 6. Clean teacher assignments
+        if (state.teacherAssignments) {
+            state.teacherAssignments = state.teacherAssignments.filter(a => a.schoolId !== schoolId && !removedUserIds.has(a.teacherId));
+        }
+
+        // 7. Clean student groups
+        if (state.studentGroups) {
+            state.studentGroups = state.studentGroups.filter(g => g.schoolId !== schoolId && !g.studentIds.some(sid => removedUserIds.has(sid)));
+        }
+
+        // 8. Clean announcements
+        if (state.announcements) {
+            state.announcements = state.announcements.filter(a => a.schoolId !== schoolId);
+        }
+
+        // 9. Clean messages involving removed users or school
+        if (state.messages) {
+            state.messages = state.messages.filter(m => !removedUserIds.has(m.fromId) && !m.toIds?.some(tid => removedUserIds.has(tid)) && m.schoolId !== schoolId);
+        }
+
+        // 10. Clean school settings
+        if (state.settings && (state.settings as any).schoolsSettings) {
+            delete (state.settings as any).schoolsSettings[schoolId];
+        }
+
+        // 11. Remove school itself
         state.schools = state.schools.filter(s => s.id !== schoolId);
         
         onUpdate(state);
@@ -109,6 +178,77 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                     u.schoolId = editSchoolIdVal;
                 }
             });
+
+            const oldPrefix = `${editSchoolId}__`;
+            const newPrefix = `${editSchoolIdVal}__`;
+
+            // Update schedules
+            if (state.schedules) {
+                Object.keys(state.schedules).forEach(k => {
+                    if (k.startsWith(oldPrefix)) {
+                        const suffix = k.substring(oldPrefix.length);
+                        state.schedules[`${newPrefix}${suffix}`] = state.schedules[k];
+                        delete state.schedules[k];
+                    }
+                });
+            }
+
+            // Update grades
+            if (state.grades) {
+                Object.keys(state.grades).forEach(k => {
+                    if (k.startsWith(oldPrefix)) {
+                        const suffix = k.substring(oldPrefix.length);
+                        state.grades[`${newPrefix}${suffix}`] = state.grades[k];
+                        delete state.grades[k];
+                    }
+                });
+            }
+
+            // Update finalGrades
+            if (state.finalGrades) {
+                Object.keys(state.finalGrades).forEach(k => {
+                    if (k.startsWith(oldPrefix)) {
+                        const suffix = k.substring(oldPrefix.length);
+                        state.finalGrades[`${newPrefix}${suffix}`] = state.finalGrades[k];
+                        delete state.finalGrades[k];
+                    }
+                });
+            }
+
+            // Update homework
+            if (state.homework) {
+                state.homework.forEach(h => {
+                    if (h.schoolId === editSchoolId) h.schoolId = editSchoolIdVal;
+                });
+            }
+
+            // Update teacherAssignments
+            if (state.teacherAssignments) {
+                state.teacherAssignments.forEach(a => {
+                    if (a.schoolId === editSchoolId) a.schoolId = editSchoolIdVal;
+                });
+            }
+
+            // Update studentGroups
+            if (state.studentGroups) {
+                state.studentGroups.forEach(g => {
+                    if (g.schoolId === editSchoolId) g.schoolId = editSchoolIdVal;
+                });
+            }
+
+            // Update announcements
+            if (state.announcements) {
+                state.announcements.forEach(a => {
+                    if (a.schoolId === editSchoolId) a.schoolId = editSchoolIdVal;
+                });
+            }
+
+            // Update schoolsSettings
+            if (state.settings && (state.settings as any).schoolsSettings?.[editSchoolId]) {
+                (state.settings as any).schoolsSettings[editSchoolIdVal] = (state.settings as any).schoolsSettings[editSchoolId];
+                delete (state.settings as any).schoolsSettings[editSchoolId];
+            }
+
             // Update the school object
             state.schools[schoolIndex].id = editSchoolIdVal;
         }

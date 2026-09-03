@@ -57,10 +57,12 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
        if (!cls || !subj) return [];
        const schedule = H.getSchoolClassSchedule(state, user.schoolId, cls);
        if (!schedule) return [];
+       const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
        const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
        today.setHours(0,0,0,0);
        const dates: string[] = [];
        Object.values(schedule).forEach((d: any) => {
+           if (H.isHoliday(d.date, scheduleSettings) || H.getVacationForDay(d.date, scheduleSettings)) return;
            const hasSubject = d.lessons.some((l:any) => { if (l.subgroups && l.subgroups.length > 0) { return l.subgroups.some((sg: any) => sg.subject === subj); } return l.lesson === subj; });
            if (hasSubject) { const dayDate = new Date(d.date); if (dayDate >= today) { dates.push(d.date); } }
        });
@@ -80,6 +82,10 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
 
    const submitHW = async () => {
      if (!cls || !subj || !date || !text) return alert(t('fill_fields'));
+     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
+     if (H.isHoliday(date, scheduleSettings) || H.getVacationForDay(date, scheduleSettings)) {
+         return alert(lang === 'en' ? 'Cannot assign homework on a holiday or vacation.' : 'Нельзя задавать домашнее задание на праздничный день или период каникул.');
+     }
      const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); today.setHours(0, 0, 0, 0);
      const selectedDate = new Date(date); selectedDate.setHours(0, 0, 0, 0);
      if (selectedDate < today && !editId) { return alert(t('cant_hw_past')); }
@@ -93,11 +99,11 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
              const existing = state.homework[idx];
              const existingAtts = existing.attachments || [];
              if (existing.attachmentId) existingAtts.push({id: existing.attachmentId, name: existing.attachmentName||'File', type: existing.attachmentType||''});
-             state.homework[idx] = { ...existing, class: c, letter: l, date, subject: subj, text: finalText, attachments: [...existingAtts, ...newAttachments], lessonIndex: availableLessonCount > 1 ? lessonIndex : 0, attachmentId: undefined };
+             state.homework[idx] = { ...existing, schoolId: existing.schoolId || user.schoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: [...existingAtts, ...newAttachments], lessonIndex: availableLessonCount > 1 ? lessonIndex : 0, attachmentId: undefined };
         }
         setEditId(null);
      } else {
-        const newHW = { id: H.uid('hw'), class: c, letter: l, date, subject: subj, text: finalText, attachments: newAttachments, fromId: user.id, lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
+        const newHW = { id: H.uid('hw'), schoolId: user.schoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: newAttachments, fromId: user.id, lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
         state.homework.push(newHW);
      }
      onUpdate(state); alert(t('saved')); setText(''); setFiles([]);

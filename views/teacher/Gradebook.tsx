@@ -15,16 +15,25 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
    }, [state, hasUnsavedGrades]);
 
    const handleSave = () => {
-       onUpdate(localState);
+       const updatedGrades = { ...(state.grades || {}), ...(localState.grades || {}) };
+       const updatedFinalGrades = { ...(state.finalGrades || {}), ...(localState.finalGrades || {}) };
+       onUpdate({
+           ...state,
+           grades: updatedGrades,
+           finalGrades: updatedFinalGrades
+       });
        setHasUnsavedGrades?.(false);
    };
 
    const [localValues, setLocalValues] = useState<Record<string, string>>({});
    const [localErrors, setLocalErrors] = useState<Record<string, string>>({});
-   const minGrade = localState.gradingSystem?.minGrade ?? 2;
-   const maxGrade = localState.gradingSystem?.maxGrade ?? 5;
-   const useWeights = localState.gradingSystem?.useWeights ?? true;
-   const gradeTypes = localState.gradeTypes || [];
+   const gradingSystem = H.getSchoolGradingSystem(localState, user.schoolId);
+   const minGrade = gradingSystem?.minGrade ?? 2;
+   const maxGrade = gradingSystem?.maxGrade ?? 5;
+   const minWeight = gradingSystem?.minWeight ?? 1;
+   const maxWeight = gradingSystem?.maxWeight ?? 20;
+   const useWeights = gradingSystem?.useWeights ?? true;
+   const gradeTypes = H.getSchoolGradeTypes(localState, user.schoolId);
 
    const schoolClasses = H.getSchoolClasses(localState, user.schoolId);
    const scheduleSettings = H.getSchoolScheduleSettings(localState, user.schoolId);
@@ -331,11 +340,12 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                                    <span className="text-xs font-bold text-slate-500">Вес (Коэф.):</span>
                                    <Input 
                                       type="number" 
-                                      min="1" 
-                                      max="20" 
+                                      min={minWeight} 
+                                      max={maxWeight} 
                                       value={editWeight} 
                                       onChange={e => { 
-                                          const val = parseInt(e.target.value);
+                                          const raw = parseInt(e.target.value);
+                                          const val = isNaN(raw) ? minWeight : Math.max(minWeight, Math.min(maxWeight, raw));
                                           setEditWeight(val); 
                                           if (selectedGrade && targetKey) {
                                               const gIndex = (localState.grades[targetKey]?.[subj] || []).findIndex((g:any) => g.id === selectedGrade.grade.id);

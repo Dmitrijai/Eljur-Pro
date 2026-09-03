@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { AppState, TeacherAssignment } from '../../types';
+import { AppState, TeacherAssignment, User } from '../../types';
 import * as H from '../../utils/helpers';
 import { Button, Select, Card, Modal } from '../../components/ui';
 import { Briefcase, Copy, ChevronUp, ChevronDown, RefreshCw, X as XIcon } from 'lucide-react';
@@ -43,7 +43,7 @@ export const TeacherLoadManager = ({ state, onUpdate, user }: { state: AppState,
                              const exists = state.teacherAssignments.some(a => a.teacherId === tId && a.classId === classKey && a.subject === subj);
                              const alreadyAdded = newAssignments.some(a => a.teacherId === tId && a.classId === classKey && a.subject === subj);
                              if (!exists && !alreadyAdded) {
-                                 newAssignments.push({ id: H.uid('assign'), teacherId: tId, classId: classKey, subject: subj });
+                                 newAssignments.push({ id: H.uid('assign'), schoolId, teacherId: tId, classId: classKey, subject: subj });
                                  addedCount++;
                              }
                          }
@@ -79,7 +79,7 @@ export const TeacherLoadManager = ({ state, onUpdate, user }: { state: AppState,
             alert(t('already_exists'));
             return;
         }
-        state.teacherAssignments.push({ id: H.uid('assign'), teacherId, classId: newAssignClass, subject: newAssignSubject });
+        state.teacherAssignments.push({ id: H.uid('assign'), schoolId, teacherId, classId: newAssignClass, subject: newAssignSubject });
         syncTeacherClasses(teacherId);
         onUpdate(state);
     };

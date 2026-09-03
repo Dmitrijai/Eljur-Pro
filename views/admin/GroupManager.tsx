@@ -12,20 +12,24 @@ export const GroupManager = ({ state, onUpdate, user }: { state: AppState, onUpd
     const lang = state.settings.language || 'ru';
     const t = (k: string) => H.t(k, lang);
     const classStudents = state.users.filter(u => u.schoolId === user.schoolId && u.role === 'student' && `${u.class}_${u.letter}` === selectedClass).sort((a,b) => a.fio.localeCompare(b.fio));
-    const existingGroups = state.studentGroups.filter(g => g.classId === selectedClass);
+    const existingGroups = H.getSchoolStudentGroups(state, user.schoolId, selectedClass);
     const generateGroups = () => {
         if (!confirm('Существующие группы для этого класса будут удалены. Создать новые?')) return;
-        state.studentGroups = state.studentGroups.filter(g => g.classId !== selectedClass);
+        state.studentGroups = (state.studentGroups || []).filter(g => {
+            const isTargetClass = g.classId === selectedClass;
+            const isThisSchool = g.schoolId ? g.schoolId === user.schoolId : classStudents.some(cs => g.studentIds.includes(cs.id));
+            return !(isTargetClass && isThisSchool);
+        });
         const count = Math.max(2, groupCount);
         const chunkSize = Math.ceil(classStudents.length / count);
         for (let i = 0; i < count; i++) {
             const groupStudents = classStudents.slice(i * chunkSize, (i + 1) * chunkSize).map(u => u.id);
-            state.studentGroups.push({ id: H.uid('group'), classId: selectedClass, name: `Группа ${i + 1}`, studentIds: groupStudents });
+            state.studentGroups.push({ id: H.uid('group'), schoolId: user.schoolId, classId: selectedClass, name: `Группа ${i + 1}`, studentIds: groupStudents });
         }
         onUpdate(state);
     };
     const moveStudent = (studentId: string, fromGroupId: string, direction: 'left' | 'right') => {
-        const groups = state.studentGroups.filter(g => g.classId === selectedClass);
+        const groups = H.getSchoolStudentGroups(state, user.schoolId, selectedClass);
         const currentIdx = groups.findIndex(g => g.id === fromGroupId);
         if (currentIdx === -1) return;
         const targetIdx = direction === 'left' ? currentIdx - 1 : currentIdx + 1;
@@ -40,7 +44,7 @@ export const GroupManager = ({ state, onUpdate, user }: { state: AppState, onUpd
         }
     };
     const renameGroup = (gId: string, newName: string) => {
-        const g = state.studentGroups.find(x => x.id === gId);
+        const g = (state.studentGroups || []).find(x => x.id === gId && (!x.schoolId || x.schoolId === user.schoolId));
         if (g) { g.name = newName; onUpdate(state); }
     };
 

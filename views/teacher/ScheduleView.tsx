@@ -1,14 +1,24 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AppState, User } from '../../types';
 import * as H from '../../utils/helpers';
 import { Button, Select } from '../../components/ui';
-import { Printer } from 'lucide-react';
+import { Printer, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 export const ScheduleView = ({ state, user, lang }: { state: AppState, user: User, lang: 'ru' | 'en' }) => {
     const [highlightClass, setHighlightClass] = useState('');
     const t = (k: string) => H.t(k, lang);
 
-    const currentWeekStart = H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)));
+    const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+    const [weekStart, setWeekStart] = useState<Date>(H.getStartOfWeek(systemNow));
+
+    useEffect(() => {
+        setWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
+    }, [state.settings.systemTimeOffset]);
+
+    const goPrevWeek = () => setWeekStart(d => H.addDays(d, -7));
+    const goNextWeek = () => setWeekStart(d => H.addDays(d, 7));
+    const goCurrentWeek = () => setWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
+
     const schoolClasses = H.getSchoolClasses(state, user.schoolId);
     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
 
@@ -33,14 +43,14 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
         const classKey = `${c.class}_${c.letter}`;
         const classSchedule = H.getSchoolClassSchedule(state, user.schoolId, classKey);
         Object.values(classSchedule).forEach(day => {
-            if (!H.isDateInWeek(day.date, currentWeekStart)) return;
+            if (!H.isDateInWeek(day.date, weekStart)) return;
             day.lessons.forEach(l => {
                 const addIfMine = (teacherId: string, subject: string, room: string, groupId?: string, teacherLabel?: string) => {
                     if (teacherId === user.id) {
                         if (!mySchedule[day.date]) { mySchedule[day.date] = { date: day.date, title: H.getDayOfWeek(day.date, lang), lessons: [] }; }
                         let groupNameStr = '';
                         if (groupId) { 
-                            const groupObj = state.studentGroups.find(g => g.id === groupId); 
+                            const groupObj = H.getSchoolStudentGroups(state, user.schoolId).find(g => g.id === groupId); 
                             groupNameStr = groupObj?.name || ''; 
                         }
                         mySchedule[day.date].lessons.push({ 
@@ -66,23 +76,29 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
     Object.values(mySchedule).forEach(day => { day.lessons.sort((a,b) => a.time.localeCompare(b.time)); });
     const sortedDays = Object.values(mySchedule).sort((a,b) => a.date.localeCompare(b.date));
     const scheduleDates = sortedDays.map(d => d.date);
-    const vacationInfo = H.getVacationForWeek(currentWeekStart, scheduleSettings, scheduleDates);
+    const vacationInfo = H.getVacationForWeek(weekStart, scheduleSettings, scheduleDates);
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-soft dark:bg-slate-900 dark:border-slate-800 no-print">
-                <div className="w-64">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-soft dark:bg-slate-900 dark:border-slate-800 no-print">
+                <div className="w-full sm:w-64">
                     <label className="block text-sm font-bold text-slate-700 mb-2 dark:text-slate-300">{t('highlight_class')}</label>
                     <Select value={highlightClass} onChange={e => setHighlightClass(e.target.value)}>
                         <option value="">-- {t('all_classes')} --</option>
                         {myClasses.map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}${c.letter}`}>{c.class}{c.letter}</option>)}
                     </Select>
                 </div>
-                <div className="flex items-center gap-4">
-                    <span className="text-sm font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded dark:bg-slate-800 dark:text-slate-400">
-                        {t('current_week')}: {H.getWeekRangeString(currentWeekStart)}
-                    </span>
-                    <Button onClick={() => window.print()} variant="secondary"><Printer size={16} className="mr-2"/> {t('print')}</Button>
+                <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                    <Button variant="ghost" onClick={goPrevWeek} className="px-3 h-8"><ChevronLeft size={18}/></Button>
+                    <div className="text-center px-2">
+                       <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{t('week')}</div>
+                       <div className="font-bold text-slate-700 dark:text-white text-sm whitespace-nowrap">{H.getWeekRangeString(weekStart)}</div>
+                    </div>
+                    <Button variant="ghost" onClick={goNextWeek} className="px-3 h-8"><ChevronRight size={18}/></Button>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={goCurrentWeek} size="sm"><Calendar size={16} className="mr-2"/> {t('current')}</Button>
+                    <Button onClick={() => window.print()} variant="secondary" size="sm"><Printer size={16} className="mr-2"/> {t('print')}</Button>
                 </div>
             </div>
             {vacationInfo && vacationInfo.isFullWeek && (

@@ -80,8 +80,52 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const handleExport = async () => {
     if (!confirm(t('download_backup') + '?')) return;
     try {
+      if (isDirector && user.schoolId) {
+        // School-isolated export for Director
+        const sId = user.schoolId;
+        const schoolObj = state.schools.find(s => s.id === sId);
+        const schoolUsers = state.users.filter(u => u.schoolId === sId);
+        const schoolClasses = H.getSchoolClasses(state, sId);
+        const classKeys = schoolClasses.map(c => `${c.class}_${c.letter}`);
+
+        const schoolSchedules: Record<string, any> = {};
+        const schoolGrades: Record<string, any> = {};
+        const schoolFinalGrades: Record<string, any> = {};
+
+        classKeys.forEach(ck => {
+            const scopedKey = H.getSchoolClassKey(sId, ck);
+            if (state.schedules?.[scopedKey]) schoolSchedules[scopedKey] = state.schedules[scopedKey];
+            if (state.grades?.[scopedKey]) schoolGrades[scopedKey] = state.grades[scopedKey];
+            if (state.finalGrades?.[scopedKey]) schoolFinalGrades[scopedKey] = state.finalGrades[scopedKey];
+        });
+
+        const exportObj = {
+          isSchoolBackup: true,
+          schoolId: sId,
+          school: schoolObj,
+          users: schoolUsers,
+          schedules: schoolSchedules,
+          grades: schoolGrades,
+          finalGrades: schoolFinalGrades,
+          homework: (state.homework || []).filter(h => h.schoolId === sId),
+          teacherAssignments: (state.teacherAssignments || []).filter(ta => ta.schoolId === sId),
+          studentGroups: (state.studentGroups || []).filter(sg => sg.schoolId === sId),
+          timestamp: new Date().toISOString()
+        };
+
+        const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeSchoolName = (schoolObj?.name || 'School').replace(/[^a-zA-Z0-9а-яА-ЯёЁ_-]/g, '_');
+        a.download = `${safeSchoolName}_Backup_${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      // Full system export for Creator
       const assets = await DB.getAllAssets();
-      // Convert blobs to base64 for JSON storage (simplified for this demo)
       const assetsData = await Promise.all(assets.map(async (a) => {
         return new Promise<any>((resolve) => {
           const reader = new FileReader();
@@ -91,6 +135,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       }));
 
       const exportObj = {
+        isFullBackup: true,
         state: state,
         assets: assetsData,
         timestamp: new Date().toISOString()
@@ -113,9 +158,94 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
     try {
       const text = await file.text();
       const data = JSON.parse(text);
+
+      if (isDirector && user.schoolId) {
+        const sId = user.schoolId;
+        // School-isolated import for director
+        const importedSchool = data.school || (data.state?.schools || []).find((s: any) => s.id === sId || s.id === data.schoolId);
+        const importedUsers: User[] = (data.users || (data.state?.users || []).filter((u: any) => u.schoolId === sId || u.schoolId === data.schoolId || (!u.schoolId && u.role !== 'creator')));
+        
+        // 1. Update school details
+        const schoolIdx = state.schools.findIndex(s => s.id === sId);
+        if (schoolIdx > -1 && importedSchool) {
+          state.schools[schoolIdx] = {
+            ...state.schools[schoolIdx],
+            name: importedSchool.name || state.schools[schoolIdx].name,
+            classes: Array.isArray(importedSchool.classes) ? importedSchool.classes : state.schools[schoolIdx].classes,
+            subjects: Array.isArray(importedSchool.subjects) ? importedSchool.subjects : state.schools[schoolIdx].subjects,
+            gradingSystem: importedSchool.gradingSystem || state.schools[schoolIdx].gradingSystem,
+            gradeTypes: importedSchool.gradeTypes || state.schools[schoolIdx].gradeTypes,
+            scheduleSettings: importedSchool.scheduleSettings || state.schools[schoolIdx].scheduleSettings
+          };
+        }
+
+        // 2. Update users for this school safely
+        if (Array.isArray(importedUsers) && importedUsers.length > 0) {
+          // Remove old users of this school
+          state.users = state.users.filter(u => u.schoolId !== sId);
+          // Insert imported users, mapped to this schoolId
+          importedUsers.forEach(u => {
+            state.users.push({ ...u, schoolId: sId });
+            if (!state.userOrder.includes(u.id)) {
+              state.userOrder.push(u.id);
+            }
+          });
+        }
+
+        // 3. Update schedules for this school
+        const importedSchedules = data.schedules || data.state?.schedules || {};
+        if (!state.schedules) state.schedules = {};
+        Object.entries(importedSchedules).forEach(([key, val]) => {
+          const classKey = key.includes('__') ? key.split('__')[1] : key;
+          const targetKey = H.getSchoolClassKey(sId, classKey);
+          state.schedules[targetKey] = val as any;
+        });
+
+        // 4. Update grades for this school
+        const importedGrades = data.grades || data.state?.grades || {};
+        if (!state.grades) state.grades = {};
+        Object.entries(importedGrades).forEach(([key, val]) => {
+          const classKey = key.includes('__') ? key.split('__')[1] : key;
+          const targetKey = H.getSchoolClassKey(sId, classKey);
+          state.grades[targetKey] = val as any;
+        });
+
+        // 5. Update final grades for this school
+        const importedFinalGrades = data.finalGrades || data.state?.finalGrades || {};
+        if (!state.finalGrades) state.finalGrades = {};
+        Object.entries(importedFinalGrades).forEach(([key, val]) => {
+          const classKey = key.includes('__') ? key.split('__')[1] : key;
+          const targetKey = H.getSchoolClassKey(sId, classKey);
+          state.finalGrades[targetKey] = val as any;
+        });
+
+        // 6. Update homework, assignments, groups
+        const importedHomework = data.homework || data.state?.homework || [];
+        state.homework = [
+          ...(state.homework || []).filter(h => h.schoolId !== sId),
+          ...importedHomework.map((h: any) => ({ ...h, schoolId: sId }))
+        ];
+
+        const importedAssignments = data.teacherAssignments || data.state?.teacherAssignments || [];
+        state.teacherAssignments = [
+          ...(state.teacherAssignments || []).filter(a => a.schoolId !== sId),
+          ...importedAssignments.map((a: any) => ({ ...a, schoolId: sId }))
+        ];
+
+        const importedGroups = data.studentGroups || data.state?.studentGroups || [];
+        state.studentGroups = [
+          ...(state.studentGroups || []).filter(g => g.schoolId !== sId),
+          ...importedGroups.map((g: any) => ({ ...g, schoolId: sId }))
+        ];
+
+        onUpdate(state);
+        alert(t('import_success'));
+        return;
+      }
       
+      // Full system import for Creator
       if (data.state) {
-        // Clear DB
+        // Clear local DB assets
         const db = await DB.openDB();
         const tx = db.transaction(['assets', 'appStore'], 'readwrite');
         await tx.objectStore('assets').clear();
@@ -203,12 +333,26 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   };
 
   const handleResetData = async () => {
-      if (window.confirm('Вы уверены, что хотите сбросить все данные до значений по умолчанию? Это действие необратимо и удалит все текущие данные, вернув приложение к исходному состоянию (вместе с тестовыми данными).')) {
-          const newState = JSON.parse(JSON.stringify(defaultState));
-          // Ensure creator user is preserved if not in defaultState, but it is in defaultState.
-          onUpdate(newState);
-          alert('Данные успешно сброшены.');
-          window.location.reload();
+      if (isDirector && user.schoolId) {
+          if (window.confirm(lang === 'ru' ? 'Вы уверены, что хотите сбросить данные своей школы? Это удалит расписание, оценки и списки классов вашей школы.' : 'Are you sure you want to reset your school data? This will clear schedules, grades, and classes for your school.')) {
+              H.clearSchoolGrades(state, user.schoolId);
+              const school = state.schools.find(s => s.id === user.schoolId);
+              if (school) {
+                  school.classes = [];
+              }
+              // Reset users of this school except current director
+              state.users = state.users.filter(u => u.schoolId !== user.schoolId || u.id === user.id);
+              state.userOrder = (state.userOrder || []).filter(uid => state.users.some(u => u.id === uid));
+              onUpdate({ ...state });
+              alert(lang === 'ru' ? 'Данные школы успешно сброшены.' : 'School data reset successfully.');
+          }
+      } else if (isCreator) {
+          if (window.confirm('Вы уверены, что хотите сбросить все данные до значений по умолчанию? Это действие необратимо и удалит все текущие данные, вернув приложение к исходному состоянию (вместе с тестовыми данными).')) {
+              const newState = JSON.parse(JSON.stringify(defaultState));
+              onUpdate(newState);
+              alert('Данные успешно сброшены.');
+              window.location.reload();
+          }
       }
   };
 
@@ -361,7 +505,15 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
              <label className="block text-sm font-bold text-slate-600 mb-2 dark:text-slate-300">{t('app_theme')}</label>
              <Select 
                value={state.settings.theme} 
-               onChange={(e) => { state.settings.theme = e.target.value as any; onUpdate(state); }}
+               onChange={(e) => {
+                 const val = e.target.value as 'light' | 'dark';
+                 try { localStorage.setItem('eljur_theme', val); } catch (_) {}
+                 const u = state.users.find(usr => usr.id === user.id);
+                 if (u) u.theme = val;
+                 user.theme = val;
+                 state.settings.theme = val;
+                 onUpdate(state);
+               }}
              >
                <option value="light">{t('theme_light')}</option>
                <option value="dark">{t('theme_dark')}</option>
@@ -371,7 +523,15 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
              <label className="block text-sm font-bold text-slate-600 mb-2 dark:text-slate-300">{t('language')}</label>
              <Select 
                value={state.settings.language || 'ru'} 
-               onChange={(e) => { state.settings.language = e.target.value as any; onUpdate(state); }}
+               onChange={(e) => {
+                 const val = e.target.value as 'ru' | 'en';
+                 try { localStorage.setItem('eljur_lang', val); } catch (_) {}
+                 const u = state.users.find(usr => usr.id === user.id);
+                 if (u) u.language = val;
+                 user.language = val;
+                 state.settings.language = val;
+                 onUpdate(state);
+               }}
              >
                <option value="ru">Русский</option>
                <option value="en">English</option>

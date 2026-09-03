@@ -131,7 +131,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                                        day.lessons.forEach(l => {
                                            let sub = l.lesson; 
                                            if (l.subgroups && l.subgroups.length > 0) { 
-                                               const studentGroup = state.studentGroups.find(g => g.classId === classKey && g.studentIds.includes(user.id)); 
+                                               const studentGroup = H.getSchoolStudentGroups(state, user.schoolId, classKey).find(g => g.studentIds.includes(user.id)); 
                                                if (studentGroup) { 
                                                    const sg = l.subgroups.find(s => s.groupId === studentGroup.id); 
                                                    if (sg) sub = sg.subject;
@@ -142,9 +142,25 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                                        });
 
                                        return day.lessons.map((l, index) => {
-                                           let subject = l.lesson; let teacherLabel = l.teacherLabel; let isHidden = false;
-                                           if (l.subgroups && l.subgroups.length > 0) { const studentGroup = state.studentGroups.find(g => g.classId === classKey && g.studentIds.includes(user.id)); if (studentGroup) { const sg = l.subgroups.find(s => s.groupId === studentGroup.id); if (sg) { subject = sg.subject; teacherLabel = sg.teacherLabel; } else { isHidden = true; } } else { isHidden = true; } }
-                                           if (isHidden) return null;
+                                           let subject = l.lesson; 
+                                           let teacherLabel = l.teacherLabel; 
+                                           let isUnassigned = false;
+                                           if (l.subgroups && l.subgroups.length > 0) { 
+                                               const studentGroup = H.getSchoolStudentGroups(state, user.schoolId, classKey).find(g => g.studentIds.includes(user.id)); 
+                                               if (studentGroup) { 
+                                                   const sg = l.subgroups.find(s => s.groupId === studentGroup.id); 
+                                                   if (sg) { 
+                                                       subject = sg.subject; 
+                                                       teacherLabel = sg.teacherLabel; 
+                                                   } else { 
+                                                       isUnassigned = true; 
+                                                       teacherLabel = 'Не распределен в подгруппу'; 
+                                                   } 
+                                               } else { 
+                                                   isUnassigned = true; 
+                                                   teacherLabel = 'Не распределен в подгруппу'; 
+                                               } 
+                                           }
                                            
                                            // Calculate subject occurrence index to match with Gradebook's lessonIndex
                                            if (!subjectCounts[subject]) subjectCounts[subject] = 0;
