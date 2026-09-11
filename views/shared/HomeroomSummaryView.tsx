@@ -81,8 +81,8 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
 
     let wSum = 0; let wCount = 0;
     qGrades.forEach(g => {
-      const val = parseFloat(String(g.value));
-      if (!isNaN(val)) {
+      const val = H.getEffectiveGradeValue(g, minGrade, state.settings?.systemTimeOffset);
+      if (val !== null && !isNaN(val)) {
         const weight = getEffectiveWeight(g);
         wSum += val * weight;
         wCount += weight;
@@ -99,8 +99,8 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
     const studentGrades = grades.filter(g => g.studentId === studentId);
     let wSum = 0; let wCount = 0;
     studentGrades.forEach(g => {
-      const val = parseFloat(String(g.value));
-      if (!isNaN(val)) {
+      const val = H.getEffectiveGradeValue(g, minGrade, state.settings?.systemTimeOffset);
+      if (val !== null && !isNaN(val)) {
         const weight = getEffectiveWeight(g);
         wSum += val * weight;
         wCount += weight;

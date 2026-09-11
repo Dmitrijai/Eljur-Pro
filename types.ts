@@ -27,6 +27,8 @@ export interface User {
   fio: string;
   login: string;
   password?: string;
+  passwordHash?: string;
+  passwordSalt?: string;
   role: Role;
   customRole?: string; // For "Other" roles (e.g. Laborant) or title for Employee
   blockedUntil?: string; // ISO Date string if blocked, undefined otherwise
@@ -242,7 +244,9 @@ export interface AppState {
     headingFontId?: string;
 
     // Creator Settings
-    adminPassword?: string; // Default 'admin'
+    adminPassword?: string;
+    adminPasswordHash?: string;
+    adminPasswordSalt?: string;
     secretKey?: string; // Default 'Space'
     secretCount?: number; // Default 4
     eljurInfo?: string; // Rich text info about Eljur

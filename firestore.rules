@@ -1,14 +1,192 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    // Helper functions: Strict Attribute-Based Access Control via verified /authUidMap/{uid} document
+    function isAuthenticated() {
+      return request.auth != null;
     }
-    match /appStates/{stateId} {
-      // Allow any user to read/write for now since this 
-      // replaces localStorage and has its own custom auth in the json payload.
-      // Since they haven't adopted Firebase Auth yet, allow true.
-      allow read, write: if true;
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/authUidMap/$(request.auth.uid)).data;
+    }
+
+    function hasAuthMap() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/authUidMap/$(request.auth.uid));
+    }
+
+    function isCreator() {
+      return isAuthenticated() && (
+        request.auth.uid == 'P5cdPdwZSOXcKzpKLsPWRsoY7CM2' ||
+        (hasAuthMap() && currentUserData().get('role', '') == 'creator')
+      );
+    }
+
+    function isSchoolMember(schoolId) {
+      return isAuthenticated() && (
+        isCreator() ||
+        (hasAuthMap() && currentUserData().get('schoolId', '') == schoolId)
+      );
+    }
+
+    function isDirector(schoolId) {
+      return isAuthenticated() && (
+        isCreator() ||
+        (hasAuthMap() && 
+         currentUserData().get('schoolId', '') == schoolId &&
+         currentUserData().get('role', '') == 'director')
+      );
+    }
+
+    function isTeacher(schoolId) {
+      return isDirector(schoolId) || (
+        isAuthenticated() &&
+        hasAuthMap() &&
+        currentUserData().get('schoolId', '') == schoolId &&
+        currentUserData().get('role', '') == 'teacher'
+      );
+    }
+
+    // Mapping table: user can read their own map doc or creator can inspect.
+    // Self-escalation and self-binding to arbitrary accounts are strictly prohibited:
+    // 1. A user CANNOT self-assign role = 'creator'
+    // 2. A user can ONLY create a mapping for their own request.auth.uid
+    // 3. The target school user document (schools/{schoolId}/users/{userId}) MUST exist
+    // 4. The target school user document MUST already have authUid bound to request.auth.uid
+    // 5. Role and schoolId must strictly match the pre-authorized user document.
+    match /authUidMap/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || isCreator());
+
+      allow create: if isAuthenticated() && (
+        isCreator() ||
+        (
+          request.auth.uid == uid &&
+          request.resource.data.role != 'creator' &&
+          request.resource.data.keys().hasAll(['schoolId', 'userId', 'role']) &&
+          exists(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)) &&
+          get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.get('authUid', '') == request.auth.uid &&
+          get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.role == request.resource.data.role &&
+          get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.schoolId == request.resource.data.schoolId
+        )
+      );
+
+      // Once created, role, schoolId, and userId CANNOT be changed by the user (immutable identity binding)
+      allow update: if isCreator() || (
+        isAuthenticated() && 
+        request.auth.uid == uid &&
+        request.resource.data.schoolId == resource.data.schoolId &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.role == resource.data.role
+      );
+
+      allow delete: if isCreator() || (hasAuthMap() && isDirector(resource.data.schoolId));
+    }
+
+    // --- Isolated School Namespace (Multi-Tenant Isolation) ---
+    match /schools/{schoolId} {
+      // Public Creator Gate Configuration (pre-login trigger configuration and password verification hash)
+      // Only secretKey, secretCount, and password hash/salt are exposed here; zero sensitive school data.
+      match /publicConfig/creatorGate {
+        allow read: if true;
+        allow write: if isDirector(schoolId);
+      }
+
+      // School metadata/settings: only members of THIS school or creator can read
+      allow read: if isSchoolMember(schoolId);
+      // Only directors of THIS school or creator can update school metadata/settings
+      allow write: if isDirector(schoolId);
+
+      // School users collection (Profiles)
+      match /users/{userId} {
+        allow read: if isSchoolMember(schoolId);
+        // Director or creator can manage users (director cannot create/assign creator role)
+        // Individual users can update their own preferences (e.g. language, theme)
+        // but CANNOT modify identity or privileged fields:
+        // id, schoolId, role, authUid, isAdministration, canSendAsDirector,
+        // allowedTabs, messagingScope, blockedUntil, teacherClasses,
+        // employeePermissions, classes, subjects
+        allow write: if isCreator() || (
+          isDirector(schoolId) && (
+            request.method == 'delete' ||
+            request.resource.data.role != 'creator'
+          )
+        ) || (
+          isAuthenticated() &&
+          hasAuthMap() &&
+          currentUserData().get('schoolId', '') == schoolId &&
+          currentUserData().get('userId', '') == userId &&
+          request.resource.data.id == resource.data.id &&
+          request.resource.data.schoolId == resource.data.schoolId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.get('authUid', '') == resource.data.get('authUid', '') &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'id', 'role', 'schoolId', 'authUid', 'isAdministration', 'canSendAsDirector', 
+            'allowedTabs', 'messagingScope', 'blockedUntil', 
+            'teacherClasses', 'employeePermissions', 'classes', 'subjects'
+          ])
+        );
+      }
+
+      // Class schedules: teachers of this school or director/creator can manage
+      match /schedules/{classKey} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isTeacher(schoolId);
+      }
+
+      // Academic Grades - CRITICAL: Students NEVER write grades
+      match /grades/{gradeId} {
+        allow read: if isSchoolMember(schoolId);
+        // Only teachers, directors, or creator of THIS school can record or modify grades
+        allow write: if isTeacher(schoolId);
+      }
+
+      // Final Grades
+      match /finalGrades/{classKey} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isTeacher(schoolId);
+      }
+
+      // Homework assignments
+      match /homework/{hwId} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isTeacher(schoolId);
+      }
+
+      // Internal School Messaging
+      match /messages/{msgId} {
+        allow read: if isSchoolMember(schoolId);
+        allow create: if isSchoolMember(schoolId);
+        allow update, delete: if isDirector(schoolId) || (
+          isAuthenticated() &&
+          hasAuthMap() &&
+          currentUserData().get('schoolId', '') == schoolId &&
+          resource.data.fromId == currentUserData().get('userId', '')
+        );
+      }
+
+      // School Announcements
+      match /announcements/{annId} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isDirector(schoolId);
+      }
+
+      // Teacher load assignments
+      match /teacherAssignments/{assignId} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isDirector(schoolId);
+      }
+
+      // Student subgroups
+      match /studentGroups/{groupId} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isDirector(schoolId);
+      }
+
+      // Shared file attachments
+      match /attachments/{attachmentId} {
+        allow read: if isSchoolMember(schoolId);
+        allow write: if isTeacher(schoolId);
+      }
     }
   }
 }

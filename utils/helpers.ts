@@ -517,6 +517,9 @@ export const DICT: Record<string, Record<string, string>> = {
     all_quarters: 'Все четверти',
     final_grades: 'Итоговые оценки',
     whole_class_summary: 'Сводка по классу',
+    cant_assign_hw_holiday_vacation: 'Нельзя задавать домашнее задание на праздничный день или период каникул.',
+    weight_coeff: 'Вес (Коэф.):',
+    no_lessons_subject_quarter: 'В расписании этого класса нет уроков по данному предмету в текущей четверти.',
   },
   en: {
     reply: 'Reply',
@@ -1031,6 +1034,9 @@ export const DICT: Record<string, Record<string, string>> = {
     all_quarters: 'All Quarters',
     final_grades: 'Final Grades',
     whole_class_summary: 'Class Summary',
+    cant_assign_hw_holiday_vacation: 'Cannot assign homework on a holiday or vacation.',
+    weight_coeff: 'Weight (Coeff.):',
+    no_lessons_subject_quarter: 'There are no lessons for this subject in the schedule for this class in the current quarter.',
   }
 };
 
@@ -1240,10 +1246,80 @@ export const getWeekRangeString = (weekStart: Date): string => {
     return `${f(weekStart)} - ${f(weekEnd)}`;
 };
 
+export const parseGradeNumericValue = (val: string | number | undefined, minGrade: number = 2): number | null => {
+    if (val === undefined || val === null || val === '') return null;
+    if (typeof val === 'number') return isNaN(val) ? null : val;
+    const str = String(val).trim();
+    if (str === '') return null;
+    
+    // Dual grades like "5/4", "4/5", "3/4"
+    if (str.includes('/')) {
+        const upper = str.toUpperCase();
+        if (upper === 'Н/У' || upper === 'N/U') {
+            return null;
+        }
+        const parts = str.split('/').map(p => parseFloat(p.trim())).filter(n => !isNaN(n));
+        if (parts.length > 0) {
+            const sum = parts.reduce((a, b) => a + b, 0);
+            return sum / parts.length;
+        }
+        return null;
+    }
+    
+    const upper = str.toUpperCase();
+    if (['Н', 'N', 'УВ', 'Б', 'ОП', 'О', 'ЗЧ', 'НЗ'].includes(upper)) {
+        return null;
+    }
+    
+    const parsed = parseFloat(str);
+    return isNaN(parsed) ? null : parsed;
+};
+
+export const isGradeExpiredNU = (grade: Grade | undefined | null, systemTimeOffset: number = 0): boolean => {
+    if (!grade || grade.value === undefined || grade.value === null) return false;
+    const valStr = String(grade.value).trim().toUpperCase();
+    if (valStr !== 'Н/У' && valStr !== 'N/U') return false;
+    const systemNow = new Date(Date.now() + systemTimeOffset);
+    systemNow.setHours(0, 0, 0, 0);
+    const created = new Date(grade.date);
+    const deadline = grade.deadline ? new Date(grade.deadline) : addDays(created, 7);
+    return systemNow >= deadline;
+};
+
+export const getEffectiveGradeValue = (grade: Grade | undefined | null, minGrade: number = 2, systemTimeOffset: number = 0): number | null => {
+    if (!grade || grade.value === undefined || grade.value === null || grade.value === '') return null;
+    const valStr = String(grade.value).trim();
+    if (valStr.toUpperCase() === 'Н/У' || valStr.toUpperCase() === 'N/U') {
+        if (isGradeExpiredNU(grade, systemTimeOffset)) {
+            return minGrade;
+        }
+        return null;
+    }
+    return parseGradeNumericValue(valStr, minGrade);
+};
+
+export const isAttendanceMark = (val: string | number | undefined): boolean => {
+    if (!val) return false;
+    const upper = String(val).trim().toUpperCase();
+    return ['Н', 'N', 'УВ', 'Б', 'ОП', 'О'].includes(upper);
+};
+
+export const isPassFailMark = (val: string | number | undefined): boolean => {
+    if (!val) return false;
+    const upper = String(val).trim().toUpperCase();
+    return ['ЗЧ', 'НЗ'].includes(upper);
+};
+
 export const getGradeColorClass = (val: string, min: number = 2, max: number = 5): string => {
-    if (val === 'Н/У') return 'text-red-500'; // Special styling for N/U
-    const num = parseFloat(val);
-    if (isNaN(num)) return 'text-slate-700 dark:text-slate-300';
+    if (val === 'Н/У') return 'text-red-500 font-bold'; // Special styling for N/U
+    const upper = String(val).trim().toUpperCase();
+    if (['Н', 'N', 'УВ', 'Б'].includes(upper)) return 'text-amber-600 dark:text-amber-400 font-bold';
+    if (upper === 'ОП' || upper === 'О') return 'text-yellow-600 dark:text-yellow-400 font-bold';
+    if (upper === 'ЗЧ') return 'text-emerald-600 dark:text-emerald-400 font-bold';
+    if (upper === 'НЗ') return 'text-rose-600 dark:text-rose-400 font-bold';
+
+    const num = parseGradeNumericValue(val, min);
+    if (num === null || isNaN(num)) return 'text-slate-700 dark:text-slate-300';
     
     // Ensure range logic (Higher = Better)
     // Red (0) at Min, Green (120) at Max
@@ -1275,12 +1351,28 @@ export const getQuarterFromDate = (dateStr: string): string => {
 
 // --- UNREAD MESSAGES & ANNOUNCEMENTS HELPERS ---
 
-export const isMessageUnreadByUser = (m: Message, userId: string): boolean => {
+export const isMessageUnreadByUser = (m: Message, userOrId: User | string, allUsers?: User[]): boolean => {
     if (!m) return false;
+    const userId = typeof userOrId === 'string' ? userOrId : userOrId.id;
+    const currentUser = typeof userOrId === 'object' ? userOrId : allUsers?.find(u => u.id === userId);
+
     // Messages created by current user are not unread for them
     if (m.fromId === userId || m.realAuthorId === userId) return false;
     // Must be addressed to user
     if (!m.toIds || !m.toIds.includes(userId)) return false;
+
+    // Defense-in-depth: check schoolId matching (creator messages can be cross-school or global)
+    if (currentUser) {
+        if (m.schoolId && currentUser.schoolId && (currentUser.role as string) !== 'creator') {
+            if (m.schoolId !== currentUser.schoolId) return false;
+        } else if (!m.schoolId && allUsers) {
+            const sender = allUsers.find(u => u.id === m.fromId);
+            if (sender && (sender.role as string) !== 'creator' && currentUser.schoolId && sender.schoolId !== currentUser.schoolId) {
+                return false;
+            }
+        }
+    }
+
     // Check if user has read it
     if (m.readBy && m.readBy.includes(userId)) return false;
     return true;
@@ -1305,7 +1397,8 @@ export const isAnnouncementUnreadByUser = (a: Announcement, user: User, allUsers
 
 export const getUnreadMessagesCount = (state: AppState, user: User): number => {
     if (!state || !state.messages || !Array.isArray(state.messages) || !user) return 0;
-    return state.messages.filter(m => isMessageUnreadByUser(m, user.id)).length;
+    const users = state.users || [];
+    return state.messages.filter(m => isMessageUnreadByUser(m, user, users)).length;
 };
 
 export const getUnreadAnnouncementsCount = (state: AppState, user: User): number => {
@@ -1352,8 +1445,9 @@ export const defaultScheduleSettings: ScheduleSettings = {
 };
 
 export const getSchool = (state: AppState, schoolId?: string): School | undefined => {
-    if (!schoolId || !state.schools) return undefined;
-    return state.schools.find(s => s.id === schoolId);
+    if (!state.schools || state.schools.length === 0) return undefined;
+    if (!schoolId || schoolId === 'global') return state.schools[0];
+    return state.schools.find(s => s.id === schoolId) || state.schools[0];
 };
 
 export const getSchoolGradingSystem = (state: AppState, schoolId?: string): GradingSystemSettings => {
@@ -1397,17 +1491,23 @@ export const getSchoolClasses = (state: AppState, schoolId?: string): { class: s
                 }
             });
         });
-        result.sort((a, b) => parseInt(a.class) - parseInt(b.class) || a.letter.localeCompare(b.letter));
-        return result;
+        if (result.length > 0) {
+            result.sort((a, b) => parseInt(a.class) - parseInt(b.class) || a.letter.localeCompare(b.letter));
+            return result;
+        }
+        if (Array.isArray(state.classes) && state.classes.length > 0) {
+            return state.classes;
+        }
+        return [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
     }
     const school = getSchool(state, schoolId);
-    if (school) {
-        if (!Array.isArray(school.classes)) {
-            school.classes = [];
-        }
+    if (school && Array.isArray(school.classes) && school.classes.length > 0) {
         return school.classes;
     }
-    return [];
+    if (Array.isArray(state.classes) && state.classes.length > 0) {
+        return state.classes;
+    }
+    return [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
 };
 
 export const setSchoolClasses = (state: AppState, schoolId: string | undefined, classes: { class: string; letter: string; headmasterId?: string }[]) => {
@@ -1415,8 +1515,11 @@ export const setSchoolClasses = (state: AppState, schoolId: string | undefined, 
         const school = getSchool(state, schoolId);
         if (school) {
             school.classes = classes;
-            return;
         }
+    }
+    state.classes = classes;
+    if (state.schools && state.schools[0] && (!schoolId || schoolId === 'global' || state.schools[0].id === schoolId)) {
+        state.schools[0].classes = classes;
     }
 };
 
@@ -1518,14 +1621,16 @@ export const getSchoolSubjects = (state: AppState, schoolId?: string): string[] 
 };
 
 export const setSchoolSubjects = (state: AppState, schoolId: string | undefined, subjects: string[]) => {
-    if (schoolId) {
+    if (schoolId && schoolId !== 'global') {
         const school = getSchool(state, schoolId);
         if (school) {
             school.subjects = subjects;
-            return;
         }
     }
     state.subjects = subjects;
+    if (state.schools && state.schools[0] && (!schoolId || schoolId === 'global' || state.schools[0].id === schoolId)) {
+        state.schools[0].subjects = subjects;
+    }
 };
 
 export const getSchoolClassKey = (schoolId: string | undefined, classKey: string): string => {

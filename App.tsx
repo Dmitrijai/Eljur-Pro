@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import * as DB from './services/db';
 import { AppState, User, School, COEFFICIENT_TYPES } from './types';
 import Login from './views/Login';
@@ -19,29 +19,40 @@ import DOMPurify from 'dompurify';
 const defaultSchool: School = {
   id: 'school_1',
   name: 'Школа №1',
-  directorId: 'u_dir'
+  directorId: 'u_dir',
+  classes: [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }],
+  subjects: [
+    'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
+    'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
+  ]
 };
 
 export const defaultState: AppState = {
   schools: [defaultSchool],
   // Creator is NOT in the default user list until initialized or logged in via secret
   users: [
-    {id:'u_creator', schoolId: 'global', fio: 'Создатель', role: 'creator', login: 'creator', password: 'admin'},
+    {id:'u_creator', schoolId: 'global', fio: 'Создатель', role: 'creator', login: 'creator', password: 'admin123'},
     {id:'u_dir', schoolId: 'school_1', fio:'Иванов Иван',role:'director',login:'director',password:'dir123'},
-    {id:'u_teacher', schoolId: 'school_1', fio:'Петров Пётр',role:'teacher',login:'teacher',password:'teach123', subjects:['Математика'], classes:[]},
-    {id:'s_1', schoolId: 'school_1', fio:'Кузнецов Алексей',role:'student',login:'s10a_1',password:'pass1'},
-    {id:'u_emp', schoolId: 'school_1', fio:'Сидоров Сидр', role:'employee', customRole:'Лаборант', login:'emp', password:'123'}
+    {id:'u_teacher', schoolId: 'school_1', fio:'Петров Пётр',role:'teacher',login:'teacher',password:'teach123', subjects:['Математика', 'Физика'], classes:['10_А']},
+    {id:'s_1', schoolId: 'school_1', fio:'Кузнецов Алексей',role:'student',login:'s10a_1',password:'pass123', class: '10', letter: 'А'},
+    {id:'u_emp', schoolId: 'school_1', fio:'Сидоров Сидр', role:'employee', customRole:'Лаборант', login:'emp', password:'emp123'}
   ],
   userOrder: ['u_dir', 'u_teacher', 'u_emp', 's_1'],
-  classes: [],
-  subjects: ['Математика','Русский язык','Физика'],
+  classes: [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }],
+  subjects: [
+    'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
+    'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
+  ],
   schedules: {},
   homework: [],
   messages: [],
   announcements: [],
   grades: {},
   finalGrades: {}, 
-  teacherAssignments: [], // New
+  teacherAssignments: [
+    { id: 'ta_1', teacherId: 'u_teacher', subject: 'Математика', classId: '10_А', schoolId: 'school_1' },
+    { id: 'ta_2', teacherId: 'u_teacher', subject: 'Физика', classId: '10_А', schoolId: 'school_1' }
+  ], // New
   studentGroups: [], // New
   // Default Grading Settings
   gradingSystem: {
@@ -54,7 +65,15 @@ export const defaultState: AppState = {
   gradeTypes: [], // Initialized in useEffect logic below
   subjectRequirements: {},
   quarters: {Q1:[],Q2:[],Q3:[],Q4:[]},
-  settings: {theme:'light', language: 'ru', showSeasonalAnimations: true},
+  settings: {
+    theme: 'light', 
+    language: 'ru', 
+    showSeasonalAnimations: true,
+    secretKey: 'Space',
+    secretCount: 4,
+    adminPasswordHash: '',
+    adminPasswordSalt: ''
+  },
   scheduleSettings: {
       daysToAddBatch: 1,
       skippedWeekDays: [0], // Default skip Sunday
@@ -73,17 +92,24 @@ export const defaultState: AppState = {
 const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boolean, timeOffset?: number }) => {
     if (!enabled) return null;
 
+    // Honor prefers-reduced-motion
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return null;
+    }
+
     // Use Virtual Time for seasonal effects
     const now = new Date(Date.now() + (timeOffset || 0));
     const month = now.getMonth(); // 0-11
+    
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const particleCount = isMobile ? 12 : 24;
     
     // Helper for random numbers
     const random = (min: number, max: number) => Math.random() * (max - min) + min;
 
     // Winter: Dec (11), Jan (0), Feb (1)
     if (month === 11 || month === 0 || month === 1) {
-        // Snowflakes: Negative delay fixes initial freeze
-        const snow = Array.from({ length: 40 }).map((_, i) => ({
+        const snow = Array.from({ length: particleCount }).map((_, i) => ({
             id: i,
             left: `${random(0, 100)}vw`,
             duration: `${random(10, 20)}s`,
@@ -94,7 +120,7 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
         return (
             <>
                 {snow.map(s => (
-                    <div key={`s-${s.id}`} className="season-element season-snowflake" style={{ left: s.left, animationDuration: s.duration, animationDelay: s.delay, fontSize: s.size }}>❄</div>
+                    <div key={`s-${s.id}`} className="season-element season-snowflake" style={{ left: s.left, animationDuration: s.duration, animationDelay: s.delay, fontSize: s.size, willChange: 'transform' }}>❄</div>
                 ))}
             </>
         );
@@ -102,7 +128,7 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
     
     // Spring: Mar (2), Apr (3), May (4)
     if (month >= 2 && month <= 4) {
-        const petals = Array.from({ length: 25 }).map((_, i) => ({
+        const petals = Array.from({ length: particleCount }).map((_, i) => ({
             id: i,
             left: `${random(0, 100)}vw`,
             duration: `${random(10, 20)}s`,
@@ -114,7 +140,7 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
         return (
             <>
                 {petals.map(p => (
-                    <div key={`p-${p.id}`} className="season-petal" style={{ left: p.left, animationDuration: p.duration, animationDelay: p.delay, width: p.width, height: p.height }}></div>
+                    <div key={`p-${p.id}`} className="season-petal" style={{ left: p.left, animationDuration: p.duration, animationDelay: p.delay, width: p.width, height: p.height, willChange: 'transform' }}></div>
                 ))}
             </>
         );
@@ -122,7 +148,7 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
 
     // Summer: Jun (5), Jul (6), Aug (7)
     if (month >= 5 && month <= 7) {
-        const summerElements = Array.from({ length: 40 }).map((_, i) => ({
+        const summerElements = Array.from({ length: particleCount }).map((_, i) => ({
             id: i,
             left: `${random(0, 100)}vw`,
             duration: `${random(12, 25)}s`,
@@ -134,7 +160,7 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
         return (
             <>
                 {summerElements.map(p => (
-                    <div key={`sum-${p.id}`} className={p.isLeaf ? "season-summer-leaf" : "season-pollen"} style={{ left: p.left, animationDuration: p.duration, animationDelay: p.delay, width: p.size, height: p.size }}></div>
+                    <div key={`sum-${p.id}`} className={p.isLeaf ? "season-summer-leaf" : "season-pollen"} style={{ left: p.left, animationDuration: p.duration, animationDelay: p.delay, width: p.size, height: p.size, willChange: 'transform' }}></div>
                 ))}
             </>
         );
@@ -142,13 +168,13 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
 
     // Autumn: Sep (8), Oct (9), Nov (10)
     if (month >= 8 && month <= 10) {
-        const leaves = Array.from({ length: 20 }).map((_, i) => {
-            const colors = [
-                ['#fb923c', '#ea580c'], // orange
-                ['#fcd34d', '#d97706'], // yellow-orange
-                ['#f87171', '#dc2626'], // red
-                ['#b45309', '#78350f']  // brown
-            ];
+        const colors = [
+            ['#fb923c', '#ea580c'], // orange
+            ['#fcd34d', '#d97706'], // yellow-orange
+            ['#f87171', '#dc2626'], // red
+            ['#b45309', '#78350f']  // brown
+        ];
+        const leaves = Array.from({ length: Math.min(particleCount, 16) }).map((_, i) => {
             const colorPair = colors[Math.floor(random(0, colors.length))];
             return {
                 id: i,
@@ -170,6 +196,7 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
                         animationDelay: l.delay, 
                         width: l.size, 
                         height: l.size,
+                        willChange: 'transform',
                         '--leaf-color-1': l.color1,
                         '--leaf-color-2': l.color2
                     } as React.CSSProperties}></div>
@@ -182,261 +209,170 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
 });
 
 export default function App() {
-  const [appState, setAppState] = useState<AppState | null>(null);
+  const [appState, setAppState] = useState<AppState>(defaultState);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'dashboard' | 'settings'>('dashboard');
   const [showEljurInfo, setShowEljurInfo] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [customFonts, setCustomFonts] = useState<{name: string, displayName: string}[]>([]);
+  const [dbError, setDbError] = useState<string | null>(null);
 
-  // Initialize Data
+  // Subscribe to database error notifications
+  useEffect(() => {
+    DB.setDatabaseErrorListener((msg) => {
+      setDbError(msg);
+      setTimeout(() => setDbError(null), 6000);
+    });
+    return () => DB.setDatabaseErrorListener(null);
+  }, []);
+
+  // Ensure Firebase Auth session syncs UID mapping automatically
+  useEffect(() => {
+    const unsubAuth = DB.auth.onAuthStateChanged((fbUser) => {
+      if (fbUser && currentUser) {
+        DB.syncUserAuthUidMap(currentUser.schoolId || 'school_1', currentUser.id, currentUser.role, fbUser.uid).catch(() => {});
+      }
+    });
+    return () => unsubAuth();
+  }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
+
+  // Initialize Data with instant cache fast-path and Firestore real-time sync
   useEffect(() => {
     let unsubscribe: any;
-    const init = async () => {
-      // Load once first to handle default setup
-      let loaded = await DB.loadStateOnce();
-      if (!loaded) {
-        loaded = defaultState;
-        await DB.saveState(loaded);
+    let isFirstSync = true;
+
+    // Instant fast-path: restore cached state from IndexedDB if available
+    const activeSchoolId = (currentUser?.schoolId && currentUser.schoolId !== 'global')
+      ? currentUser.schoolId
+      : (localStorage.getItem('eljur_active_school_id') || 'school_1');
+
+    DB.getSchoolCache(activeSchoolId).then((cached) => {
+      if (cached) {
+        setAppState(prev => ({
+          ...defaultState,
+          ...cached,
+          schools: (Array.isArray(cached.schools) && cached.schools.length > 0) ? cached.schools : defaultState.schools,
+          classes: (Array.isArray(cached.classes) && cached.classes.length > 0) ? cached.classes : defaultState.classes,
+          subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
+        }));
+        setLoading(false);
       }
-      
-      let isFirstSync = true;
-      unsubscribe = DB.subscribeToState(async (syncedState) => {
-         let loaded = syncedState ? JSON.parse(JSON.stringify(syncedState)) : null;
-         let migrationNeeded = false;
-         
-         if (!loaded) {
-             loaded = JSON.parse(JSON.stringify(defaultState));
-             await DB.saveState(loaded);
-         }
+    }).catch((e) => console.warn('IndexedDB cache load failed:', e));
 
-        // Migration: Ensure schools array exists and default test school exists
-        if (!loaded.schools || loaded.schools.length === 0) {
-          loaded.schools = [defaultSchool];
-          loaded.users?.forEach((u: any) => { if (!u.schoolId) u.schoolId = 'school_1'; });
-          migrationNeeded = true;
-        } else if (!loaded.schools.some((s: any) => s.id === 'school_1')) {
-          loaded.schools.unshift(defaultSchool);
-          migrationNeeded = true;
-        }
-
-        // Ensure test users exist if missing
-        const defaultTestUsers = [
-            { id: 'u_creator', schoolId: 'global', fio: 'Создатель', role: 'creator', login: 'creator', password: 'admin' },
-            { id: 'u_dir', schoolId: 'school_1', fio: 'Иванов Иван Иванович', role: 'director', login: 'director', password: 'dir123' },
-            { id: 'u_teacher', schoolId: 'school_1', fio: 'Петров Пётр Петрович', role: 'teacher', login: 'teacher', password: 'teach123', subjects: ['Математика'], classes: [] },
-            { id: 's_1', schoolId: 'school_1', fio: 'Кузнецов Алексей Сергеевич', role: 'student', login: 's10a_1', password: 'pass1' },
-            { id: 'u_emp', schoolId: 'school_1', fio: 'Сидоров Сидр Сидорович', role: 'employee', customRole: 'Лаборант', login: 'emp', password: '123' }
-        ];
-        defaultTestUsers.forEach(tu => {
-            const found = loaded.users?.find((u: any) => u.id === tu.id || (u.login === tu.login && u.role === tu.role));
-            if (!found) {
-                loaded.users.push(tu);
-                migrationNeeded = true;
+    const sessionStr = localStorage.getItem('eljur_session');
+    if (sessionStr) {
+      try {
+        const session = JSON.parse(sessionStr);
+        if (session.expires > Date.now()) {
+          const u = defaultState.users.find((user: any) => user.id === session.userId);
+          if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= new Date())) {
+            setCurrentUser(u);
+            if (session.viewMode) setViewMode(session.viewMode);
+            if (DB.auth.currentUser) {
+              DB.syncUserAuthUidMap(u.schoolId || activeSchoolId, u.id, u.role, DB.auth.currentUser.uid).catch(() => {});
             }
+          }
+        }
+      } catch (e) {
+        console.warn('Session parse failed:', e);
+      }
+    }
+
+    // Safety timeout: ensure loading state never hangs indefinitely
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+      setAppState(prev => prev || defaultState);
+    }, 2500);
+
+    let unsubSchool: (() => void) | null = null;
+    let unsubAllSchools: (() => void) | null = null;
+
+    if (currentUser) {
+      if (currentUser.role === 'creator') {
+        unsubAllSchools = DB.subscribeToAllSchools((schools) => {
+          if (schools && schools.length > 0) {
+            setAppState(prev => {
+              const cur = prev || defaultState;
+              return {
+                ...cur,
+                schools: schools.map((s: any) => ({
+                  id: s.id,
+                  name: s.name,
+                  directorId: s.directorId,
+                  classes: s.classes || []
+                }))
+              };
+            });
+          }
         });
+      }
 
-        // Ensure core arrays/objects exist to prevent .map/.forEach crashes
-        if (!loaded.classes) { loaded.classes = []; migrationNeeded = true; }
-        if (!loaded.schools) { loaded.schools = []; migrationNeeded = true; }
-        if (!loaded.subjects) { loaded.subjects = ['Математика', 'Русский язык', 'Физика']; migrationNeeded = true; }
-        if (!loaded.users) { loaded.users = []; migrationNeeded = true; }
-        if (!loaded.schedules) { loaded.schedules = {}; migrationNeeded = true; }
-        if (!loaded.grades) { loaded.grades = {}; migrationNeeded = true; }
-        if (!loaded.finalGrades) { loaded.finalGrades = {}; migrationNeeded = true; }
-        if (!loaded.homework) { loaded.homework = []; migrationNeeded = true; }
-        if (!loaded.messages) { loaded.messages = []; migrationNeeded = true; }
-        if (!loaded.announcements) { loaded.announcements = []; migrationNeeded = true; }
-        if (!loaded.teacherAssignments) { loaded.teacherAssignments = []; migrationNeeded = true; }
-        if (!loaded.studentGroups) { loaded.studentGroups = []; migrationNeeded = true; }
-        if (!loaded.subjectRequirements) { loaded.subjectRequirements = {}; migrationNeeded = true; }
-        if (!loaded.quarters) { loaded.quarters = {Q1:[],Q2:[],Q3:[],Q4:[]}; migrationNeeded = true; }
+      unsubSchool = DB.subscribeToSchool(activeSchoolId, (schoolUpdate) => {
+        clearTimeout(safetyTimer);
+        setAppState(prev => {
+          const cur = prev || defaultState;
+          const incomingUsers = (schoolUpdate.users && schoolUpdate.users.length > 0)
+            ? schoolUpdate.users
+            : (cur.users && cur.users.length > 0 ? cur.users : defaultState.users);
 
-        // Ensure every school has an isolated classes array, and migrate any legacy global classes into the default school
-        if (loaded.schools && Array.isArray(loaded.schools)) {
-            loaded.schools.forEach((s: any) => {
-                if (!Array.isArray(s.classes)) {
-                    s.classes = [];
-                    migrationNeeded = true;
-                }
-            });
-            if (Array.isArray(loaded.classes) && loaded.classes.length > 0) {
-                const defaultSchool = loaded.schools.find((s: any) => s.id === 'school_1') || loaded.schools[0];
-                if (defaultSchool) {
-                    if (!defaultSchool.classes || defaultSchool.classes.length === 0) {
-                        defaultSchool.classes = [...loaded.classes];
-                    }
-                }
-                loaded.classes = [];
-                migrationNeeded = true;
-            }
-        }
+          const fullClasses = (schoolUpdate.classes && schoolUpdate.classes.length > 0)
+            ? schoolUpdate.classes
+            : (cur.classes && cur.classes.length > 0 ? cur.classes : defaultState.classes);
 
-        // Clean up invalid/orphaned teacher classes and student classes strictly within each user's school
-        if (loaded.users) {
-            loaded.users.forEach((u: any) => {
-                const school = (loaded.schools || []).find((s: any) => s.id === u.schoolId);
-                const schoolClasses = school && Array.isArray(school.classes) ? school.classes : [];
-                const validClasses = new Set<string>(schoolClasses.map((c: any) => `${c.class}_${c.letter}`));
+          const fullSubjects = (schoolUpdate.subjects && schoolUpdate.subjects.length > 0)
+            ? schoolUpdate.subjects
+            : (cur.subjects && cur.subjects.length > 0 ? cur.subjects : defaultState.subjects);
 
-                if (u.role === 'teacher' && u.classes) {
-                    const originalLength = u.classes.length;
-                    u.classes = u.classes.filter((cKey: string) => validClasses.has(cKey));
-                    if (u.classes.length !== originalLength) {
-                        migrationNeeded = true;
-                    }
-                }
-                if (u.role === 'student' && (u.class || u.letter)) {
-                    const key = `${u.class}_${u.letter}`;
-                    if (!validClasses.has(key)) {
-                        u.class = undefined;
-                        u.letter = undefined;
-                        migrationNeeded = true;
-                    }
-                }
-            });
-        }
+          const fullAssignments = (schoolUpdate.teacherAssignments && schoolUpdate.teacherAssignments.length > 0)
+            ? schoolUpdate.teacherAssignments
+            : (cur.teacherAssignments && cur.teacherAssignments.length > 0 ? cur.teacherAssignments : defaultState.teacherAssignments);
 
-        // Migrate studentGroups to have schoolId if missing
-        if (loaded.studentGroups && Array.isArray(loaded.studentGroups)) {
-            loaded.studentGroups.forEach((g: any) => {
-                if (!g.schoolId) {
-                    const firstStudent = (loaded.users || []).find((u: any) => (g.studentIds || []).includes(u.id));
-                    if (firstStudent && firstStudent.schoolId) {
-                        g.schoolId = firstStudent.schoolId;
-                        migrationNeeded = true;
-                    } else if (loaded.schools && loaded.schools[0]) {
-                        g.schoolId = loaded.schools[0].id;
-                        migrationNeeded = true;
-                    }
-                }
-            });
-        }
+          const fullSchools = (schoolUpdate.schools && schoolUpdate.schools.length > 0)
+            ? schoolUpdate.schools.map((s: any) => ({
+                ...s,
+                subjects: (s.subjects && s.subjects.length > 0) ? s.subjects : fullSubjects,
+                classes: (s.classes && s.classes.length > 0) ? s.classes : fullClasses
+              }))
+            : (cur.schools && cur.schools.length > 0 ? cur.schools : [defaultSchool]);
 
-        if (!loaded.settings) {
-            loaded.settings = { theme: 'light', language: 'ru', showSeasonalAnimations: true };
-            migrationNeeded = true;
-        } else {
-            if (loaded.settings.showSeasonalAnimations === undefined) loaded.settings.showSeasonalAnimations = true;
-            if (!loaded.settings.language) loaded.settings.language = 'ru';
-        }
-        const savedTheme = localStorage.getItem('eljur_theme') as 'light' | 'dark' | null;
-        if (savedTheme) loaded.settings.theme = savedTheme;
-        const savedLang = localStorage.getItem('eljur_lang') as 'ru' | 'en' | null;
-        if (savedLang) loaded.settings.language = savedLang;
+          const updated: AppState = {
+            ...cur,
+            ...schoolUpdate,
+            schools: fullSchools,
+            classes: fullClasses,
+            subjects: fullSubjects,
+            users: incomingUsers,
+            teacherAssignments: fullAssignments,
+            schedules: { ...cur.schedules, ...(schoolUpdate.schedules || {}) },
+            grades: { ...cur.grades, ...(schoolUpdate.grades || {}) },
+            finalGrades: { ...cur.finalGrades, ...(schoolUpdate.finalGrades || {}) },
+            homework: schoolUpdate.homework || cur.homework || [],
+            messages: schoolUpdate.messages || cur.messages || [],
+            announcements: schoolUpdate.announcements || cur.announcements || [],
+            studentGroups: schoolUpdate.studentGroups || cur.studentGroups || [],
+            settings: schoolUpdate.settings ? { ...cur.settings, ...schoolUpdate.settings } : cur.settings,
+            gradingSystem: schoolUpdate.gradingSystem || cur.gradingSystem,
+            gradeTypes: schoolUpdate.gradeTypes || cur.gradeTypes,
+            scheduleSettings: schoolUpdate.scheduleSettings || cur.scheduleSettings
+          };
 
-        // Scope unscoped schedule keys to default school_1
-        if (loaded.schedules) {
-            const newSchedules: any = {};
-            Object.entries(loaded.schedules).forEach(([k, v]) => {
-                const dayDict = v as any;
-                Object.keys(dayDict).forEach(dayId => {
-                    if (!dayDict[dayId].lessons) dayDict[dayId].lessons = [];
-                    dayDict[dayId].lessons.forEach((l: any) => {
-                        if (!l.subgroups) l.subgroups = [];
-                    });
-                });
-                const targetKey = k.includes('__') ? k : `school_1__${k}`;
-                newSchedules[targetKey] = dayDict;
-                if (!k.includes('__')) migrationNeeded = true;
-            });
-            if (migrationNeeded) loaded.schedules = newSchedules;
-        }
+          DB.saveSchoolCache(activeSchoolId, updated);
 
-        if (loaded.userOrder || !loaded.userOrder || loaded.userOrder.length < loaded.users.length) {
-            const existingOrder = new Set(loaded.userOrder || []);
-            const newOrder = [...(loaded.userOrder || [])];
-            loaded.users.forEach((u: any) => {
-                if (!existingOrder.has(u.id)) {
-                    newOrder.push(u.id);
-                }
-            });
-            if (JSON.stringify(newOrder) !== JSON.stringify(loaded.userOrder)) {
-                loaded.userOrder = newOrder;
-                migrationNeeded = true;
-            }
-        }
-
-        if (!loaded.scheduleSettings) {
-            loaded.scheduleSettings = { daysToAddBatch: 1, skippedWeekDays: [0], holidays: [], vacations: [], quarterDefinitions: { 'Q1': { start: '', end: '' }, 'Q2': { start: '', end: '' }, 'Q3': { start: '', end: '' }, 'Q4': { start: '', end: '' } } };
-            migrationNeeded = true;
-        } else {
-            if (!loaded.scheduleSettings.holidays) { loaded.scheduleSettings.holidays = []; migrationNeeded = true; }
-            if (!loaded.scheduleSettings.vacations) { loaded.scheduleSettings.vacations = []; migrationNeeded = true; }
-            if (!loaded.scheduleSettings.skippedWeekDays) { loaded.scheduleSettings.skippedWeekDays = [0]; migrationNeeded = true; }
-            if (!loaded.scheduleSettings.quarterDefinitions) { loaded.scheduleSettings.quarterDefinitions = { 'Q1': { start: '', end: '' }, 'Q2': { start: '', end: '' }, 'Q3': { start: '', end: '' }, 'Q4': { start: '', end: '' } }; migrationNeeded = true; }
-        }
-        if (!loaded.gradingSystem) {
-            loaded.gradingSystem = { minGrade: 2, maxGrade: 5, useWeights: true, minWeight: 1, maxWeight: 10 };
-            migrationNeeded = true;
-        }
-        if (!loaded.gradeTypes || loaded.gradeTypes.length === 0) {
-            loaded.gradeTypes = COEFFICIENT_TYPES.map(def => ({ id: H.uid('gt'), key: def.key, name: def.name, weight: def.weight, isDynamicWeight: def.key === 'nu', isNoWeight: def.key === 'n' || def.key === 'op' }));
-            migrationNeeded = true;
-        }
-        if (!loaded.gradeTypes.find((gt: any) => gt.name === '...')) {
-            loaded.gradeTypes.unshift({ id: H.uid('gt_def'), key: 'default', name: '...', weight: 1 });
-            migrationNeeded = true;
-        }
-
-        if (loaded.scheduleSettings && loaded.scheduleSettings.holidays) {
-            const rawHolidays = loaded.scheduleSettings.holidays as any[];
-            if (rawHolidays.length > 0 && typeof rawHolidays[0] === 'string') {
-                loaded.scheduleSettings.holidays = rawHolidays.map((dateStr: string) => ({ date: dateStr, title: 'Выходной' }));
-                migrationNeeded = true;
-            }
-        }
-        
-        if (migrationNeeded) {
-            // Save state back to Firestore to ensure permanent database stability
-            DB.saveState(loaded);
-        }
-        
-        setAppState(loaded);
-        if (isFirstSync) {
-            isFirstSync = false;
-            
-            const sessionStr = localStorage.getItem('eljur_session');
-            if (sessionStr) {
-                try {
-                    const session = JSON.parse(sessionStr);
-                    if (session.expires > Date.now()) {
-                        const u = loaded.users.find((user: any) => user.id === session.userId);
-                        if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= new Date())) {
-                            setCurrentUser(u);
-                            if (session.viewMode) setViewMode(session.viewMode);
-                            if (u.theme) {
-                                loaded.settings.theme = u.theme;
-                                try { localStorage.setItem('eljur_theme', u.theme); } catch (_) {}
-                            }
-                            if (u.language) {
-                                loaded.settings.language = u.language;
-                                try { localStorage.setItem('eljur_lang', u.language); } catch (_) {}
-                            }
-                            
-                            session.expires = Date.now() + 60 * 60 * 1000;
-                            localStorage.setItem('eljur_session', JSON.stringify(session));
-                        } else {
-                            localStorage.removeItem('eljur_session');
-                        }
-                    } else {
-                        localStorage.removeItem('eljur_session');
-                    }
-                } catch(e) {
-                    localStorage.removeItem('eljur_session');
-                }
-            }
-            
-            setLoading(false);
-        }
+          return updated;
+        });
       });
-    };
-    init();
+    } else {
+      clearTimeout(safetyTimer);
+      setLoading(false);
+    }
+
     return () => {
-       if (unsubscribe) unsubscribe();
+      clearTimeout(safetyTimer);
+      if (unsubSchool) unsubSchool();
+      if (unsubAllSchools) unsubAllSchools();
     };
-  }, []);
+  }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
 
   // Effect to toggle body class for theme
   useEffect(() => {
@@ -539,10 +475,44 @@ export default function App() {
     loadCustomFonts();
   }, [appState?.settings?.eljurInfo]);
 
-  const handleUpdateState = async (newState: AppState) => {
-    const updated = JSON.parse(JSON.stringify(newState));
-    setAppState(updated);
-    await DB.saveState(updated);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingStateRef = useRef<AppState | null>(null);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (pendingStateRef.current) {
+        const targetSchoolId = currentUser?.schoolId && currentUser.schoolId !== 'global'
+          ? currentUser.schoolId
+          : (pendingStateRef.current.schools[0]?.id || 'school_1');
+        DB.saveSchoolState(targetSchoolId, pendingStateRef.current);
+        DB.saveSchoolCache(targetSchoolId, pendingStateRef.current);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [currentUser?.schoolId]);
+
+  const handleUpdateState = (newState: AppState) => {
+    // Pure immutable state update without JSON.parse(JSON.stringify(newState))
+    setAppState(newState);
+    pendingStateRef.current = newState;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      if (pendingStateRef.current) {
+        const targetSchoolId = currentUser?.schoolId && currentUser.schoolId !== 'global'
+          ? currentUser.schoolId
+          : (pendingStateRef.current.schools[0]?.id || 'school_1');
+        DB.saveSchoolState(targetSchoolId, pendingStateRef.current);
+        DB.saveSchoolCache(targetSchoolId, pendingStateRef.current);
+        pendingStateRef.current = null;
+      }
+    }, 250);
   };
 
   const handleLogin = (u: User) => {
@@ -700,7 +670,13 @@ export default function App() {
       <SeasonalBackground enabled={showAnimations} timeOffset={appState.settings.systemTimeOffset} />
 
       {!currentUser ? (
-        <Login users={appState.users} onLogin={handleLogin} schoolName={localStorage.getItem('eljur_last_school_name') || 'ЭлЖур'} settings={appState.settings} onShowInfo={() => setShowEljurInfo(true)} />
+        <Login 
+          users={(appState?.users && appState.users.length > 0) ? appState.users : defaultState.users} 
+          onLogin={handleLogin} 
+          schoolName={localStorage.getItem('eljur_last_school_name') || 'ЭлЖур'} 
+          settings={appState?.settings || defaultState.settings} 
+          onShowInfo={() => setShowEljurInfo(true)} 
+        />
       ) : (
         <>
           {/* Header */}
@@ -817,6 +793,22 @@ export default function App() {
           </div>
         </div>
       </Modal>
+
+      {/* Visual error feedback for database save/read issues */}
+      {dbError && (
+        <div id="db-error-toast" className="fixed bottom-6 right-6 z-50 bg-red-600 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-bounce">
+          <span className="text-lg">⚠️</span>
+          <span className="font-medium text-sm">{dbError}</span>
+          <button 
+            id="dismiss-db-error-btn"
+            onClick={() => setDbError(null)} 
+            className="ml-2 hover:opacity-80 text-white font-bold p-1 leading-none"
+            aria-label="Закрыть"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

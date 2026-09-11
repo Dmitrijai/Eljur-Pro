@@ -4,6 +4,8 @@ import { AppState, User, Role } from '../../types';
 import * as H from '../../utils/helpers';
 import { Button, Input, Select, Card, SearchableSelect, MultiSelect, Modal } from '../../components/ui';
 import { Trash2, GripVertical, Lock, Unlock, Minus, Plus, UserX, PlusCircle, X as XIcon, Check, AlertCircle, Shield, Building, Printer, GraduationCap } from 'lucide-react';
+import { generateSalt, hashPassword, verifyUserPasswordDetailed } from '../../utils/auth';
+import * as DB from '../../services/db';
 
 export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false }: { state: AppState, onUpdate: (s: AppState) => void, currentUser: User, isGlobal?: boolean }) => {
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -17,6 +19,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const [newRoleInputOpen, setNewRoleInputOpen] = useState(false);
     const [focusedNameId, setFocusedNameId] = useState<string | null>(null);
     const [newUser, setNewUser] = useState({ fio: '', login: '', password: '', role: 'student' as Role, customRole: '', classKey: '', teacherClasses: [] as string[], schoolId: currentUser.schoolId || ''});
+    const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>({});
     const [newClassNum, setNewClassNum] = useState('');
     const [newClassLet, setNewClassLet] = useState('');
     const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const handleDragLeave = (e: React.DragEvent) => { e.currentTarget.classList.remove('dragging-over'); };
     const handleDrop = (e: React.DragEvent, targetId: string) => { e.preventDefault(); e.currentTarget.classList.remove('dragging-over'); if (!draggedItemId || draggedItemId === targetId) return; const oldIdx = state.userOrder.indexOf(draggedItemId); const newIdx = state.userOrder.indexOf(targetId); if (oldIdx !== -1 && newIdx !== -1) { const newOrder = [...state.userOrder]; newOrder.splice(oldIdx, 1); newOrder.splice(newIdx, 0, draggedItemId); state.userOrder = newOrder; setSortField('default'); onUpdate(state); } };
     const toggleRow = (id: string) => setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
-    const updateField = (userId: string, field: keyof User, val: any) => { 
+    const updateField = async (userId: string, field: keyof User, val: any) => { 
         const uIndex = state.users.findIndex(u => u.id === userId); 
         if (uIndex > -1) { 
             const userToUpdate = state.users[uIndex];
@@ -97,21 +100,33 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             }
             if (field === 'login' || field === 'password') {
                 const testLogin = field === 'login' ? String(val).toLowerCase().trim() : (userToUpdate.login || '').toLowerCase().trim();
-                const testPass = field === 'password' ? String(val) : (userToUpdate.password || '');
+                const testPass = field === 'password' ? String(val) : '';
                 if (testLogin && testPass) {
-                    const comboTaken = state.users.some(u => 
-                        u.id !== userId && 
-                        u.login?.toLowerCase().trim() === testLogin && 
-                        u.password === testPass
-                    );
-                    if (comboTaken) {
-                        setUiError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
-                        setUiErrorUserId(userId);
-                        return;
+                    for (const other of state.users) {
+                        if (other.id !== userId && other.login?.toLowerCase().trim() === testLogin) {
+                            const isMatch = await verifyUserPasswordDetailed(other, testPass);
+                            if (isMatch) {
+                                setUiError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
+                                setUiErrorUserId(userId);
+                                return;
+                            }
+                        }
                     }
                 }
             }
-            if (field === 'role') { 
+            if (currentUser.role === 'employee' && (val === 'director' || val === 'employee' || userToUpdate.role === 'director' || userToUpdate.role === 'employee')) {
+                setUiError(lang === 'ru' ? 'Недостаточно прав для изменения этой роли' : 'Insufficient permissions to change this role');
+                setUiErrorUserId(userId);
+                return;
+            }
+            if (field === 'schoolId') {
+                if (state.users[uIndex].schoolId !== val) {
+                    state.users[uIndex].schoolId = val;
+                    state.users[uIndex].class = undefined;
+                    state.users[uIndex].letter = undefined;
+                    state.users[uIndex].classes = undefined;
+                }
+            } else if (field === 'role') { 
                 if (val === 'director') { 
                     const existingDir = state.users.find(u => u.schoolId === userToUpdate.schoolId && u.role === 'director' && u.id !== userId); 
                     if (existingDir) { 
@@ -129,6 +144,15 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     state.users[uIndex].role = 'employee'; 
                     state.users[uIndex].employeePermissions = { allowedTabs: ['messages'], messagingScope: ['ALL'], canSendAsDirector: false }; 
                 } else state.users[uIndex].role = val; 
+            } else if (field === 'password') { 
+                const rawPass = String(val);
+                if (rawPass) {
+                    delete (state.users[uIndex] as any).password;
+                    const salt = generateSalt(); 
+                    const hash = await hashPassword(rawPass, salt);
+                    state.users[uIndex].passwordSalt = salt; 
+                    state.users[uIndex].passwordHash = hash; 
+                }
             } else { 
                 (state.users[uIndex] as any)[field] = val; 
             } 
@@ -173,6 +197,13 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const deleteUser = (id: string, name: string) => { 
         if(!window.confirm(`${t('confirm_delete')} "${name}"?`)) return; 
         if (currentUser.role === 'employee' && (id === currentUser.id || id === state.schools.find(s=>s.id===currentUser.schoolId)?.directorId)) return alert('Error'); 
+
+        const targetUser = state.users.find(u => u.id === id);
+        const targetSchoolId = targetUser?.schoolId || currentUser.schoolId;
+        if (targetSchoolId && targetSchoolId !== 'global') {
+            DB.deleteSchoolEntity(targetSchoolId, 'users', id).catch(() => {});
+        }
+
         state.users = state.users.filter(u => u.id !== id); 
         state.userOrder = state.userOrder.filter(uid => uid !== id); 
 
@@ -248,7 +279,67 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         onUpdate(state); 
     };
     const applyBlock = (id: string, duration: any) => { const uIndex = state.users.findIndex(u => u.id === id); if (uIndex > -1) { state.users[uIndex].blockedUntil = duration === 'unblock' ? undefined : new Date(Date.now() + (duration==='1h'?3600000:duration==='24h'?86400000:3153600000000)).toISOString(); onUpdate(state); } setBlockingUserId(null); };
-    const addUser = () => { if (!newUser.fio || !newUser.login || !newUser.password) { setUiError(t('fill_fields')); setUiErrorUserId('NEW_USER_FORM'); return; } if (validationErrors.length > 0) { setUiError(validationErrors[0]); setUiErrorUserId('NEW_USER_FORM'); return; } let targetSchoolId = isGlobal && newUser.schoolId && newUser.schoolId !== 'global' && newUser.schoolId !== '-' ? newUser.schoolId : currentUser.schoolId; if (isGlobal && newUser.schoolId === '-') targetSchoolId = ''; if (newUser.role === 'director' && targetSchoolId) { const existingDir = state.users.find(u => u.schoolId === targetSchoolId && u.role === 'director'); if (existingDir) { setUiError(`Director exists: ${existingDir.fio}`); setUiErrorUserId('NEW_USER_FORM'); return; } } const u: User = { id: H.uid('u'), schoolId: targetSchoolId, fio: newUser.fio, login: newUser.login, password: newUser.password, role: newUser.role, customRole: newUser.customRole }; if (newUser.role === 'student' && newUser.classKey) { const [cl, lt] = newUser.classKey.split('_'); u.class = cl; u.letter = lt; } else if (newUser.role === 'teacher') { u.classes = newUser.teacherClasses; } else if (newUser.role === 'employee') { u.employeePermissions = { allowedTabs: ['messages'], messagingScope: ['ALL'], canSendAsDirector: false }; } state.users.push(u); state.userOrder.push(u.id); onUpdate(state); setNewUser({ ...newUser, fio: '', login: '', password: '', role: 'student', customRole: '', classKey: '', teacherClasses: [] }); setNewRoleInputOpen(false); setUiError(null); setUiErrorUserId(null); };
+    const addUser = async () => { 
+        if (!newUser.fio || !newUser.login || !newUser.password) { 
+            setUiError(t('fill_fields')); 
+            setUiErrorUserId('NEW_USER_FORM'); 
+            return; 
+        } 
+        if (validationErrors.length > 0) { 
+            setUiError(validationErrors[0]); 
+            setUiErrorUserId('NEW_USER_FORM'); 
+            return; 
+        } 
+        let targetSchoolId = isGlobal && newUser.schoolId && newUser.schoolId !== 'global' && newUser.schoolId !== '-' ? newUser.schoolId : currentUser.schoolId; 
+        if (isGlobal && newUser.schoolId === '-') targetSchoolId = ''; 
+        if (newUser.role === 'director' && targetSchoolId) { 
+            const existingDir = state.users.find(u => u.schoolId === targetSchoolId && u.role === 'director'); 
+            if (existingDir) { 
+                setUiError(`Director exists: ${existingDir.fio}`); 
+                setUiErrorUserId('NEW_USER_FORM'); 
+                return; 
+            } 
+        } 
+        const normLogin = newUser.login.toLowerCase().trim();
+        for (const existingUser of state.users) {
+            if (existingUser.login?.toLowerCase().trim() === normLogin) {
+                const isMatch = await verifyUserPasswordDetailed(existingUser, newUser.password);
+                if (isMatch) {
+                    setUiError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
+                    setUiErrorUserId('NEW_USER_FORM');
+                    return;
+                }
+            }
+        }
+        const salt = generateSalt();
+        const hashed = await hashPassword(newUser.password, salt);
+        const u: User = { 
+            id: H.uid('u'), 
+            schoolId: targetSchoolId, 
+            fio: newUser.fio, 
+            login: newUser.login, 
+            passwordSalt: salt,
+            passwordHash: hashed,
+            role: newUser.role, 
+            customRole: newUser.customRole 
+        }; 
+        if (newUser.role === 'student' && newUser.classKey) { 
+            const [cl, lt] = newUser.classKey.split('_'); 
+            u.class = cl; 
+            u.letter = lt; 
+        } else if (newUser.role === 'teacher') { 
+            u.classes = newUser.teacherClasses; 
+        } else if (newUser.role === 'employee') { 
+            u.employeePermissions = { allowedTabs: ['messages'], messagingScope: ['ALL'], canSendAsDirector: false }; 
+        } 
+        state.users.push(u); 
+        state.userOrder.push(u.id); 
+        onUpdate(state); 
+        setNewUser({ ...newUser, fio: '', login: '', password: '', role: 'student', customRole: '', classKey: '', teacherClasses: [] }); 
+        setNewRoleInputOpen(false); 
+        setUiError(null); 
+        setUiErrorUserId(null); 
+    };
     const handleAddClass = () => { 
         if(!newClassNum || !newClassLet) { setClassError(t('fill_fields')); return; } 
         const lettr = newClassLet.toUpperCase(); 
@@ -423,9 +514,9 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                 </Card>
             )}
             <Card className="p-0 border-t-[6px] border-t-blue-600">
-                <div className="p-5 border-b border-slate-200 flex flex-col gap-4 bg-slate-50/50 dark:bg-slate-900 dark:border-slate-700 no-print"><div className="flex flex-wrap gap-4 justify-between items-center"><div className="flex flex-wrap items-center gap-4"><h3 className="font-bold text-slate-800 text-lg dark:text-white mr-4 font-heading">{isGlobal ? t('global_list') : t('school_users')}</h3><div className="w-64"><SearchableSelect lang={lang as 'ru'|'en'} placeholder={t('search_fio')} options={filteredUsers.map(u => ({ value: u.id, label: u.fio }))} value="" onChange={handleSearchSelect} className="h-10 text-xs" /></div>{isGlobal && <Select value={filterSchool} onChange={e => setFilterSchool(e.target.value)} className="w-40 text-xs py-1.5 h-auto"><option value="">{t('all_schools')}</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>}<Select value={filterRole} onChange={e => setFilterRole(e.target.value)} className="w-32 text-xs py-1.5 h-auto"><option value="">{t('all_roles')}</option><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option><option value="director">{t('director')}</option><option value="employee">{t('employee')}</option></Select>{!isGlobal && <Select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="w-32 text-xs py-1.5 h-auto"><option value="">{t('all_classes')}</option>{schoolClasses.map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select>}<Select value={sortField} onChange={e => setSortField(e.target.value as any)} className="w-40 text-xs py-1.5 h-auto"><option value="default">{t('sort_manual')}</option><option value="fio">{t('sort_fio')}</option><option value="role">{t('sort_role')}</option></Select></div><Button size="sm" onClick={() => window.print()} className="no-print"><Printer className="w-4 h-4 mr-2"/> {t('print')}</Button></div></div>
+                <div className="p-5 border-b border-slate-200 flex flex-col gap-4 bg-slate-50/50 dark:bg-slate-900 dark:border-slate-700 no-print"><div className="flex flex-wrap gap-4 justify-between items-center"><div className="flex flex-wrap items-center gap-4"><h3 className="font-bold text-slate-800 text-lg dark:text-white mr-4 font-heading">{isGlobal ? t('global_list') : t('school_users')}</h3><div className="w-64"><SearchableSelect lang={lang as 'ru'|'en'} placeholder={t('search_fio')} options={filteredUsers.map(u => ({ value: u.id, label: u.fio }))} value="" onChange={handleSearchSelect} className="h-10 text-xs" /></div>{isGlobal && <Select value={filterSchool} onChange={e => { setFilterSchool(e.target.value); setFilterClass(''); }} className="w-40 text-xs py-1.5 h-auto"><option value="">{t('all_schools')}</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>}<Select value={filterRole} onChange={e => setFilterRole(e.target.value)} className="w-32 text-xs py-1.5 h-auto"><option value="">{t('all_roles')}</option><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option><option value="director">{t('director')}</option><option value="employee">{t('employee')}</option></Select>{(!isGlobal || filterSchool) && <Select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="w-32 text-xs py-1.5 h-auto"><option value="">{t('all_classes')}</option>{(isGlobal ? H.getSchoolClasses(state, filterSchool) : schoolClasses).map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select>}<Select value={sortField} onChange={e => setSortField(e.target.value as any)} className="w-40 text-xs py-1.5 h-auto"><option value="default">{t('sort_manual')}</option><option value="fio">{t('sort_fio')}</option><option value="role">{t('sort_role')}</option></Select></div><Button size="sm" onClick={() => window.print()} className="no-print"><Printer className="w-4 h-4 mr-2"/> {t('print')}</Button></div></div>
                 <div className="overflow-x-auto"><table className="w-full text-sm min-w-[800px]"><thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 uppercase text-xs tracking-wider dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"><tr><th className="p-5 w-8 text-center no-print"></th><th className="p-5 w-12 text-center no-print"></th><th className="p-5 text-center">{t('fio')}</th>{isGlobal && <th className="p-5 text-center">{t('school')}</th>}<th className="p-5 text-center">{t('login')}</th><th className="p-5 text-center">{t('password')}</th><th className="p-5 text-center w-40">{t('role')}</th><th className="p-5 text-center">{t('class_assignment')}</th><th className="p-5 text-right no-print">{t('actions')}</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{sortedUsers.map(u => { const hasEmptyFields = !u.fio || !u.login || !u.password || (isGlobal && !u.schoolId) || (u.role === 'student' && (!u.class || !u.letter)) || (u.role === 'teacher' && (!u.classes || u.classes.length === 0)); return (<React.Fragment key={u.id}>{uiError && uiErrorUserId === u.id && (<tr className="bg-red-50 dark:bg-red-900/10 no-print animate-in fade-in slide-in-from-top-1"><td colSpan={isGlobal ? 9 : 8} className="p-2 text-red-600 dark:text-red-400 font-bold text-center border-b border-red-100 dark:border-red-900/30"><div className="flex items-center justify-center gap-2 relative"><AlertCircle size={14}/> {uiError}<button onClick={() => setUiError(null)} className="absolute right-2 p-1 hover:bg-red-200 rounded transition"><XIcon size={14}/></button></div></td></tr>)}<tr id={`row-${u.id}`} draggable onDragStart={(e) => handleDragStart(e, u.id)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, u.id)} className={`hover:bg-blue-50/50 transition duration-150 group dark:hover:bg-slate-800/50 cursor-move ${highlightId === u.id ? 'highlight-blink bg-blue-100 dark:bg-blue-900' : ''} ${hasEmptyFields ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}><td className="p-5 text-slate-400 text-center no-print"><GripVertical size={16}/></td><td className="p-5 text-center no-print">{((u.role === 'teacher' && !u.customRole) || u.role === 'employee') && <button onClick={() => toggleRow(u.id)} className={`p-1.5 rounded-full transition ${expandedRows[u.id] ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'hover:bg-slate-200 text-slate-400 dark:hover:bg-slate-700'}`}>{expandedRows[u.id] ? <Minus size={14}/> : <Plus size={14}/>}</button>}{u.blockedUntil && <div title={t('blocked')} className="flex justify-center mt-1"><Lock size={14} className="text-red-500" /></div>}</td><td className="p-5 text-center">{focusedNameId !== u.id ? <div onClick={() => setFocusedNameId(u.id)} className="bg-white border border-transparent hover:border-slate-200 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center cursor-text min-h-[38px] flex items-center justify-center transition-colors">{H.formatShortName(u.fio)}</div> : <input autoFocus className="bg-white border border-blue-500 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center focus:ring-2 focus:ring-blue-100 outline-none" value={u.fio} onChange={(e) => updateField(u.id, 'fio', e.target.value)} onBlur={() => setFocusedNameId(null)} placeholder={t('fio')} />}</td>{isGlobal && <td className="p-5 text-center"><Select value={u.schoolId || '-'} onChange={e => updateField(u.id, 'schoolId', e.target.value === '-' ? '' : e.target.value)} className="text-xs w-32"><option value="-">-</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></td>}<td className="p-5 text-center"><input className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center" value={u.login} onChange={(e) => updateField(u.id, 'login', e.target.value)} placeholder={t('login')} /></td><td className="p-5 text-center"><input className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center" value={u.password || ''} onChange={(e) => updateField(u.id, 'password', e.target.value)} placeholder={t('password')} /></td><td className="p-5 text-center"><div className="flex flex-col gap-1 items-center relative"><Select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)} className="text-xs py-2 font-medium w-36"><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{(isGlobal || currentUser.role === 'creator') && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select>{u.role === 'employee' && <div className="mt-1 w-36">{roleInputOpen[u.id] || u.customRole ? <div className="relative group animate-in zoom-in duration-200"><input autoFocus={roleInputOpen[u.id] && !u.customRole} className="text-xs border border-blue-200 rounded-lg px-3 py-1.5 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 dark:focus:border-blue-400 shadow-sm transition-all font-medium text-blue-700 dark:text-blue-300 placeholder-blue-300" value={u.customRole || ''} onChange={e => updateCustomRole(u.id, e.target.value)} placeholder={t('user_position')} />{roleInputOpen[u.id] && !u.customRole && <button onClick={() => toggleRoleInput(u.id)} className="absolute -right-2 -top-2 bg-red-100 rounded-full p-0.5 text-red-500 hover:bg-red-500 hover:text-white shadow-sm border border-red-200 transition-colors"><XIcon size={10}/></button>}</div> : <button onClick={() => toggleRoleInput(u.id)} className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-400 border border-dashed border-slate-300 rounded-lg py-1.5 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 group"><PlusCircle size={12} className="group-hover:scale-110 transition-transform"/><span>{t('user_position')}</span></button>}</div>}</div></td><td className="p-5 text-center">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{sortedUsers.map(u => { const hasEmptyFields = !u.fio || !u.login || (!u.password && !u.passwordHash) || (isGlobal && !u.schoolId) || (u.role === 'student' && (!u.class || !u.letter)) || (u.role === 'teacher' && (!u.classes || u.classes.length === 0)); return (<React.Fragment key={u.id}>{uiError && uiErrorUserId === u.id && (<tr className="bg-red-50 dark:bg-red-900/10 no-print animate-in fade-in slide-in-from-top-1"><td colSpan={isGlobal ? 9 : 8} className="p-2 text-red-600 dark:text-red-400 font-bold text-center border-b border-red-100 dark:border-red-900/30"><div className="flex items-center justify-center gap-2 relative"><AlertCircle size={14}/> {uiError}<button onClick={() => setUiError(null)} className="absolute right-2 p-1 hover:bg-red-200 rounded transition"><XIcon size={14}/></button></div></td></tr>)}<tr id={`row-${u.id}`} draggable onDragStart={(e) => handleDragStart(e, u.id)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, u.id)} className={`hover:bg-blue-50/50 transition duration-150 group dark:hover:bg-slate-800/50 cursor-move ${highlightId === u.id ? 'highlight-blink bg-blue-100 dark:bg-blue-900' : ''} ${hasEmptyFields ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}><td className="p-5 text-slate-400 text-center no-print"><GripVertical size={16}/></td><td className="p-5 text-center no-print">{((u.role === 'teacher' && !u.customRole) || u.role === 'employee') && <button onClick={() => toggleRow(u.id)} className={`p-1.5 rounded-full transition ${expandedRows[u.id] ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'hover:bg-slate-200 text-slate-400 dark:hover:bg-slate-700'}`}>{expandedRows[u.id] ? <Minus size={14}/> : <Plus size={14}/>}</button>}{u.blockedUntil && <div title={t('blocked')} className="flex justify-center mt-1"><Lock size={14} className="text-red-500" /></div>}</td><td className="p-5 text-center">{focusedNameId !== u.id ? <div onClick={() => setFocusedNameId(u.id)} className="bg-white border border-transparent hover:border-slate-200 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center cursor-text min-h-[38px] flex items-center justify-center transition-colors">{H.formatShortName(u.fio)}</div> : <input autoFocus className="bg-white border border-blue-500 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center focus:ring-2 focus:ring-blue-100 outline-none" value={u.fio} onChange={(e) => updateField(u.id, 'fio', e.target.value)} onBlur={() => setFocusedNameId(null)} placeholder={t('fio')} />}</td>{isGlobal && <td className="p-5 text-center"><Select value={u.schoolId || '-'} onChange={e => updateField(u.id, 'schoolId', e.target.value === '-' ? '' : e.target.value)} className="text-xs w-32 print:hidden"><option value="-">-</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{state.schools.find(s => s.id === u.schoolId)?.name || '—'}</span></td>}<td className="p-5 text-center"><input className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center" value={u.login} onChange={(e) => updateField(u.id, 'login', e.target.value)} placeholder={t('login')} /></td><td className="p-5 text-center"><input className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center" value={passwordInputs[u.id] !== undefined ? passwordInputs[u.id] : (u.password || '')} onChange={(e) => setPasswordInputs(prev => ({ ...prev, [u.id]: e.target.value }))} onBlur={(e) => { if (e.target.value) { updateField(u.id, 'password', e.target.value); setPasswordInputs(prev => { const n = {...prev}; delete n[u.id]; return n; }); } }} placeholder={u.passwordHash ? '••••••••' : t('password')} /></td><td className="p-5 text-center"><div className="flex flex-col gap-1 items-center relative"><Select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)} className="text-xs py-2 font-medium w-36 print:hidden"><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{(isGlobal || currentUser.role === 'creator') && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{u.role === 'employee' && u.customRole ? u.customRole : t(u.role)}</span>{u.role === 'employee' && <div className="mt-1 w-36 no-print">{roleInputOpen[u.id] || u.customRole ? <div className="relative group animate-in zoom-in duration-200"><input autoFocus={roleInputOpen[u.id] && !u.customRole} className="text-xs border border-blue-200 rounded-lg px-3 py-1.5 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 dark:focus:border-blue-400 shadow-sm transition-all font-medium text-blue-700 dark:text-blue-300 placeholder-blue-300" value={u.customRole || ''} onChange={e => updateCustomRole(u.id, e.target.value)} placeholder={t('user_position')} />{roleInputOpen[u.id] && !u.customRole && <button onClick={() => toggleRoleInput(u.id)} className="absolute -right-2 -top-2 bg-red-100 rounded-full p-0.5 text-red-500 hover:bg-red-500 hover:text-white shadow-sm border border-red-200 transition-colors"><XIcon size={10}/></button>}</div> : <button onClick={() => toggleRoleInput(u.id)} className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-400 border border-dashed border-slate-300 rounded-lg py-1.5 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 group"><PlusCircle size={12} className="group-hover:scale-110 transition-transform"/><span>{t('user_position')}</span></button>}</div>}</div></td><td className="p-5 text-center">
     {(() => {
         const leadingClasses = H.getUserLeadingClasses(state, u.schoolId, u.id);
         const leadingBadge = leadingClasses.length > 0 ? (
@@ -437,10 +528,12 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             </div>
         ) : null;
 
+        const rowSchoolClasses = isGlobal ? H.getSchoolClasses(state, u.schoolId) : schoolClasses;
+
         if (u.role === 'student') {
             return (
                 <Select 
-                    value={u.class && u.letter && (schoolClasses || []).some(c => c.class === u.class && c.letter === u.letter) ? `${u.class}_${u.letter}` : ''} 
+                    value={u.class && u.letter && (rowSchoolClasses || []).some(c => c.class === u.class && c.letter === u.letter) ? `${u.class}_${u.letter}` : ''} 
                     onChange={(e) => { 
                         const [c, l] = e.target.value.split('_'); 
                         const uIdx = state.users.findIndex(us => us.id === u.id); 
@@ -451,11 +544,11 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     className="text-xs py-2 w-32 mx-auto"
                 >
                     <option value="">{t('not_selected')}</option>
-                    {(schoolClasses || []).map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}
+                    {(rowSchoolClasses || []).map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}
                 </Select>
             );
         } else if (u.role === 'teacher') {
-            const validKeys = new Set((schoolClasses || []).map(c => `${c.class}_${c.letter}`)); 
+            const validKeys = new Set((rowSchoolClasses || []).map(c => `${c.class}_${c.letter}`)); 
             const activeClasses = (u.classes || []).filter(ck => validKeys.has(ck)); 
             return (
                 <div className="flex flex-col items-center gap-1">

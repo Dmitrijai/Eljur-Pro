@@ -219,12 +219,40 @@
             background: linear-gradient(to bottom right, transparent 48%, rgba(0,0,0,0.15) 49%, transparent 51%);
         }
 
-        /* --- BEAUTIFUL PRINT STYLES (A4 Optimized & Capacious) --- */
+        /* --- REDUCED MOTION PREFERENCE --- */
+        @media (prefers-reduced-motion: reduce) {
+            .season-element,
+            .season-snowflake,
+            .season-petal,
+            .season-pollen,
+            .season-summer-leaf,
+            .season-autumn-leaf {
+                display: none !important;
+                animation: none !important;
+            }
+            * {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+            }
+        }
+
+        /* --- BEAUTIFUL PRINT STYLES (A4 Optimized & Ink Friendly) --- */
         @media print {
             @page {
-                size: landscape;
-                margin: 6mm;
+                size: A4 auto;
+                margin: 8mm;
             }
+            @page landscape {
+                size: A4 landscape;
+                margin: 8mm;
+            }
+            @page portrait {
+                size: A4 portrait;
+                margin: 8mm;
+            }
+            .print-landscape { page: landscape; }
+            .print-portrait { page: portrait; }
 
             *, *:before, *:after {
                 -webkit-print-color-adjust: exact !important;
@@ -235,7 +263,7 @@
 
             body, html { 
                 background: #ffffff !important; 
-                color: #0f172a !important; 
+                color: #000000 !important; 
                 font-size: 9pt !important;
                 width: 100% !important;
                 height: auto !important;
@@ -428,10 +456,6 @@
                 color: black !important; /* Force B&W for clearer printing or keep color if preferred */
             }
             
-            /* Force table headers to repeat */
-            thead { display: table-header-group; }
-            tr { page-break-inside: avoid; }
-
             /* Links */
             a { text-decoration: none !important; color: black !important; }
         }

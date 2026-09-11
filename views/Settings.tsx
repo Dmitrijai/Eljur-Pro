@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { AppState, User } from '../types';
 import * as DB from '../services/db';
 import * as H from '../utils/helpers';
+import { hashPassword, generateSalt } from '../utils/auth';
 import { Button, Input, Select, Card, FileUploader } from '../components/ui';
 import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle } from 'lucide-react';
 import { defaultState } from '../App';
@@ -261,7 +262,10 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
         }
         
         // Restore state
-        await DB.saveState(data.state);
+        const schoolsToSave = data.state?.schools || [{ id: 'school_1' }];
+        for (const s of schoolsToSave) {
+          await DB.saveSchoolState(s.id, data.state);
+        }
         alert(t('import_success'));
         window.location.reload();
       } else {
@@ -334,23 +338,29 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
   const handleResetData = async () => {
       if (isDirector && user.schoolId) {
-          if (window.confirm(lang === 'ru' ? 'Вы уверены, что хотите сбросить данные своей школы? Это удалит расписание, оценки и списки классов вашей школы.' : 'Are you sure you want to reset your school data? This will clear schedules, grades, and classes for your school.')) {
+          if (window.confirm(lang === 'ru' ? 'Вы уверены, что хотите сбросить данные своей школы? Это вернет расписание, списки классов и тестовых пользователей к исходному состоянию.' : 'Are you sure you want to reset your school data? This will restore test schedules, classes and users.')) {
               H.clearSchoolGrades(state, user.schoolId);
               const school = state.schools.find(s => s.id === user.schoolId);
               if (school) {
-                  school.classes = [];
+                  school.classes = [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
+                  school.subjects = [...defaultState.subjects];
               }
-              // Reset users of this school except current director
-              state.users = state.users.filter(u => u.schoolId !== user.schoolId || u.id === user.id);
-              state.userOrder = (state.userOrder || []).filter(uid => state.users.some(u => u.id === uid));
+              // Reset users of this school to default test users
+              const otherUsers = state.users.filter(u => u.schoolId !== user.schoolId && u.schoolId !== 'school_1');
+              const defaultSchoolUsers = defaultState.users.filter(u => u.schoolId === 'school_1' || u.schoolId === user.schoolId);
+              state.users = [...otherUsers, ...defaultSchoolUsers];
+              state.userOrder = ['u_dir', 'u_teacher', 'u_emp', 's_1'];
+              state.teacherAssignments = [...defaultState.teacherAssignments];
+              state.classes = [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
+              state.subjects = [...defaultState.subjects];
               onUpdate({ ...state });
-              alert(lang === 'ru' ? 'Данные школы успешно сброшены.' : 'School data reset successfully.');
+              alert(lang === 'ru' ? 'Данные школы успешно сброшены к начальным тестовым данным.' : 'School data reset successfully to test defaults.');
           }
       } else if (isCreator) {
-          if (window.confirm('Вы уверены, что хотите сбросить все данные до значений по умолчанию? Это действие необратимо и удалит все текущие данные, вернув приложение к исходному состоянию (вместе с тестовыми данными).')) {
+          if (window.confirm(t('reset_data_confirm'))) {
               const newState = JSON.parse(JSON.stringify(defaultState));
               onUpdate(newState);
-              alert('Данные успешно сброшены.');
+              alert(t('data_reset_success'));
               window.location.reload();
           }
       }
@@ -456,7 +466,17 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                      <label className="block text-sm font-bold text-slate-600 mb-2 dark:text-slate-300">{t('secret_key')}</label>
                      <Input 
                         value={state.settings.secretKey || 'Space'} 
-                        onChange={e => { state.settings.secretKey = e.target.value; onUpdate(state); }} 
+                        onChange={e => {
+                          const val = e.target.value;
+                          state.settings.secretKey = val;
+                          DB.savePublicCreatorGate(user.schoolId || 'school_1', {
+                            secretKey: val,
+                            secretCount: state.settings.secretCount || 4,
+                            adminPasswordHash: state.settings.adminPasswordHash,
+                            adminPasswordSalt: state.settings.adminPasswordSalt
+                          });
+                          onUpdate({ ...state });
+                        }} 
                         placeholder="Space"
                      />
                      <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">{t('secret_key_desc')}</p>
@@ -468,7 +488,17 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                         min="1"
                         max="20"
                         value={state.settings.secretCount || 4} 
-                        onChange={e => { state.settings.secretCount = parseInt(e.target.value); onUpdate(state); }} 
+                        onChange={e => {
+                          const count = parseInt(e.target.value) || 4;
+                          state.settings.secretCount = count;
+                          DB.savePublicCreatorGate(user.schoolId || 'school_1', {
+                            secretCount: count,
+                            secretKey: state.settings.secretKey || 'Space',
+                            adminPasswordHash: state.settings.adminPasswordHash,
+                            adminPasswordSalt: state.settings.adminPasswordSalt
+                          });
+                          onUpdate({ ...state });
+                        }} 
                         className="bg-white text-slate-900 border border-slate-300 dark:bg-slate-950 dark:text-white dark:border-slate-700" 
                      />
                  </div>
@@ -477,8 +507,35 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                      <div className="relative">
                          <Input 
                             type={showSecretPass ? 'text' : 'password'}
-                            value={state.settings.adminPassword || 'admin'} 
-                            onChange={e => { state.settings.adminPassword = e.target.value; onUpdate(state); }} 
+                            value={state.settings.adminPassword || ''} 
+                            placeholder="Введите пароль Создателя"
+                            onChange={async e => {
+                              const newPass = e.target.value;
+                              state.settings.adminPassword = newPass;
+                              const targetSchool = user.schoolId || 'school_1';
+                              if (newPass.trim()) {
+                                const salt = generateSalt();
+                                const hash = await hashPassword(newPass, salt);
+                                state.settings.adminPasswordHash = hash;
+                                state.settings.adminPasswordSalt = salt;
+                                await DB.savePublicCreatorGate(targetSchool, {
+                                  adminPasswordHash: hash,
+                                  adminPasswordSalt: salt,
+                                  secretKey: state.settings.secretKey || 'Space',
+                                  secretCount: state.settings.secretCount || 4
+                                });
+                              } else {
+                                state.settings.adminPasswordHash = '';
+                                state.settings.adminPasswordSalt = '';
+                                await DB.savePublicCreatorGate(targetSchool, {
+                                  adminPasswordHash: '',
+                                  adminPasswordSalt: '',
+                                  secretKey: state.settings.secretKey || 'Space',
+                                  secretCount: state.settings.secretCount || 4
+                                });
+                              }
+                              onUpdate({ ...state });
+                            }} 
                          />
                          <button 
                             type="button"

@@ -1,10 +1,7 @@
-
-
 import React, { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import * as DB from '../services/db';
 import * as H from '../utils/helpers';
-import { Attachment } from '../types';
 import { Search, X, ChevronDown, Check } from 'lucide-react';
 
 // --- BUTTON ---
@@ -34,15 +31,27 @@ export const Button: React.FC<ButtonProps> = ({ variant = 'secondary', size = 'm
 };
 
 // --- INPUT ---
+// Standardized font-size: text-base on mobile (<768px) to prevent iOS Safari auto-zoom, sm:text-sm on desktop
 export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ className = '', ...props }) => {
   const hasWidth = /\bw-\w+/.test(className);
-  return <input className={`block ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm py-2.5 px-3 border transition-colors dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`} {...props} />;
+  return (
+    <input 
+      className={`block ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base sm:text-sm py-2.5 px-3 border transition-colors dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`} 
+      {...props} 
+    />
+  );
 };
 
 // --- SELECT ---
+// Standardized font-size: text-base on mobile to prevent iOS Safari auto-zoom, sm:text-sm on desktop
 export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({ className = '', ...props }) => {
   const hasWidth = /\bw-\w+/.test(className);
-  return <select className={`block ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm py-2.5 px-3 border cursor-pointer transition-colors dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`} {...props} />;
+  return (
+    <select 
+      className={`block ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base sm:text-sm py-2.5 px-3 border cursor-pointer transition-colors dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`} 
+      {...props} 
+    />
+  );
 };
 
 // --- SEARCHABLE SELECT ---
@@ -58,6 +67,7 @@ interface SearchableSelectProps {
 
 export const SearchableSelect: React.FC<SearchableSelectProps> = ({ options, value, onChange, placeholder = "Выберите...", className = '', multi = false, lang = 'ru' }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [openUpwards, setOpenUpwards] = useState(false);
   const [search, setSearch] = useState('');
   const wrapperRef = useRef<HTMLDivElement>(null);
   
@@ -72,6 +82,17 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({ options, val
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const toggleDropdown = () => {
+    if (!isOpen && wrapperRef.current) {
+      const rect = wrapperRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      setOpenUpwards(spaceBelow < 250 && spaceAbove > spaceBelow);
+    }
+    setIsOpen(prev => !prev);
+    if (!isOpen) setSearch('');
+  };
 
   const filteredOptions = options.filter(opt => 
     opt.label.toLowerCase().includes(search.toLowerCase())
@@ -106,15 +127,15 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({ options, val
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
       <div 
-        onClick={() => { setIsOpen(!isOpen); if (!isOpen) setSearch(''); }}
-        className={`block w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm border py-2.5 px-3 cursor-pointer flex justify-between items-center dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 min-h-[42px] transition-all ${isOpen ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
+        onClick={toggleDropdown}
+        className={`block w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm border py-2.5 px-3 cursor-pointer flex justify-between items-center dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 min-h-[42px] text-base sm:text-sm transition-all ${isOpen ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}
       >
         <span className={(!value || (Array.isArray(value) && value.length === 0)) ? 'text-slate-400' : 'truncate pr-2'}>{getLabel()}</span>
         <ChevronDown size={14} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}/>
       </div>
       
       {isOpen && (
-        <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto custom-scrollbar dark:bg-slate-900 dark:border-slate-700 animate-in slide-in-from-top-1">
+        <div className={`absolute z-50 w-full ${openUpwards ? 'bottom-full mb-2' : 'top-full mt-2'} bg-white border border-slate-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto custom-scrollbar dark:bg-slate-900 dark:border-slate-700 animate-in ${openUpwards ? 'slide-in-from-bottom-2' : 'slide-in-from-top-1'}`}>
           <div className="p-2 sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 z-10">
              <div className="relative">
                 <Search size={14} className="absolute left-3 top-3 text-slate-400" />
@@ -123,7 +144,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({ options, val
                   value={search} 
                   onChange={e => setSearch(e.target.value)} 
                   placeholder={t('search_placeholder')} 
-                  className="w-full text-sm pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  className="w-full text-base sm:text-sm pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 />
              </div>
           </div>
@@ -137,7 +158,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({ options, val
                       <div 
                         key={opt.value} 
                         onClick={() => handleSelect(opt.value)}
-                        className={`px-4 py-2.5 text-sm cursor-pointer flex justify-between items-center transition-colors hover:bg-blue-50 dark:hover:bg-slate-800 ${isSelected ? 'bg-blue-50/70 text-blue-700 font-semibold dark:bg-blue-900/20 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}
+                        className={`px-4 py-2.5 text-base sm:text-sm cursor-pointer flex justify-between items-center transition-colors hover:bg-blue-50 dark:hover:bg-slate-800 ${isSelected ? 'bg-blue-50/70 text-blue-700 font-semibold dark:bg-blue-900/20 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}
                       >
                         <span className="truncate">{opt.label}</span>
                         {isSelected && <Check size={14} className="text-blue-500" />}
@@ -165,6 +186,7 @@ interface MultiSelectProps {
 }
 export const MultiSelect: React.FC<MultiSelectProps> = ({ options, selected, onChange, label, placeholder = "Выберите...", lang = 'ru' }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [openUpwards, setOpenUpwards] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   
   const t = (k: string) => H.t(k, lang as 'ru' | 'en');
@@ -178,6 +200,16 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({ options, selected, onC
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const toggleDropdown = () => {
+    if (!isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      setOpenUpwards(spaceBelow < 250 && spaceAbove > spaceBelow);
+    }
+    setIsOpen(prev => !prev);
+  };
 
   const toggle = (val: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -196,10 +228,10 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({ options, selected, onC
   return (
     <div ref={containerRef} className="relative w-full">
       <div 
-        onClick={() => setIsOpen(!isOpen)}
-        className={`min-h-[42px] w-full border border-slate-300 rounded-lg bg-white dark:bg-slate-950 dark:border-slate-700 p-1.5 flex flex-wrap gap-1.5 cursor-pointer items-center transition-all ${isOpen ? 'ring-2 ring-blue-500 border-blue-500' : 'hover:border-slate-400'}`}
+        onClick={toggleDropdown}
+        className={`min-h-[42px] w-full border border-slate-300 rounded-lg bg-white dark:bg-slate-950 dark:border-slate-700 p-1.5 flex flex-wrap gap-1.5 cursor-pointer items-center text-base sm:text-sm transition-all ${isOpen ? 'ring-2 ring-blue-500 border-blue-500' : 'hover:border-slate-400'}`}
       >
-        {selected.length === 0 && <span className="text-slate-400 text-sm px-2">{placeholder}</span>}
+        {selected.length === 0 && <span className="text-slate-400 text-base sm:text-sm px-2">{placeholder}</span>}
         {selected.map(s => (
           <div key={s} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-bold border border-blue-100 flex items-center gap-1.5 animate-in zoom-in-95 duration-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800">
             {label ? label.replace('%s', s.replace('_','')) : s.replace('_','')}
@@ -214,7 +246,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({ options, selected, onC
       </div>
 
       {isOpen && (
-        <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto custom-scrollbar dark:bg-slate-900 dark:border-slate-700 animate-in slide-in-from-top-1">
+        <div className={`absolute z-50 w-full ${openUpwards ? 'bottom-full mb-2' : 'top-full mt-2'} bg-white border border-slate-200 rounded-xl shadow-2xl max-h-60 overflow-y-auto custom-scrollbar dark:bg-slate-900 dark:border-slate-700 animate-in ${openUpwards ? 'slide-in-from-bottom-2' : 'slide-in-from-top-1'}`}>
           <div className="py-1">
             {options.map(opt => {
               const isSelected = selected.includes(opt);
@@ -222,7 +254,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({ options, selected, onC
                 <div 
                   key={opt}
                   onClick={(e) => toggle(opt, e)}
-                  className={`px-4 py-2.5 text-sm cursor-pointer flex justify-between items-center transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${isSelected ? 'text-blue-600 font-bold dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}
+                  className={`px-4 py-2.5 text-base sm:text-sm cursor-pointer flex justify-between items-center transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${isSelected ? 'text-blue-600 font-bold dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}
                 >
                   <span>{label ? label.replace('%s', opt.replace('_','')) : opt.replace('_','')}</span>
                   {isSelected && <Check size={14} className="text-blue-500" />}
@@ -245,21 +277,23 @@ export const Card: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className
 );
 
 // --- FILE DISPLAY ---
-export const FileDisplay: React.FC<{ id?: string; name?: string, lang?: 'ru'|'en' }> = ({ id, name, lang = 'ru' }) => {
+export const FileDisplay: React.FC<{ id?: string; name?: string, schoolId?: string, lang?: 'ru'|'en' }> = ({ id, name, schoolId, lang = 'ru' }) => {
   if (!id || !name) return null;
   const t = (k:string) => H.t(k, lang as 'ru'|'en');
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const asset = await DB.getAsset(id);
+      const asset = await DB.getAsset(id, schoolId);
       if (!asset) return alert('Файл не найден');
       const url = URL.createObjectURL(asset.blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = asset.name;
+      document.body.appendChild(a);
       a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
       alert('Ошибка скачивания');
     }
@@ -268,10 +302,11 @@ export const FileDisplay: React.FC<{ id?: string; name?: string, lang?: 'ru'|'en
   const handleOpen = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const asset = await DB.getAsset(id);
+      const asset = await DB.getAsset(id, schoolId);
       if (!asset) return alert('Файл не найден');
       const url = URL.createObjectURL(asset.blob);
       window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
       alert('Ошибка открытия');
     }
@@ -283,13 +318,13 @@ export const FileDisplay: React.FC<{ id?: string; name?: string, lang?: 'ru'|'en
       <div className="flex flex-col">
         <span className="font-semibold text-slate-800 max-w-[150px] truncate text-xs dark:text-slate-200" title={name}>{name}</span>
         <div className="flex gap-2 text-[10px] text-blue-600 font-medium dark:text-blue-400">
-           <button onClick={handleOpen} className="hover:underline">{t('open')}</button>
-           <button onClick={handleDownload} className="hover:underline">{t('download')}</button>
+           <button type="button" onClick={handleOpen} className="hover:underline">{t('open')}</button>
+           <button type="button" onClick={handleDownload} className="hover:underline">{t('download')}</button>
         </div>
       </div>
     </div>
   );
-}
+};
 
 // --- MULTI FILE UPLOADER ---
 interface MultiFileUploaderProps {
@@ -313,17 +348,22 @@ export const MultiFileUploader: React.FC<MultiFileUploaderProps> = ({ files, onF
     onFilesChange(files.filter((_, i) => i !== index));
   };
 
-  // Helper to open local file preview
+  // Helper to open local file preview with leak-proof revokeObjectURL
   const openLocal = (f: File) => {
       const url = URL.createObjectURL(f);
       window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
   
   const downloadLocal = (f: File) => {
       const url = URL.createObjectURL(f);
-      const a = document.createElement('a'); a.href = url; a.download = f.name; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const a = document.createElement('a'); 
+      a.href = url; 
+      a.download = f.name; 
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   return (
@@ -349,7 +389,7 @@ export const MultiFileUploader: React.FC<MultiFileUploaderProps> = ({ files, onF
                      <span className="cursor-pointer hover:underline" onClick={()=>downloadLocal(f)}>{t('download')}</span>
                  </div>
              </div>
-             <button onClick={() => removeFile(idx)} className="text-slate-400 hover:text-red-500 font-bold ml-2 text-lg">&times;</button>
+             <button type="button" onClick={() => removeFile(idx)} className="text-slate-400 hover:text-red-500 font-bold ml-2 text-lg">&times;</button>
            </div>
          ))}
        </div>
@@ -388,7 +428,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, select
 };
 
 // --- MODAL ---
-// Updated to use Portal for better z-index handling
+// Uses Portal for clean z-index hierarchy and ensures full accessibility
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) => {
   React.useEffect(() => {
     if (isOpen) {
@@ -405,11 +445,11 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
       <div className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}>
         <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black">
           <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{title}</h3>
-          <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300">&times;</button>
+          <button type="button" onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300">&times;</button>
         </div>
         <div className="p-6 dark:text-slate-300">{children}</div>
       </div>
     </div>,
     document.body
   );
-}
+};

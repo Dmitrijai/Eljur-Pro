@@ -1,0 +1,41 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function currentUserData() {
+      return firestore.get(/databases/(default)/documents/authUidMap/$(request.auth.uid)).data;
+    }
+    function hasAuthMap() {
+      return isAuthenticated() && firestore.exists(/databases/(default)/documents/authUidMap/$(request.auth.uid));
+    }
+    function isCreator() {
+      return isAuthenticated() && (
+        request.auth.uid == 'P5cdPdwZSOXcKzpKLsPWRsoY7CM2' ||
+        (hasAuthMap() && 'role' in currentUserData() && currentUserData().role == 'creator')
+      );
+    }
+    function isSchoolMember(schoolId) {
+      return isAuthenticated() && (
+        isCreator() ||
+        (hasAuthMap() && currentUserData().schoolId == schoolId)
+      );
+    }
+    function isStaff(schoolId) {
+      return isAuthenticated() && (
+        isCreator() ||
+        (hasAuthMap() && currentUserData().schoolId == schoolId && (
+          currentUserData().role == 'teacher' || 
+          currentUserData().role == 'director' || 
+          currentUserData().role == 'employee'
+        ))
+      );
+    }
+
+    match /schools/{schoolId}/attachments/{attachmentId} {
+      allow read: if isSchoolMember(schoolId);
+      allow write: if isStaff(schoolId) && request.resource.size < 25 * 1024 * 1024;
+    }
+  }
+}

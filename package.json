@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "firebase emulators:exec --only firestore \"node --experimental-strip-types --test firestore.rules.test.ts\""
   },
   "dependencies": {
     "dompurify": "^3.4.13",
     "firebase": "^12.13.0",
+    "firebase-admin": "^14.3.0",
     "lucide-react": "^0.555.0",
     "mammoth": "^1.12.0",
     "quill-image-resize-module-react": "^3.0.0",
@@ -22,6 +24,7 @@
     "react-rnd": "^10.5.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@types/dompurify": "^3.2.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",

@@ -186,17 +186,9 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                 const currentGrades = grades.filter(g => g.studentId === user.id && g.date >= qStart && g.date <= qEnd);
                                 if (currentGrades.length === 0) return null;
                                 let wSum = 0, wCount = 0;
-                                const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
                                 currentGrades.forEach(g => { 
-                                    let val = parseFloat(String(g.value)); 
-                                    if (g.value === 'Н/У') {
-                                        const created = new Date(g.date);
-                                        const deadline = g.deadline ? new Date(g.deadline) : H.addDays(created, 7);
-                                        if (systemNow >= deadline) {
-                                            val = minGrade;
-                                        }
-                                    }
-                                    if (!isNaN(val)) { 
+                                    const val = H.getEffectiveGradeValue(g, minGrade, state.settings.systemTimeOffset); 
+                                    if (val !== null && !isNaN(val)) { 
                                         const weight = getEffectiveWeight(g); 
                                         wSum += val * weight; 
                                         wCount += weight; 
@@ -214,8 +206,7 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                                     {dayGrades.length > 0 ? (
                                                         <div className="flex flex-wrap items-center justify-center gap-1.5">
                                                             {dayGrades.map((g, gIdx) => {
-                                                                const isNU = g.value === 'Н/У';
-                                                                const isExpiredNU = isNU && systemNow >= (g.deadline ? new Date(g.deadline) : H.addDays(new Date(g.date), 7));
+                                                                const isExpiredNU = H.isGradeExpiredNU(g, state.settings.systemTimeOffset);
                                                                 return (
                                                                 <div key={g.id || gIdx} className="flex flex-col items-center cursor-pointer group hover:scale-110 transition-transform" onClick={() => { setSelectedGradeDetails({grade: g, subject: subj}); playGradeSound(g.value); }}>
                                                                     <span className={`font-bold ${isExpiredNU ? 'text-red-600 line-through decoration-red-600/50' : H.getGradeColorClass(String(g.value), minGrade, maxGrade)}`} title={isExpiredNU ? `Просрочено (учитывается как ${minGrade})` : undefined}>{g.value}</span>

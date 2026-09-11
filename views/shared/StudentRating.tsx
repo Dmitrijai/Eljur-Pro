@@ -81,6 +81,7 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
         const classKey = `${s.class}_${s.letter}`;
         const allGrades = H.getSchoolClassGrades(state, s.schoolId, classKey);
         const schoolGradingSystem = H.getSchoolGradingSystem(state, s.schoolId);
+        const minGrade = schoolGradingSystem?.minGrade ?? 2;
         const schoolGradeTypes = H.getSchoolGradeTypes(state, s.schoolId);
         const useWeights = schoolGradingSystem?.useWeights ?? true;
         let totalWeighted = 0;
@@ -102,8 +103,8 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
             }
             grades.forEach(g => {
                 if (g.studentId === s.id) {
-                    const val = parseFloat(g.value as string);
-                    if (!isNaN(val)) {
+                    const val = H.getEffectiveGradeValue(g, minGrade, state.settings?.systemTimeOffset);
+                    if (val !== null && !isNaN(val)) {
                         // Dynamic Weight Lookup Logic
                         let weight = 1;
                         if (useWeights) {

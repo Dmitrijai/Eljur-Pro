@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { AppState, User, Attachment, ScheduleDay } from '../../types';
 import * as H from '../../utils/helpers';
@@ -38,7 +37,8 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
                 });
             });
         }
-        if (assigned.length === 0 && user.subjects) { return user.subjects; }
+        if (assigned.length === 0 && user.subjects && user.subjects.length > 0) { return user.subjects; }
+        if (assigned.length === 0) { return H.getSchoolSubjects(state, user.schoolId); }
         return Array.from(new Set(assigned));
    }, [cls, state.teacherAssignments, user.id, user.subjects, state, user.schoolId]);
 
@@ -84,7 +84,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
      if (!cls || !subj || !date || !text) return alert(t('fill_fields'));
      const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
      if (H.isHoliday(date, scheduleSettings) || H.getVacationForDay(date, scheduleSettings)) {
-         return alert(lang === 'en' ? 'Cannot assign homework on a holiday or vacation.' : 'Нельзя задавать домашнее задание на праздничный день или период каникул.');
+         return alert(t('cant_assign_hw_holiday_vacation'));
      }
      const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); today.setHours(0, 0, 0, 0);
      const selectedDate = new Date(date); selectedDate.setHours(0, 0, 0, 0);
@@ -140,7 +140,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
                  <div><label className="text-sm font-bold text-slate-600 mb-2 block dark:text-slate-300">{t('class')}</label><Select value={cls} onChange={e => { setCls(e.target.value); setDate(''); }}>{myClasses.map((c: any) => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select></div>
                  <div><label className="text-sm font-bold text-slate-600 mb-2 block dark:text-slate-300">{t('subject')}</label><Select value={subj} onChange={e => { setSubj(e.target.value); setDate(''); }}>{availableSubjects.map((s: string) => <option key={s} value={s}>{s}</option>)}</Select></div>
               </div>
-              <div><label className="text-sm font-bold text-slate-600 mb-2 block dark:text-slate-300">{t('submit_hw')}</label><div className="relative"><Select value={date} onChange={e => setDate(e.target.value)} disabled={validHWDates.length === 0}><option value="">-- {t('select_date')} --</option>{validHWDates.map(d => (<option key={d} value={d}>{H.formatDateDDMMYYYY(d)} ({H.getDayOfWeek(d, lang)})</option>))}</Select>{validHWDates.length === 0 && <div className="absolute inset-0 z-10" onClick={() => alert(cls && subj ? `В расписании этого класса нет будущих уроков по предмету «${subj}».` : t('list_empty'))} />}</div></div>
+              <div><label className="text-sm font-bold text-slate-600 mb-2 block dark:text-slate-300">{t('submit_hw')}</label><div className="relative"><Select value={date} onChange={e => setDate(e.target.value)} disabled={validHWDates.length === 0}><option value="">-- {t('select_date')} --</option>{validHWDates.map(d => (<option key={d} value={d}>{H.formatDateDDMMYYYY(d)} ({H.getDayOfWeek(d, lang)})</option>))}</Select>{validHWDates.length === 0 && <div className="absolute inset-0 z-10" onClick={() => alert(cls && subj ? (lang === 'en' ? `There are no future lessons for "${subj}" in this class schedule.` : `В расписании этого класса нет будущих уроков по предмету «${subj}».`) : t('list_empty'))} />}</div></div>
               {availableLessonCount > 1 && (<div className="bg-blue-50 p-3 rounded-lg border border-blue-100 dark:bg-blue-900/20 dark:border-blue-800"><label className="text-sm font-bold text-blue-800 mb-2 block dark:text-blue-300">{t('select_lesson_found')} ({availableLessonCount})</label><Select value={lessonIndex} onChange={e => setLessonIndex(parseInt(e.target.value))}>{Array.from({length: availableLessonCount}).map((_, i) => (<option key={i} value={i}>{i + 1} {t('lesson_order')}</option>))}</Select></div>)}
               <div><label className="text-sm font-bold text-slate-600 mb-2 block dark:text-slate-300">{t('hw_text')}</label><textarea className="w-full border border-slate-300 rounded-xl p-4 h-40 focus:ring-blue-500 focus:border-blue-500 text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200" value={text} onChange={e => setText(e.target.value)} placeholder="..." /></div>
               <div className="pt-2"><MultiFileUploader files={files} onFilesChange={setFiles} lang={lang} /></div>

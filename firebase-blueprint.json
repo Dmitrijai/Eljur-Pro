@@ -1,17 +1,188 @@
 {
   "entities": {
-    "AppState": {
-      "title": "Application State",
-      "description": "Unified state for the entire ElZhur application",
+    "School": {
+      "title": "School Metadata",
+      "description": "School details, settings, and classes configuration",
       "type": "object",
-      "properties": {},
-      "required": []
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "directorId": { "type": "string" },
+        "classes": { "type": "array" }
+      },
+      "required": ["id", "name"]
+    },
+    "SchoolUser": {
+      "title": "School User Profile",
+      "description": "User profile associated with a school without sensitive credentials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "fio": { "type": "string" },
+        "login": { "type": "string" },
+        "role": { "type": "string", "enum": ["creator", "director", "teacher", "student", "employee"] },
+        "class": { "type": "number" },
+        "letter": { "type": "string" }
+      },
+      "required": ["id", "schoolId", "fio", "login", "role"]
+    },
+    "ScheduleDay": {
+      "title": "Schedule Day",
+      "description": "Class schedule for a specific day of the week",
+      "type": "object",
+      "properties": {
+        "day": { "type": "string" },
+        "lessons": { "type": "array" }
+      },
+      "required": ["day", "lessons"]
+    },
+    "GradeRecord": {
+      "title": "Class Grade Records",
+      "description": "Academic grades entries for a class and subject",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "subject": { "type": "string" },
+        "entries": { "type": "array" }
+      },
+      "required": ["classId", "subject"]
+    },
+    "FinalGradeRecord": {
+      "title": "Final Academic Grades",
+      "description": "Quarterly and annual final grades for a class",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "entries": { "type": "array" }
+      },
+      "required": ["classId"]
+    },
+    "Homework": {
+      "title": "Homework Assignment",
+      "description": "Homework task issued by a teacher for a class",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "classId": { "type": "string" },
+        "subject": { "type": "string" },
+        "text": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "schoolId", "classId", "subject"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Internal communication message between users of the school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "fromId": { "type": "string" },
+        "toIds": { "type": "array" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "schoolId", "fromId", "text"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "School-wide broadcast announcement",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "schoolId", "title", "content"]
+    },
+    "TeacherAssignment": {
+      "title": "Teacher Subject Assignment",
+      "description": "Teaching load mapping a teacher to a class and subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "classId": { "type": "string" },
+        "subject": { "type": "string" }
+      },
+      "required": ["id", "schoolId", "teacherId", "classId", "subject"]
+    },
+    "StudentGroup": {
+      "title": "Student Subgroup",
+      "description": "Subgroup of students within a class for separated subjects",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "classId": { "type": "string" },
+        "name": { "type": "string" },
+        "studentIds": { "type": "array" }
+      },
+      "required": ["id", "schoolId", "classId", "name", "studentIds"]
+    },
+    "Attachment": {
+      "title": "File Attachment",
+      "description": "Shared file attachment metadata and content payload",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "data": { "type": "string" }
+      },
+      "required": ["id", "schoolId", "name", "type"]
     }
   },
   "firestore": {
-    "/appStates/{stateId}": {
-      "schema": "AppState",
-      "description": "The unified state document"
+    "/schools/{schoolId}": {
+      "schema": "School",
+      "description": "Root document for a school containing its configuration"
+    },
+    "/schools/{schoolId}/users/{userId}": {
+      "schema": "SchoolUser",
+      "description": "Users belonging to the specific school"
+    },
+    "/schools/{schoolId}/schedules/{classKey}": {
+      "schema": "ScheduleDay",
+      "description": "Schedules organized per class for the school"
+    },
+    "/schools/{schoolId}/grades/{gradeId}": {
+      "schema": "GradeRecord",
+      "description": "Academic grades organized per class and subject"
+    },
+    "/schools/{schoolId}/finalGrades/{classKey}": {
+      "schema": "FinalGradeRecord",
+      "description": "Quarterly and annual final grade sheets"
+    },
+    "/schools/{schoolId}/homework/{hwId}": {
+      "schema": "Homework",
+      "description": "Homework tasks issued by teachers in this school"
+    },
+    "/schools/{schoolId}/messages/{msgId}": {
+      "schema": "Message",
+      "description": "School messaging conversations"
+    },
+    "/schools/{schoolId}/announcements/{annId}": {
+      "schema": "Announcement",
+      "description": "Announcements targeted to the school"
+    },
+    "/schools/{schoolId}/teacherAssignments/{assignId}": {
+      "schema": "TeacherAssignment",
+      "description": "Teaching load assignments"
+    },
+    "/schools/{schoolId}/studentGroups/{groupId}": {
+      "schema": "StudentGroup",
+      "description": "Student division groups for split classes"
+    },
+    "/schools/{schoolId}/attachments/{attachmentId}": {
+      "schema": "Attachment",
+      "description": "Shared file attachments for homework and messaging"
     }
   }
 }

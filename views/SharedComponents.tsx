@@ -1142,7 +1142,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
               activeTab === 'inbox' &&
               (isAnnounce
                 ? H.isAnnouncementUnreadByUser(item, currentUser, state.users)
-                : H.isMessageUnreadByUser(item, currentUser.id));
+                : H.isMessageUnreadByUser(item, currentUser, state.users));
 
             return (
               <MessageCard
