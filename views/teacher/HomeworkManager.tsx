@@ -89,8 +89,9 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
      const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); today.setHours(0, 0, 0, 0);
      const selectedDate = new Date(date); selectedDate.setHours(0, 0, 0, 0);
      if (selectedDate < today && !editId) { return alert(t('cant_hw_past')); }
+     const targetSchoolId = user.schoolId || 'school_1';
      const newAttachments: Attachment[] = [];
-     for (const f of files) { const id = H.uid('att'); await DB.saveAsset(id, f.name, f.type, f); newAttachments.push({ id, name: f.name, type: f.type }); }
+     for (const f of files) { const id = H.uid('att'); await DB.saveAsset(id, f.name, f.type, f, targetSchoolId); newAttachments.push({ id, name: f.name, type: f.type }); }
      const [c, l] = cls.split('_');
      let finalText = text;
      if (editId) {
@@ -99,14 +100,18 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
              const existing = state.homework[idx];
              const existingAtts = existing.attachments || [];
              if (existing.attachmentId) existingAtts.push({id: existing.attachmentId, name: existing.attachmentName||'File', type: existing.attachmentType||''});
-             state.homework[idx] = { ...existing, schoolId: existing.schoolId || user.schoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: [...existingAtts, ...newAttachments], lessonIndex: availableLessonCount > 1 ? lessonIndex : 0, attachmentId: undefined };
+             const updatedHW: any = { ...existing, schoolId: existing.schoolId || targetSchoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: [...existingAtts, ...newAttachments], lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
+             delete updatedHW.attachmentId;
+             state.homework[idx] = updatedHW;
+             await DB.saveSchoolEntity(targetSchoolId, 'homework', updatedHW.id, updatedHW);
         }
         setEditId(null);
      } else {
-        const newHW = { id: H.uid('hw'), schoolId: user.schoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: newAttachments, fromId: user.id, lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
+        const newHW = { id: H.uid('hw'), schoolId: targetSchoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: newAttachments, fromId: user.id, lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
         state.homework.push(newHW);
+        await DB.saveSchoolEntity(targetSchoolId, 'homework', newHW.id, newHW);
      }
-     onUpdate(state); alert(t('saved')); setText(''); setFiles([]);
+     onUpdate({ ...state }); alert(t('saved')); setText(''); setFiles([]);
    };
 
    const startEdit = (h: any) => {
@@ -125,7 +130,8 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
       }
       if(!confirm(t('confirm_delete'))) return;
       state.homework = state.homework.filter((h:any) => h.id !== id);
-      onUpdate(state);
+      DB.deleteSchoolEntity(user.schoolId || 'school_1', 'homework', id).catch(() => {});
+      onUpdate({ ...state });
    };
 
    const filteredHistory = state.homework.filter((h: any) => h.fromId === user.id).filter((h: any) => historyClassFilter ? `${h.class}_${h.letter}` === historyClassFilter : true).reverse();
@@ -157,7 +163,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
                <Card key={h.id} className="p-5 text-sm border-l-[6px] border-l-blue-400 dark:border-l-blue-600">
                   <div className="flex justify-between items-center mb-3"><div className="font-bold text-slate-800 text-base dark:text-white">{h.subject}{lIdxLabel}</div><div className="flex items-center gap-2"><div className="text-xs font-mono font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full dark:bg-slate-800 dark:text-slate-400">{h.class}{h.letter} • {H.formatDateDDMMYYYY(h.date)}</div>{!isPast && (<><button onClick={() => startEdit(h)} className="text-blue-500 hover:text-blue-700"><Edit size={14}/></button><button onClick={() => deleteHW(h.id)} className="text-red-500 hover:text-red-700"><Trash2 size={14}/></button></>)}{isPast && <span title={t('past_edit_forbidden')} className="text-slate-300 cursor-not-allowed"><Edit size={14}/></span>}</div></div>
                   <p className="text-slate-600 whitespace-pre-wrap leading-relaxed dark:text-slate-300">{h.text}</p>
-                  {((h.attachments || []).length > 0 || h.attachmentId) && (<div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">{h.attachmentId && <FileDisplay id={h.attachmentId} name={h.attachmentName} lang={lang} />}{(h.attachments || []).map((att: Attachment) => (<FileDisplay key={att.id} id={att.id} name={att.name} lang={lang} />))}</div>)}
+                  {((h.attachments || []).length > 0 || h.attachmentId) && (<div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">{h.attachmentId && <FileDisplay id={h.attachmentId} name={h.attachmentName} schoolId={h.schoolId || user.schoolId} lang={lang} />}{(h.attachments || []).map((att: Attachment) => (<FileDisplay key={att.id} id={att.id} name={att.name} schoolId={h.schoolId || user.schoolId} lang={lang} />))}</div>)}
                </Card>
              )})}
            </div>

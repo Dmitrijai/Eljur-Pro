@@ -1,4 +1,3 @@
-
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -7,22 +6,21 @@ import {
   updatePassword,
   UserCredential 
 } from 'firebase/auth';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   getFirestore, 
   doc, 
   setDoc, 
   getDoc, 
+  getDocFromServer,
   onSnapshot, 
   collection, 
   getDocs, 
   deleteDoc,
-  writeBatch,
   setLogLevel,
   Firestore 
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { AppState, Asset } from '../types';
+import { AppState, Asset, User } from '../types';
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
@@ -36,12 +34,58 @@ try {
 const dbId = (firebaseConfig as any).firestoreDatabaseId;
 export const db: Firestore = dbId && dbId !== '(default)' ? getFirestore(app, dbId) : getFirestore(app);
 export const auth = getAuth(app);
-export const storage = getStorage(app);
+
+// Validate connection to Firestore on boot
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'schools', 'school_1', 'publicConfig', 'creatorGate'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration.');
+    }
+  }
+}
+testConnection();
 
 const DB_NAME = 'ElZhurDB_v9';
 const DB_VERSION = 3;
 const STORE_ASSETS = 'assets';
 const STORE_SCHOOL_CACHE = 'school_cache';
+
+// Active user context for role-aware Firestore writes
+interface SessionUserContext {
+  id: string;
+  schoolId: string;
+  role: string;
+  employeePermissions?: any;
+}
+
+let currentSessionUser: SessionUserContext | null = null;
+
+export const setCurrentSessionUser = (user: User | null) => {
+  if (!user) {
+    currentSessionUser = null;
+    return;
+  }
+  currentSessionUser = {
+    id: user.id,
+    schoolId: user.schoolId || 'school_1',
+    role: user.role,
+    employeePermissions: user.employeePermissions
+  };
+};
+
+// Track serialized document snapshots per path so we only write documents that actually changed
+const docSnapshots = new Map<string, string>();
+
+const stableSerialize = (obj: any): string => {
+  if (obj === undefined) return '';
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return '';
+  }
+};
 
 /**
  * Synchronizes a user's Firebase Auth UID to their school and role mapping.
@@ -50,7 +94,7 @@ const STORE_SCHOOL_CACHE = 'school_cache';
 export const syncUserAuthUidMap = async (schoolId: string, userId: string, role: string, firebaseUid: string): Promise<void> => {
   try {
     await setDoc(doc(db, 'authUidMap', firebaseUid), {
-      schoolId,
+      schoolId: schoolId || 'school_1',
       userId,
       role,
       updatedAt: new Date().toISOString()
@@ -89,6 +133,8 @@ export const ensureFirebaseAuthSession = async (
       'teach123__eljur123',
       'pass123',
       'pass123__eljur123',
+      'emp123',
+      'emp123__eljur123',
       'admin123',
       'admin__eljur123',
       'admin12345',
@@ -103,7 +149,6 @@ export const ensureFirebaseAuthSession = async (
     for (const pwd of passwordsToTry) {
       try {
         const userCred = await signInWithEmailAndPassword(auth, virtualEmail, pwd);
-        // Synchronize password to preferred if different
         if (pwd !== formatPwd(preferredPassword) && auth.currentUser) {
           try {
             await updatePassword(auth.currentUser, formatPwd(preferredPassword));
@@ -116,7 +161,7 @@ export const ensureFirebaseAuthSession = async (
         break;
       } catch (err: any) {
         if (err.code === 'auth/user-not-found') {
-          break; // User does not exist, go straight to creation
+          break;
         }
       }
     }
@@ -127,7 +172,6 @@ export const ensureFirebaseAuthSession = async (
         cred = await createUserWithEmailAndPassword(auth, virtualEmail, formatPwd(preferredPassword));
       } catch (createErr: any) {
         // 3. If email is already in use with an unrecoverable password, create an alternative alias email
-        // This guarantees the user is NEVER locked out while maintaining full valid Firebase Auth UID
         if (createErr.code === 'auth/email-already-in-use') {
           const uniqueSuffix = Math.random().toString(36).substring(2, 7);
           const aliasEmail = virtualEmail.replace('@', `_${uniqueSuffix}@`);
@@ -147,18 +191,62 @@ export const ensureFirebaseAuthSession = async (
   return cred!;
 };
 
+/**
+ * Fetches users across schools from Firestore during pre-login authentication
+ * when a user logs in on a fresh device/browser that doesn't have the user list cached yet.
+ */
+export const fetchUsersForLoginLookup = async (): Promise<User[]> => {
+  try {
+    if (!auth.currentUser) {
+      await ensureFirebaseAuthSession('login_lookup@school1.eljur.org', 'eljur_lookup_123456');
+    }
+    const schoolIds = new Set<string>(['school_1']);
+    const lastSchoolId = localStorage.getItem('eljur_active_school_id');
+    if (lastSchoolId && lastSchoolId !== 'global') {
+      schoolIds.add(lastSchoolId);
+    }
+    try {
+      const schoolsSnap = await getDocs(collection(db, 'schools'));
+      schoolsSnap.docs.forEach(d => {
+        if (d.id && d.id !== 'global') schoolIds.add(d.id);
+      });
+    } catch {
+      // fallback to known schoolIds
+    }
+
+    const discoveredUsers: User[] = [];
+    for (const sId of Array.from(schoolIds)) {
+      try {
+        const uSnap = await getDocs(collection(db, 'schools', sId, 'users'));
+        uSnap.docs.forEach(d => {
+          const data = d.data() as User;
+          if (data && data.id) {
+            discoveredUsers.push({ ...data, schoolId: data.schoolId || sId });
+          }
+        });
+      } catch {
+        // ignore individual school read error
+      }
+    }
+    return discoveredUsers;
+  } catch (e) {
+    console.warn('Pre-login user lookup skipped:', e);
+    return [];
+  }
+};
+
 export const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = (e: IDBVersionChangeEvent) => {
-      const db = (e.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_ASSETS)) {
-        db.createObjectStore(STORE_ASSETS, { keyPath: 'key' });
+      const idb = (e.target as IDBOpenDBRequest).result;
+      if (!idb.objectStoreNames.contains(STORE_ASSETS)) {
+        idb.createObjectStore(STORE_ASSETS, { keyPath: 'key' });
       }
-      if (!db.objectStoreNames.contains(STORE_SCHOOL_CACHE)) {
-        db.createObjectStore(STORE_SCHOOL_CACHE, { keyPath: 'schoolId' });
+      if (!idb.objectStoreNames.contains(STORE_SCHOOL_CACHE)) {
+        idb.createObjectStore(STORE_SCHOOL_CACHE, { keyPath: 'schoolId' });
       }
     };
   });
@@ -174,7 +262,6 @@ export const saveSchoolCache = async (schoolId: string, state: any): Promise<voi
     await new Promise<void>((resolve, reject) => {
       const tx = localDb.transaction(STORE_SCHOOL_CACHE, 'readwrite');
       const store = tx.objectStore(STORE_SCHOOL_CACHE);
-      // Strip passwords before persisting to disk
       const cleanUsers = (state.users || []).map((u: any) => {
         const cu = { ...u };
         delete cu.password;
@@ -238,11 +325,57 @@ export const clearSchoolCache = async (schoolId?: string): Promise<void> => {
   }
 };
 
-export const saveAsset = async (id: string, name: string, type: string, blob: Blob, schoolId: string = 'global'): Promise<void> => {
-  const targetSchoolId = schoolId || 'global';
+const blobToDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+const dataUrlToBlob = async (dataUrl: string, fallbackType: string = 'application/octet-stream'): Promise<Blob> => {
+  try {
+    const res = await fetch(dataUrl);
+    return await res.blob();
+  } catch {
+    const parts = dataUrl.split(',');
+    const mimeMatch = parts[0]?.match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : fallbackType;
+    const bstr = atob(parts[1] || '');
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  }
+};
+
+const CHUNK_CHAR_SIZE = 650 * 1024; // ~650KB per Firestore document chunk (well within 1MiB limit)
+
+/**
+ * Saves an attachment or font asset directly to IndexedDB + Firestore (with chunking for larger files).
+ * Completely avoids Firebase Storage requests to prevent CORS errors on GitHub Pages.
+ */
+export const saveAsset = async (
+  id: string,
+  name: string,
+  type: string,
+  blob: Blob,
+  schoolId?: string
+): Promise<void> => {
+  const resolvedSchoolId =
+    (schoolId && schoolId !== 'global')
+      ? schoolId
+      : (currentSessionUser?.schoolId && currentSessionUser.schoolId !== 'global')
+      ? currentSessionUser.schoolId
+      : (localStorage.getItem('eljur_active_school_id') || 'school_1');
+
+  const targetSchoolId = schoolId === 'global' ? 'global' : resolvedSchoolId;
   const key = `${targetSchoolId}__${id}`;
 
-  // 1. Fast local cache in IndexedDB with tenant scoped key
+  // 1. Fast local cache in IndexedDB
   try {
     const localDb = await openDB();
     await new Promise<void>((resolve, reject) => {
@@ -257,62 +390,90 @@ export const saveAsset = async (id: string, name: string, type: string, blob: Bl
     console.warn('Local asset save failed:', e);
   }
 
-  // 2. Primary Remote Storage: Firebase Storage (if available/provisioned)
+  // 2. Direct Firestore Storage (chunked automatically if DataURL > 650KB, up to ~10MB)
   try {
-    const sRef = storageRef(storage, `schools/${targetSchoolId}/attachments/${id}`);
-    await uploadBytes(sRef, blob, { contentType: type });
-    const downloadUrl = await getDownloadURL(sRef);
-    await setDoc(doc(db, 'schools', targetSchoolId, 'attachments', id), {
-      id,
-      schoolId: targetSchoolId,
-      name,
-      type,
-      url: downloadUrl,
-      size: blob.size,
-      updatedAt: new Date().toISOString()
-    });
-    return;
-  } catch (storageErr) {
-    // Graceful fallback to Firestore document storage if Firebase Storage bucket is not activated
-  }
+    if (blob.size > 10 * 1024 * 1024) {
+      console.warn('Asset exceeds 10MB cloud sync limit; stored in local IndexedDB only.');
+      return;
+    }
 
-  // 3. Fallback Remote Storage: Firestore Document (if within document size limit < 900KB)
-  try {
-    if (blob.size < 900 * 1024) {
-      const reader = new FileReader();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+    const dataUrl = await blobToDataUrl(blob);
+
+    if (dataUrl.length <= CHUNK_CHAR_SIZE) {
       await setDoc(doc(db, 'schools', targetSchoolId, 'attachments', id), {
         id,
         schoolId: targetSchoolId,
         name,
-        type,
+        type: type || 'application/octet-stream',
         data: dataUrl,
+        chunkCount: 0,
+        size: blob.size,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      const chunks: string[] = [];
+      for (let i = 0; i < dataUrl.length; i += CHUNK_CHAR_SIZE) {
+        chunks.push(dataUrl.slice(i, i + CHUNK_CHAR_SIZE));
+      }
+      // Save chunk documents in parallel
+      await Promise.all(
+        chunks.map((chunkData, idx) =>
+          setDoc(doc(db, 'schools', targetSchoolId, 'attachments', `${id}_chunk_${idx}`), {
+            id: `${id}_chunk_${idx}`,
+            parentId: id,
+            schoolId: targetSchoolId,
+            chunkIndex: idx,
+            data: chunkData,
+            updatedAt: new Date().toISOString()
+          })
+        )
+      );
+      // Save main metadata document
+      await setDoc(doc(db, 'schools', targetSchoolId, 'attachments', id), {
+        id,
+        schoolId: targetSchoolId,
+        name,
+        type: type || 'application/octet-stream',
+        chunkCount: chunks.length,
         size: blob.size,
         updatedAt: new Date().toISOString()
       });
     }
   } catch (e) {
-    console.warn('Remote attachment sync failed:', e);
+    console.warn('Remote attachment sync to Firestore failed:', e);
   }
 };
 
-export const getAsset = async (id: string, schoolId: string = 'global'): Promise<Asset | null> => {
-  const targetSchoolId = schoolId || 'global';
-  const key = `${targetSchoolId}__${id}`;
+export const getAsset = async (id: string, schoolId?: string): Promise<Asset | null> => {
+  const candidateSchools = Array.from(
+    new Set(
+      [
+        schoolId,
+        currentSessionUser?.schoolId,
+        localStorage.getItem('eljur_active_school_id') || undefined,
+        'school_1',
+        'global'
+      ].filter((s): s is string => !!s)
+    )
+  );
 
-  // 1. Check local IndexedDB first
+  // 1. Check local IndexedDB first (both exact key match and id scan)
   try {
     const localDb = await openDB();
-    const localAsset = await new Promise<any | null>((resolve, reject) => {
+    const localAsset = await new Promise<any | null>((resolve) => {
       const tx = localDb.transaction(STORE_ASSETS, 'readonly');
       const store = tx.objectStore(STORE_ASSETS);
-      const request = store.get(key);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || null);
+      const allReq = store.getAll();
+      allReq.onerror = () => resolve(null);
+      allReq.onsuccess = () => {
+        const all = allReq.result || [];
+        for (const sId of candidateSchools) {
+          const exact = all.find((item: any) => item.key === `${sId}__${id}`);
+          if (exact && exact.blob) return resolve(exact);
+        }
+        const byId = all.find((item: any) => item.id === id && item.blob);
+        resolve(byId || null);
+      };
       tx.oncomplete = () => localDb.close();
     });
     if (localAsset && localAsset.blob) {
@@ -322,49 +483,81 @@ export const getAsset = async (id: string, schoolId: string = 'global'): Promise
     console.warn('Local asset get failed:', e);
   }
 
-  // 2. Try Firebase Storage directly
-  try {
-    const sRef = storageRef(storage, `schools/${targetSchoolId}/attachments/${id}`);
-    const downloadUrl = await getDownloadURL(sRef);
-    const res = await fetch(downloadUrl);
-    const blob = await res.blob();
-    const asset: Asset = { id, name: id, type: blob.type, blob };
-    // Cache locally
+  // 2. Fetch from Firestore attachments subcollection across candidate schools
+  for (const candSchool of candidateSchools) {
     try {
-      const localDb = await openDB();
-      const tx = localDb.transaction(STORE_ASSETS, 'readwrite');
-      tx.objectStore(STORE_ASSETS).put({ key, id, schoolId: targetSchoolId, name: id, type: blob.type, blob });
-      tx.oncomplete = () => localDb.close();
-    } catch {}
-    return asset;
-  } catch (storageErr) {
-    // Continue to Firestore fallback
-  }
+      const docSnap = await getDoc(doc(db, 'schools', candSchool, 'attachments', id));
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        let dataUrl: string | null = d.data || null;
 
-  // 3. Fallback to Firestore subcollection if not in Firebase Storage
-  try {
-    const docSnap = await getDoc(doc(db, 'schools', targetSchoolId, 'attachments', id));
-    if (docSnap.exists()) {
-      const d = docSnap.data();
-      const fetchUrl = d.url || d.data;
-      if (fetchUrl) {
-        const res = await fetch(fetchUrl);
-        const blob = await res.blob();
-        const asset: Asset = { id: d.id, name: d.name, type: d.type, blob };
-        try {
-          const localDb = await openDB();
-          const tx = localDb.transaction(STORE_ASSETS, 'readwrite');
-          tx.objectStore(STORE_ASSETS).put({ key, id, schoolId: targetSchoolId, name: d.name, type: d.type, blob });
-          tx.oncomplete = () => localDb.close();
-        } catch {}
-        return asset;
+        if (!dataUrl && typeof d.chunkCount === 'number' && d.chunkCount > 0) {
+          const chunkSnaps = await Promise.all(
+            Array.from({ length: d.chunkCount }).map((_, idx) =>
+              getDoc(doc(db, 'schools', candSchool, 'attachments', `${id}_chunk_${idx}`))
+            )
+          );
+          if (chunkSnaps.every(cs => cs.exists())) {
+            dataUrl = chunkSnaps.map(cs => cs.data()?.data || '').join('');
+          }
+        }
+
+        if (dataUrl) {
+          const blob = await dataUrlToBlob(dataUrl, d.type);
+          const asset: Asset = { id: d.id || id, name: d.name || id, type: d.type || blob.type, blob };
+          try {
+            const localDb = await openDB();
+            const tx = localDb.transaction(STORE_ASSETS, 'readwrite');
+            tx.objectStore(STORE_ASSETS).put({
+              key: `${candSchool}__${id}`,
+              id: asset.id,
+              schoolId: candSchool,
+              name: asset.name,
+              type: asset.type,
+              blob
+            });
+            tx.oncomplete = () => localDb.close();
+          } catch {}
+          return asset;
+        }
       }
+    } catch {
+      // try next candidate schoolId
     }
-  } catch (e) {
-    console.warn('Remote asset get failed:', e);
   }
 
   return null;
+};
+
+export const deleteAsset = async (id: string, schoolId?: string): Promise<void> => {
+  try {
+    const localDb = await openDB();
+    await new Promise<void>((resolve) => {
+      const tx = localDb.transaction(STORE_ASSETS, 'readwrite');
+      const store = tx.objectStore(STORE_ASSETS);
+      const allReq = store.getAll();
+      allReq.onsuccess = () => {
+        const items = allReq.result || [];
+        items.forEach((item: any) => {
+          if (item.id === id || item.key === id) {
+            store.delete(item.key);
+          }
+        });
+        resolve();
+      };
+      allReq.onerror = () => resolve();
+      tx.oncomplete = () => localDb.close();
+    });
+  } catch (e) {
+    console.warn('Local asset delete failed:', e);
+  }
+
+  const targetSchoolId = schoolId || currentSessionUser?.schoolId || 'school_1';
+  for (const sId of Array.from(new Set([targetSchoolId, 'global', 'school_1']))) {
+    try {
+      await deleteDoc(doc(db, 'schools', sId, 'attachments', id));
+    } catch {}
+  }
 };
 
 export const getAllAssets = async (): Promise<Asset[]> => {
@@ -394,7 +587,17 @@ export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: any;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
 }
 
 type DatabaseErrorListener = (message: string) => void;
@@ -412,6 +615,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
       emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
     },
     operationType,
     path
@@ -428,7 +637,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 export const saveSchoolMetadata = async (schoolId: string, schoolData: any): Promise<void> => {
   const docPath = `schools/${schoolId}`;
   try {
-    await setDoc(doc(db, 'schools', schoolId), JSON.parse(JSON.stringify(schoolData)), { merge: true });
+    const clean = JSON.parse(JSON.stringify(schoolData));
+    await setDoc(doc(db, 'schools', schoolId), clean, { merge: true });
+    docSnapshots.set(docPath, stableSerialize(clean));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
   }
@@ -443,7 +654,6 @@ export interface PublicCreatorGateConfig {
 }
 
 export const getPublicCreatorGate = async (schoolId: string = 'school_1'): Promise<PublicCreatorGateConfig | null> => {
-  const docPath = `schools/${schoolId}/publicConfig/creatorGate`;
   try {
     const snap = await getDoc(doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'));
     if (snap.exists()) {
@@ -467,15 +677,16 @@ export const savePublicCreatorGate = async (
   schoolId: string = 'school_1',
   config: Partial<PublicCreatorGateConfig>
 ): Promise<void> => {
-  const docPath = `schools/${schoolId}/publicConfig/creatorGate`;
+  const targetSchoolId = schoolId && schoolId !== 'global' ? schoolId : 'school_1';
+  const docPath = `schools/${targetSchoolId}/publicConfig/creatorGate`;
   try {
-    const payload = {
+    const payload = JSON.parse(JSON.stringify({
       ...config,
       updatedAt: new Date().toISOString()
-    };
-    await setDoc(doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'), payload, { merge: true });
+    }));
+    await setDoc(doc(db, 'schools', targetSchoolId, 'publicConfig', 'creatorGate'), payload, { merge: true });
     try {
-      localStorage.setItem(`eljur_gate_${schoolId}`, JSON.stringify(payload));
+      localStorage.setItem(`eljur_gate_${targetSchoolId}`, JSON.stringify(payload));
     } catch {}
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
@@ -483,22 +694,34 @@ export const savePublicCreatorGate = async (
 };
 
 export const saveSchoolEntity = async (schoolId: string, collName: string, entityId: string, data: any): Promise<void> => {
-  const docPath = `schools/${schoolId}/${collName}/${entityId}`;
+  const targetSchoolId = (schoolId && schoolId !== 'global') ? schoolId : 'school_1';
+  const docPath = `schools/${targetSchoolId}/${collName}/${entityId}`;
   try {
     const cleanData = JSON.parse(JSON.stringify(data));
     if (collName === 'users') {
       delete cleanData.password;
     }
-    await setDoc(doc(db, 'schools', schoolId, collName, entityId), cleanData, { merge: true });
+    await setDoc(doc(db, 'schools', targetSchoolId, collName, entityId), cleanData, { merge: true });
+    docSnapshots.set(docPath, stableSerialize(cleanData));
+    const synced = getOrCreateSyncedIds(targetSchoolId);
+    if ((synced as any)[collName] instanceof Set) {
+      (synced as any)[collName].add(entityId);
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
   }
 };
 
 export const deleteSchoolEntity = async (schoolId: string, collName: string, entityId: string): Promise<void> => {
-  const docPath = `schools/${schoolId}/${collName}/${entityId}`;
+  const targetSchoolId = (schoolId && schoolId !== 'global') ? schoolId : 'school_1';
+  const docPath = `schools/${targetSchoolId}/${collName}/${entityId}`;
   try {
-    await deleteDoc(doc(db, 'schools', schoolId, collName, entityId));
+    await deleteDoc(doc(db, 'schools', targetSchoolId, collName, entityId));
+    docSnapshots.delete(docPath);
+    const synced = getOrCreateSyncedIds(targetSchoolId);
+    if ((synced as any)[collName] instanceof Set) {
+      (synced as any)[collName].delete(entityId);
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, docPath);
   }
@@ -507,7 +730,9 @@ export const deleteSchoolEntity = async (schoolId: string, collName: string, ent
 export const saveSchoolSchedule = async (schoolId: string, classKey: string, days: any): Promise<void> => {
   const docPath = `schools/${schoolId}/schedules/${classKey}`;
   try {
-    await setDoc(doc(db, 'schools', schoolId, 'schedules', classKey), { classKey, days: JSON.parse(JSON.stringify(days)) });
+    const payload = { id: classKey, classKey, days: JSON.parse(JSON.stringify(days)) };
+    await setDoc(doc(db, 'schools', schoolId, 'schedules', classKey), payload);
+    docSnapshots.set(docPath, stableSerialize({ id: classKey, days: payload.days }));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
   }
@@ -516,7 +741,9 @@ export const saveSchoolSchedule = async (schoolId: string, classKey: string, day
 export const saveSchoolGrades = async (schoolId: string, gradeKey: string, entries: any): Promise<void> => {
   const docPath = `schools/${schoolId}/grades/${gradeKey}`;
   try {
-    await setDoc(doc(db, 'schools', schoolId, 'grades', gradeKey), { key: gradeKey, entries: JSON.parse(JSON.stringify(entries)) });
+    const payload = { id: gradeKey, key: gradeKey, entries: JSON.parse(JSON.stringify(entries)) };
+    await setDoc(doc(db, 'schools', schoolId, 'grades', gradeKey), payload);
+    docSnapshots.set(docPath, stableSerialize({ id: gradeKey, entries: payload.entries }));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
   }
@@ -525,7 +752,9 @@ export const saveSchoolGrades = async (schoolId: string, gradeKey: string, entri
 export const saveSchoolFinalGrades = async (schoolId: string, classKey: string, entries: any): Promise<void> => {
   const docPath = `schools/${schoolId}/finalGrades/${classKey}`;
   try {
-    await setDoc(doc(db, 'schools', schoolId, 'finalGrades', classKey), { classKey, entries: JSON.parse(JSON.stringify(entries)) });
+    const payload = { id: classKey, classKey, entries: JSON.parse(JSON.stringify(entries)) };
+    await setDoc(doc(db, 'schools', schoolId, 'finalGrades', classKey), payload);
+    docSnapshots.set(docPath, stableSerialize({ id: classKey, entries: payload.entries }));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
   }
@@ -584,147 +813,185 @@ export const subscribeToSchool = (
 
   const handleSubError = (err: unknown, op: OperationType, path: string) => {
     if (isCancelled) return;
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('insufficient permissions') || msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
-      safeUnsubAll();
-    }
-    handleFirestoreError(err, op, path);
+    console.warn(`Subscription warning on ${path}:`, err);
   };
 
   const startListeners = () => {
     if (isCancelled || !auth.currentUser) return;
 
     // 1. School Root Document
-  const unsubSchool = onSnapshot(doc(db, 'schools', schoolId), (snap) => {
-    if (isCancelled) return;
-    if (snap.exists()) {
-      const data = snap.data();
-      const defaultCurriculumSubjects = [
-        'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
-        'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
-      ];
-      const schoolSubjects = (Array.isArray(data.subjects) && data.subjects.length > 0)
-        ? data.subjects
-        : defaultCurriculumSubjects;
-      const schoolClasses = (Array.isArray(data.classes) && data.classes.length > 0)
-        ? data.classes
-        : [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
+    const unsubSchool = onSnapshot(doc(db, 'schools', schoolId), (snap) => {
+      if (isCancelled) return;
+      if (snap.exists()) {
+        const data = snap.data();
+        const defaultCurriculumSubjects = [
+          'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
+          'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
+        ];
+        const schoolSubjects = (Array.isArray(data.subjects) && data.subjects.length > 0)
+          ? data.subjects
+          : defaultCurriculumSubjects;
+        const schoolClasses = (Array.isArray(data.classes) && data.classes.length > 0)
+          ? data.classes
+          : [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
 
-      onUpdate({
-        schools: [{
+        docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
           name: data.name || 'Школа №1',
           directorId: data.directorId || 'u_dir',
           classes: schoolClasses,
-          subjects: schoolSubjects
-        }],
-        classes: schoolClasses,
-        subjects: schoolSubjects,
-        gradingSystem: data.gradingSystem,
-        gradeTypes: data.gradeTypes,
-        subjectRequirements: data.subjectRequirements,
-        scheduleSettings: data.scheduleSettings,
-        settings: data.settings
+          subjects: schoolSubjects,
+          gradingSystem: data.gradingSystem,
+          gradeTypes: data.gradeTypes,
+          subjectRequirements: data.subjectRequirements,
+          scheduleSettings: data.scheduleSettings,
+          settings: data.settings
+        }));
+
+        onUpdate({
+          schools: [{
+            id: data.id || schoolId,
+            name: data.name || 'Школа №1',
+            directorId: data.directorId || 'u_dir',
+            classes: schoolClasses,
+            subjects: schoolSubjects
+          }],
+          classes: schoolClasses,
+          subjects: schoolSubjects,
+          gradingSystem: data.gradingSystem,
+          gradeTypes: data.gradeTypes,
+          subjectRequirements: data.subjectRequirements,
+          scheduleSettings: data.scheduleSettings,
+          settings: data.settings
+        });
+      }
+    }, (err) => handleSubError(err, OperationType.GET, `schools/${schoolId}`));
+    unsubs.push(unsubSchool);
+
+    // 2. Users Subcollection
+    const unsubUsers = onSnapshot(collection(db, 'schools', schoolId, 'users'), (snap) => {
+      if (isCancelled) return;
+      synced.users = new Set(snap.docs.map(d => d.id));
+      const users = snap.docs.map(d => {
+        const uData = d.data() as any;
+        const cleanDoc = { ...uData };
+        delete cleanDoc.password;
+        docSnapshots.set(`schools/${schoolId}/users/${d.id}`, stableSerialize(cleanDoc));
+        return uData;
       });
-    }
-  }, (err) => handleSubError(err, OperationType.GET, `schools/${schoolId}`));
-  unsubs.push(unsubSchool);
+      onUpdate({ users });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/users`));
+    unsubs.push(unsubUsers);
 
-  // 2. Users Subcollection
-  const unsubUsers = onSnapshot(collection(db, 'schools', schoolId, 'users'), (snap) => {
-    if (isCancelled) return;
-    synced.users = new Set(snap.docs.map(d => d.id));
-    const users = snap.docs.map(d => d.data() as any);
-    onUpdate({ users });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/users`));
-  unsubs.push(unsubUsers);
+    // 3. Schedules Subcollection
+    const unsubSchedules = onSnapshot(collection(db, 'schools', schoolId, 'schedules'), (snap) => {
+      if (isCancelled) return;
+      synced.schedules = new Set(snap.docs.map(d => d.id));
+      const schedules: Record<string, any> = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const key = `${schoolId}__${d.id}`;
+        schedules[key] = data.days || {};
+        docSnapshots.set(`schools/${schoolId}/schedules/${d.id}`, stableSerialize({ id: d.id, days: data.days || {} }));
+      });
+      onUpdate({ schedules });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/schedules`));
+    unsubs.push(unsubSchedules);
 
-  // 3. Schedules Subcollection
-  const unsubSchedules = onSnapshot(collection(db, 'schools', schoolId, 'schedules'), (snap) => {
-    if (isCancelled) return;
-    synced.schedules = new Set(snap.docs.map(d => d.id));
-    const schedules: Record<string, any> = {};
-    snap.docs.forEach(d => {
-      const data = d.data();
-      const key = `${schoolId}__${d.id}`;
-      schedules[key] = data.days || {};
-    });
-    onUpdate({ schedules });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/schedules`));
-  unsubs.push(unsubSchedules);
+    // 4. Grades Subcollection
+    const unsubGrades = onSnapshot(collection(db, 'schools', schoolId, 'grades'), (snap) => {
+      if (isCancelled) return;
+      synced.grades = new Set(snap.docs.map(d => d.id));
+      const grades: Record<string, any> = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const key = `${schoolId}__${d.id}`;
+        grades[key] = data.entries || [];
+        docSnapshots.set(`schools/${schoolId}/grades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || [] }));
+      });
+      onUpdate({ grades });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/grades`));
+    unsubs.push(unsubGrades);
 
-  // 4. Grades Subcollection
-  const unsubGrades = onSnapshot(collection(db, 'schools', schoolId, 'grades'), (snap) => {
-    if (isCancelled) return;
-    synced.grades = new Set(snap.docs.map(d => d.id));
-    const grades: Record<string, any> = {};
-    snap.docs.forEach(d => {
-      const data = d.data();
-      const key = `${schoolId}__${d.id}`;
-      grades[key] = data.entries || [];
-    });
-    onUpdate({ grades });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/grades`));
-  unsubs.push(unsubGrades);
+    // 5. Final Grades Subcollection
+    const unsubFinalGrades = onSnapshot(collection(db, 'schools', schoolId, 'finalGrades'), (snap) => {
+      if (isCancelled) return;
+      synced.finalGrades = new Set(snap.docs.map(d => d.id));
+      const finalGrades: Record<string, any> = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const key = `${schoolId}__${d.id}`;
+        finalGrades[key] = data.entries || [];
+        docSnapshots.set(`schools/${schoolId}/finalGrades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || [] }));
+      });
+      onUpdate({ finalGrades });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/finalGrades`));
+    unsubs.push(unsubFinalGrades);
 
-  // 5. Final Grades Subcollection
-  const unsubFinalGrades = onSnapshot(collection(db, 'schools', schoolId, 'finalGrades'), (snap) => {
-    if (isCancelled) return;
-    synced.finalGrades = new Set(snap.docs.map(d => d.id));
-    const finalGrades: Record<string, any> = {};
-    snap.docs.forEach(d => {
-      const data = d.data();
-      const key = `${schoolId}__${d.id}`;
-      finalGrades[key] = data.entries || [];
-    });
-    onUpdate({ finalGrades });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/finalGrades`));
-  unsubs.push(unsubFinalGrades);
+    // 6. Homework Subcollection
+    const unsubHomework = onSnapshot(collection(db, 'schools', schoolId, 'homework'), (snap) => {
+      if (isCancelled) return;
+      synced.homework = new Set(snap.docs.map(d => d.id));
+      const homework = snap.docs.map(d => {
+        const hwData = d.data() as any;
+        docSnapshots.set(`schools/${schoolId}/homework/${d.id}`, stableSerialize({ ...hwData, schoolId }));
+        return hwData;
+      });
+      onUpdate({ homework });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/homework`));
+    unsubs.push(unsubHomework);
 
-  // 6. Homework Subcollection
-  const unsubHomework = onSnapshot(collection(db, 'schools', schoolId, 'homework'), (snap) => {
-    if (isCancelled) return;
-    synced.homework = new Set(snap.docs.map(d => d.id));
-    const homework = snap.docs.map(d => d.data() as any);
-    onUpdate({ homework });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/homework`));
-  unsubs.push(unsubHomework);
+    // 7. Messages Subcollection
+    const unsubMessages = onSnapshot(collection(db, 'schools', schoolId, 'messages'), (snap) => {
+      if (isCancelled) return;
+      synced.messages = new Set(snap.docs.map(d => d.id));
+      const messages = snap.docs.map(d => {
+        const msgData = d.data() as any;
+        docSnapshots.set(`schools/${schoolId}/messages/${d.id}`, stableSerialize({ ...msgData, schoolId }));
+        return msgData;
+      });
+      onUpdate({ messages });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/messages`));
+    unsubs.push(unsubMessages);
 
-  // 7. Messages Subcollection
-  const unsubMessages = onSnapshot(collection(db, 'schools', schoolId, 'messages'), (snap) => {
-    if (isCancelled) return;
-    synced.messages = new Set(snap.docs.map(d => d.id));
-    const messages = snap.docs.map(d => d.data() as any);
-    onUpdate({ messages });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/messages`));
-  unsubs.push(unsubMessages);
+    // 8. Announcements Subcollection
+    const unsubAnnouncements = onSnapshot(collection(db, 'schools', schoolId, 'announcements'), (snap) => {
+      if (isCancelled) return;
+      synced.announcements = new Set(snap.docs.map(d => d.id));
+      const announcements = snap.docs.map(d => {
+        const annData = d.data() as any;
+        docSnapshots.set(`schools/${schoolId}/announcements/${d.id}`, stableSerialize({ ...annData, schoolId }));
+        return annData;
+      });
+      onUpdate({ announcements });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/announcements`));
+    unsubs.push(unsubAnnouncements);
 
-  // 8. Announcements Subcollection
-  const unsubAnnouncements = onSnapshot(collection(db, 'schools', schoolId, 'announcements'), (snap) => {
-    if (isCancelled) return;
-    synced.announcements = new Set(snap.docs.map(d => d.id));
-    const announcements = snap.docs.map(d => d.data() as any);
-    onUpdate({ announcements });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/announcements`));
-  unsubs.push(unsubAnnouncements);
+    // 9. Teacher Assignments Subcollection
+    const unsubAssignments = onSnapshot(collection(db, 'schools', schoolId, 'teacherAssignments'), (snap) => {
+      if (isCancelled) return;
+      synced.teacherAssignments = new Set(snap.docs.map(d => d.id));
+      const teacherAssignments = snap.docs.map(d => {
+        const taData = d.data() as any;
+        docSnapshots.set(`schools/${schoolId}/teacherAssignments/${d.id}`, stableSerialize({ ...taData, schoolId }));
+        return taData;
+      });
+      onUpdate({ teacherAssignments });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/teacherAssignments`));
+    unsubs.push(unsubAssignments);
 
-  // 9. Teacher Assignments Subcollection
-  const unsubAssignments = onSnapshot(collection(db, 'schools', schoolId, 'teacherAssignments'), (snap) => {
-    if (isCancelled) return;
-    synced.teacherAssignments = new Set(snap.docs.map(d => d.id));
-    const teacherAssignments = snap.docs.map(d => d.data() as any);
-    onUpdate({ teacherAssignments });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/teacherAssignments`));
-  unsubs.push(unsubAssignments);
-
-  // 10. Student Groups Subcollection
-  const unsubGroups = onSnapshot(collection(db, 'schools', schoolId, 'studentGroups'), (snap) => {
-    if (isCancelled) return;
-    synced.studentGroups = new Set(snap.docs.map(d => d.id));
-    const studentGroups = snap.docs.map(d => d.data() as any);
-    onUpdate({ studentGroups });
-  }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/studentGroups`));
-  unsubs.push(unsubGroups);
+    // 10. Student Groups Subcollection
+    const unsubGroups = onSnapshot(collection(db, 'schools', schoolId, 'studentGroups'), (snap) => {
+      if (isCancelled) return;
+      synced.studentGroups = new Set(snap.docs.map(d => d.id));
+      const studentGroups = snap.docs.map(d => {
+        const sgData = d.data() as any;
+        docSnapshots.set(`schools/${schoolId}/studentGroups/${d.id}`, stableSerialize({ ...sgData, schoolId }));
+        return sgData;
+      });
+      onUpdate({ studentGroups });
+    }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/studentGroups`));
+    unsubs.push(unsubGroups);
   };
 
   if (auth.currentUser) {
@@ -750,7 +1017,7 @@ export const subscribeToAllSchools = (callback: (schools: any[]) => void): (() =
     unsub = onSnapshot(collection(db, 'schools'), (snap) => {
       const schools = snap.docs.map(d => d.data());
       callback(schools);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'schools'));
+    }, (err) => console.warn('subscribeToAllSchools warning:', err));
   };
 
   if (auth.currentUser) {
@@ -769,184 +1036,310 @@ export const subscribeToAllSchools = (callback: (schools: any[]) => void): (() =
   };
 };
 
-// Saves changes per school exclusively to subcollections with diff-and-delete tracking
+/**
+ * Role-aware differential state synchronizer.
+ * Only writes documents that actually changed compared to docSnapshots,
+ * and strictly respects the current user's role so unauthorized collections are never touched.
+ */
 export const saveSchoolState = async (schoolId: string, state: AppState): Promise<void> => {
+  if (!schoolId || schoolId === 'global') return;
   try {
     const plainState = JSON.parse(JSON.stringify(state));
-    const batch = writeBatch(db);
     const synced = getOrCreateSyncedIds(schoolId);
 
-    // Save/update school root document
-    const school = (plainState.schools || []).find((s: any) => s.id === schoolId) || plainState.schools?.[0];
-    if (school) {
-      batch.set(doc(db, 'schools', schoolId), {
-        id: school.id,
-        name: school.name,
-        directorId: school.directorId || 'u_dir',
-        classes: school.classes || plainState.classes || [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }],
-        subjects: school.subjects || plainState.subjects || [
-          'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
-          'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
-        ],
-        gradingSystem: plainState.schoolGradingSystems?.[schoolId] || plainState.gradingSystem,
-        gradeTypes: plainState.schoolGradeTypes?.[schoolId] || plainState.gradeTypes,
-        subjectRequirements: plainState.subjectRequirements,
-        scheduleSettings: plainState.schoolScheduleSettings?.[schoolId] || plainState.scheduleSettings,
-        settings: plainState.schoolsSettings?.[schoolId] || plainState.settings
-      }, { merge: true });
+    const role = currentSessionUser?.role || 'director';
+    const currentUserId = currentSessionUser?.id || '';
 
-      // Sync public creator gate configuration
-      const activeSettings = plainState.schoolsSettings?.[schoolId] || plainState.settings;
-      if (activeSettings) {
-        const gatePayload: any = {
-          secretKey: activeSettings.secretKey || 'Space',
-          secretCount: activeSettings.secretCount || 4,
-          updatedAt: new Date().toISOString()
+    const isDirectorOrCreator = role === 'creator' || role === 'director';
+    const isEmployee = role === 'employee';
+    const isTeacher = role === 'teacher';
+
+    const canWriteSchoolDoc = isDirectorOrCreator || isEmployee;
+    const canManageUsers = isDirectorOrCreator || isEmployee;
+    const canWriteSchedules = isDirectorOrCreator || isTeacher || isEmployee;
+    const canWriteGrades = isDirectorOrCreator || isTeacher || isEmployee;
+    const canWriteHomework = isDirectorOrCreator || isTeacher || isEmployee;
+    const canManageAnnouncements = isDirectorOrCreator || isEmployee;
+    const canManageLoadAndGroups = isDirectorOrCreator || isEmployee;
+
+    const writeOps: Promise<void>[] = [];
+
+    const queueSetIfChanged = (docRef: any, docPath: string, payload: any, merge: boolean = true) => {
+      const cleanPayload = JSON.parse(JSON.stringify(payload));
+      const serialized = stableSerialize(cleanPayload);
+      if (docSnapshots.get(docPath) === serialized) {
+        return; // Unchanged — skip write!
+      }
+      docSnapshots.set(docPath, serialized);
+      writeOps.push(
+        setDoc(docRef, cleanPayload, merge ? { merge: true } : {}).catch((err) => {
+          docSnapshots.delete(docPath);
+          handleFirestoreError(err, OperationType.WRITE, docPath);
+        })
+      );
+    };
+
+    const queueDelete = (docRef: any, docPath: string) => {
+      docSnapshots.delete(docPath);
+      writeOps.push(
+        deleteDoc(docRef).catch((err) => {
+          handleFirestoreError(err, OperationType.DELETE, docPath);
+        })
+      );
+    };
+
+    // 1. School Root Document & Creator Gate (only if Director, Creator, or Employee)
+    if (canWriteSchoolDoc) {
+      const school = (plainState.schools || []).find((s: any) => s.id === schoolId) || plainState.schools?.[0];
+      if (school) {
+        const schoolPayload = {
+          id: school.id || schoolId,
+          name: school.name || 'Школа №1',
+          directorId: school.directorId || 'u_dir',
+          classes: school.classes || plainState.classes || [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }],
+          subjects: school.subjects || plainState.subjects || [
+            'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
+            'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
+          ],
+          gradingSystem: plainState.schoolGradingSystems?.[schoolId] || plainState.gradingSystem,
+          gradeTypes: plainState.schoolGradeTypes?.[schoolId] || plainState.gradeTypes,
+          subjectRequirements: plainState.subjectRequirements,
+          scheduleSettings: plainState.schoolScheduleSettings?.[schoolId] || plainState.scheduleSettings,
+          settings: plainState.schoolsSettings?.[schoolId] || plainState.settings
         };
-        if (activeSettings.adminPasswordHash) gatePayload.adminPasswordHash = activeSettings.adminPasswordHash;
-        if (activeSettings.adminPasswordSalt) gatePayload.adminPasswordSalt = activeSettings.adminPasswordSalt;
-        batch.set(doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'), gatePayload, { merge: true });
+        queueSetIfChanged(doc(db, 'schools', schoolId), `schools/${schoolId}`, schoolPayload, true);
+
+        if (isDirectorOrCreator) {
+          const activeSettings = plainState.schoolsSettings?.[schoolId] || plainState.settings;
+          if (activeSettings) {
+            const gatePayload: any = {
+              secretKey: activeSettings.secretKey || 'Space',
+              secretCount: activeSettings.secretCount || 4
+            };
+            if (activeSettings.adminPasswordHash) gatePayload.adminPasswordHash = activeSettings.adminPasswordHash;
+            if (activeSettings.adminPasswordSalt) gatePayload.adminPasswordSalt = activeSettings.adminPasswordSalt;
+            queueSetIfChanged(
+              doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'),
+              `schools/${schoolId}/publicConfig/creatorGate`,
+              gatePayload,
+              true
+            );
+          }
+        }
       }
     }
 
-    // 1. Users diff & sync (strip password before saving)
-    const schoolUsers = (plainState.users || []).filter((u: any) => u.schoolId === schoolId || u.role === 'creator');
-    const currentActiveUserIds = new Set(schoolUsers.map((u: any) => u.id));
-    for (const prevId of synced.users) {
-      if (!currentActiveUserIds.has(prevId)) {
-        batch.delete(doc(db, 'schools', schoolId, 'users', prevId));
-        synced.users.delete(prevId);
+    // 2. Users diff & sync
+    const schoolUsers = (plainState.users || []).filter((u: any) => u.schoolId === schoolId && u.role !== 'creator');
+    if (canManageUsers) {
+      const currentActiveUserIds = new Set(schoolUsers.map((u: any) => u.id));
+      for (const prevId of Array.from(synced.users)) {
+        if (!currentActiveUserIds.has(prevId)) {
+          queueDelete(doc(db, 'schools', schoolId, 'users', prevId), `schools/${schoolId}/users/${prevId}`);
+          synced.users.delete(prevId);
+        }
       }
-    }
-    for (const u of schoolUsers) {
-      const userDoc = { ...u };
-      delete userDoc.password;
-      batch.set(doc(db, 'schools', schoolId, 'users', u.id), userDoc, { merge: true });
-      synced.users.add(u.id);
-    }
-
-    // 2. Schedules diff & sync (overwrite without merge so deleted days are purged)
-    const currentActiveScheduleKeys = new Set<string>();
-    for (const [k, days] of Object.entries(plainState.schedules || {})) {
-      if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
-        const classKey = k.includes('__') ? k.split('__')[1] : k;
-        currentActiveScheduleKeys.add(classKey);
-        batch.set(doc(db, 'schools', schoolId, 'schedules', classKey), { id: classKey, days: days as any });
-        synced.schedules.add(classKey);
+      for (const u of schoolUsers) {
+        const userDoc = { ...u };
+        delete userDoc.password;
+        queueSetIfChanged(doc(db, 'schools', schoolId, 'users', u.id), `schools/${schoolId}/users/${u.id}`, userDoc, true);
+        synced.users.add(u.id);
       }
-    }
-    for (const prevKey of synced.schedules) {
-      if (!currentActiveScheduleKeys.has(prevKey)) {
-        batch.delete(doc(db, 'schools', schoolId, 'schedules', prevKey));
-        synced.schedules.delete(prevKey);
+    } else if (currentUserId) {
+      // Non-admin user can only update their own user preferences (e.g. theme, language)
+      const selfUser = schoolUsers.find((u: any) => u.id === currentUserId);
+      if (selfUser && synced.users.has(currentUserId)) {
+        const userDoc = { ...selfUser };
+        delete userDoc.password;
+        queueSetIfChanged(doc(db, 'schools', schoolId, 'users', currentUserId), `schools/${schoolId}/users/${currentUserId}`, userDoc, true);
       }
     }
 
-    // 3. Grades diff & sync (overwrite without merge so cleared entries are purged)
-    const currentActiveGradeKeys = new Set<string>();
-    for (const [k, entries] of Object.entries(plainState.grades || {})) {
-      if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
-        const gradeKey = k.includes('__') ? k.split('__')[1] : k;
-        currentActiveGradeKeys.add(gradeKey);
-        batch.set(doc(db, 'schools', schoolId, 'grades', gradeKey), { id: gradeKey, entries: entries as any });
-        synced.grades.add(gradeKey);
+    // 3. Schedules diff & sync
+    if (canWriteSchedules) {
+      const currentActiveScheduleKeys = new Set<string>();
+      for (const [k, days] of Object.entries(plainState.schedules || {})) {
+        if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
+          const classKey = k.includes('__') ? k.split('__')[1] : k;
+          currentActiveScheduleKeys.add(classKey);
+          queueSetIfChanged(
+            doc(db, 'schools', schoolId, 'schedules', classKey),
+            `schools/${schoolId}/schedules/${classKey}`,
+            { id: classKey, days: days as any },
+            false
+          );
+          synced.schedules.add(classKey);
+        }
       }
-    }
-    for (const prevKey of synced.grades) {
-      if (!currentActiveGradeKeys.has(prevKey)) {
-        batch.delete(doc(db, 'schools', schoolId, 'grades', prevKey));
-        synced.grades.delete(prevKey);
-      }
-    }
-
-    // 4. Final grades diff & sync (overwrite without merge)
-    const currentActiveFinalGradeKeys = new Set<string>();
-    for (const [k, entries] of Object.entries(plainState.finalGrades || {})) {
-      if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
-        const classKey = k.includes('__') ? k.split('__')[1] : k;
-        currentActiveFinalGradeKeys.add(classKey);
-        batch.set(doc(db, 'schools', schoolId, 'finalGrades', classKey), { id: classKey, entries: entries as any });
-        synced.finalGrades.add(classKey);
-      }
-    }
-    for (const prevKey of synced.finalGrades) {
-      if (!currentActiveFinalGradeKeys.has(prevKey)) {
-        batch.delete(doc(db, 'schools', schoolId, 'finalGrades', prevKey));
-        synced.finalGrades.delete(prevKey);
+      for (const prevKey of Array.from(synced.schedules)) {
+        if (!currentActiveScheduleKeys.has(prevKey)) {
+          queueDelete(doc(db, 'schools', schoolId, 'schedules', prevKey), `schools/${schoolId}/schedules/${prevKey}`);
+          synced.schedules.delete(prevKey);
+        }
       }
     }
 
-    // 5. Homework diff & sync
-    const schoolHomework = (plainState.homework || []).filter((h: any) => h.schoolId === schoolId || !h.schoolId);
-    const currentHwIds = new Set(schoolHomework.map((h: any) => h.id));
-    for (const prevId of synced.homework) {
-      if (!currentHwIds.has(prevId)) {
-        batch.delete(doc(db, 'schools', schoolId, 'homework', prevId));
-        synced.homework.delete(prevId);
+    // 4. Grades diff & sync
+    if (canWriteGrades) {
+      const currentActiveGradeKeys = new Set<string>();
+      for (const [k, entries] of Object.entries(plainState.grades || {})) {
+        if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
+          const gradeKey = k.includes('__') ? k.split('__')[1] : k;
+          currentActiveGradeKeys.add(gradeKey);
+          queueSetIfChanged(
+            doc(db, 'schools', schoolId, 'grades', gradeKey),
+            `schools/${schoolId}/grades/${gradeKey}`,
+            { id: gradeKey, entries: entries as any },
+            false
+          );
+          synced.grades.add(gradeKey);
+        }
+      }
+      for (const prevKey of Array.from(synced.grades)) {
+        if (!currentActiveGradeKeys.has(prevKey)) {
+          queueDelete(doc(db, 'schools', schoolId, 'grades', prevKey), `schools/${schoolId}/grades/${prevKey}`);
+          synced.grades.delete(prevKey);
+        }
+      }
+
+      // 5. Final grades diff & sync
+      const currentActiveFinalGradeKeys = new Set<string>();
+      for (const [k, entries] of Object.entries(plainState.finalGrades || {})) {
+        if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
+          const classKey = k.includes('__') ? k.split('__')[1] : k;
+          currentActiveFinalGradeKeys.add(classKey);
+          queueSetIfChanged(
+            doc(db, 'schools', schoolId, 'finalGrades', classKey),
+            `schools/${schoolId}/finalGrades/${classKey}`,
+            { id: classKey, entries: entries as any },
+            false
+          );
+          synced.finalGrades.add(classKey);
+        }
+      }
+      for (const prevKey of Array.from(synced.finalGrades)) {
+        if (!currentActiveFinalGradeKeys.has(prevKey)) {
+          queueDelete(doc(db, 'schools', schoolId, 'finalGrades', prevKey), `schools/${schoolId}/finalGrades/${prevKey}`);
+          synced.finalGrades.delete(prevKey);
+        }
       }
     }
-    for (const hw of schoolHomework) {
-      batch.set(doc(db, 'schools', schoolId, 'homework', hw.id), { ...hw, schoolId }, { merge: true });
-      synced.homework.add(hw.id);
+
+    // 6. Homework diff & sync
+    if (canWriteHomework) {
+      const schoolHomework = (plainState.homework || []).filter((h: any) => h.schoolId === schoolId || !h.schoolId);
+      const currentHwIds = new Set(schoolHomework.map((h: any) => h.id));
+      for (const prevId of Array.from(synced.homework)) {
+        if (!currentHwIds.has(prevId)) {
+          queueDelete(doc(db, 'schools', schoolId, 'homework', prevId), `schools/${schoolId}/homework/${prevId}`);
+          synced.homework.delete(prevId);
+        }
+      }
+      for (const hw of schoolHomework) {
+        queueSetIfChanged(
+          doc(db, 'schools', schoolId, 'homework', hw.id),
+          `schools/${schoolId}/homework/${hw.id}`,
+          { ...hw, schoolId },
+          true
+        );
+        synced.homework.add(hw.id);
+      }
     }
 
-    // 6. Announcements diff & sync
+    // 7. Announcements diff & sync
     const schoolAnnouncements = (plainState.announcements || []).filter((a: any) => a.schoolId === schoolId || !a.schoolId);
-    const currentAnnIds = new Set(schoolAnnouncements.map((a: any) => a.id));
-    for (const prevId of synced.announcements) {
-      if (!currentAnnIds.has(prevId)) {
-        batch.delete(doc(db, 'schools', schoolId, 'announcements', prevId));
-        synced.announcements.delete(prevId);
+    if (canManageAnnouncements) {
+      const currentAnnIds = new Set(schoolAnnouncements.map((a: any) => a.id));
+      for (const prevId of Array.from(synced.announcements)) {
+        if (!currentAnnIds.has(prevId)) {
+          queueDelete(doc(db, 'schools', schoolId, 'announcements', prevId), `schools/${schoolId}/announcements/${prevId}`);
+          synced.announcements.delete(prevId);
+        }
+      }
+      for (const ann of schoolAnnouncements) {
+        queueSetIfChanged(
+          doc(db, 'schools', schoolId, 'announcements', ann.id),
+          `schools/${schoolId}/announcements/${ann.id}`,
+          { ...ann, schoolId },
+          true
+        );
+        synced.announcements.add(ann.id);
+      }
+    } else {
+      // Students and Teachers can update read/readBy on existing announcements
+      for (const ann of schoolAnnouncements) {
+        if (synced.announcements.has(ann.id)) {
+          queueSetIfChanged(
+            doc(db, 'schools', schoolId, 'announcements', ann.id),
+            `schools/${schoolId}/announcements/${ann.id}`,
+            { ...ann, schoolId },
+            true
+          );
+        }
       }
     }
-    for (const ann of schoolAnnouncements) {
-      batch.set(doc(db, 'schools', schoolId, 'announcements', ann.id), { ...ann, schoolId }, { merge: true });
-      synced.announcements.add(ann.id);
-    }
 
-    // 7. Messages diff & sync
+    // 8. Messages diff & sync (all school members can create messages, update readBy, and delete their own messages)
     const schoolMessages = (plainState.messages || []).filter((m: any) => m.schoolId === schoolId || !m.schoolId);
     const currentMsgIds = new Set(schoolMessages.map((m: any) => m.id));
-    for (const prevId of synced.messages) {
+    for (const prevId of Array.from(synced.messages)) {
       if (!currentMsgIds.has(prevId)) {
-        batch.delete(doc(db, 'schools', schoolId, 'messages', prevId));
+        queueDelete(doc(db, 'schools', schoolId, 'messages', prevId), `schools/${schoolId}/messages/${prevId}`);
         synced.messages.delete(prevId);
       }
     }
     for (const msg of schoolMessages) {
-      batch.set(doc(db, 'schools', schoolId, 'messages', msg.id), { ...msg, schoolId }, { merge: true });
+      queueSetIfChanged(
+        doc(db, 'schools', schoolId, 'messages', msg.id),
+        `schools/${schoolId}/messages/${msg.id}`,
+        { ...msg, schoolId },
+        true
+      );
       synced.messages.add(msg.id);
     }
 
-    // 8. Teacher Assignments diff & sync
-    const schoolAssignments = (plainState.teacherAssignments || []).filter((t: any) => t.schoolId === schoolId || !t.schoolId);
-    const currentAssignIds = new Set(schoolAssignments.map((t: any) => t.id));
-    for (const prevId of synced.teacherAssignments) {
-      if (!currentAssignIds.has(prevId)) {
-        batch.delete(doc(db, 'schools', schoolId, 'teacherAssignments', prevId));
-        synced.teacherAssignments.delete(prevId);
+    // 9. Teacher Assignments & Student Groups diff & sync
+    if (canManageLoadAndGroups) {
+      const schoolAssignments = (plainState.teacherAssignments || []).filter((t: any) => t.schoolId === schoolId || !t.schoolId);
+      const currentAssignIds = new Set(schoolAssignments.map((t: any) => t.id));
+      for (const prevId of Array.from(synced.teacherAssignments)) {
+        if (!currentAssignIds.has(prevId)) {
+          queueDelete(doc(db, 'schools', schoolId, 'teacherAssignments', prevId), `schools/${schoolId}/teacherAssignments/${prevId}`);
+          synced.teacherAssignments.delete(prevId);
+        }
+      }
+      for (const ta of schoolAssignments) {
+        queueSetIfChanged(
+          doc(db, 'schools', schoolId, 'teacherAssignments', ta.id),
+          `schools/${schoolId}/teacherAssignments/${ta.id}`,
+          { ...ta, schoolId },
+          true
+        );
+        synced.teacherAssignments.add(ta.id);
+      }
+
+      const schoolGroups = (plainState.studentGroups || []).filter((g: any) => g.schoolId === schoolId || !g.schoolId);
+      const currentGroupIds = new Set(schoolGroups.map((g: any) => g.id));
+      for (const prevId of Array.from(synced.studentGroups)) {
+        if (!currentGroupIds.has(prevId)) {
+          queueDelete(doc(db, 'schools', schoolId, 'studentGroups', prevId), `schools/${schoolId}/studentGroups/${prevId}`);
+          synced.studentGroups.delete(prevId);
+        }
+      }
+      for (const sg of schoolGroups) {
+        queueSetIfChanged(
+          doc(db, 'schools', schoolId, 'studentGroups', sg.id),
+          `schools/${schoolId}/studentGroups/${sg.id}`,
+          { ...sg, schoolId },
+          true
+        );
+        synced.studentGroups.add(sg.id);
       }
     }
-    for (const ta of schoolAssignments) {
-      batch.set(doc(db, 'schools', schoolId, 'teacherAssignments', ta.id), { ...ta, schoolId }, { merge: true });
-      synced.teacherAssignments.add(ta.id);
-    }
 
-    // 9. Student Groups diff & sync
-    const schoolGroups = (plainState.studentGroups || []).filter((g: any) => g.schoolId === schoolId || !g.schoolId);
-    const currentGroupIds = new Set(schoolGroups.map((g: any) => g.id));
-    for (const prevId of synced.studentGroups) {
-      if (!currentGroupIds.has(prevId)) {
-        batch.delete(doc(db, 'schools', schoolId, 'studentGroups', prevId));
-        synced.studentGroups.delete(prevId);
-      }
+    if (writeOps.length > 0) {
+      await Promise.all(writeOps);
     }
-    for (const sg of schoolGroups) {
-      batch.set(doc(db, 'schools', schoolId, 'studentGroups', sg.id), { ...sg, schoolId }, { merge: true });
-      synced.studentGroups.add(sg.id);
-    }
-
-    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `schools/${schoolId}`);
   }
@@ -956,11 +1349,15 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
  * Saves a single message atomically to Firestore
  */
 export const saveSchoolMessage = async (schoolId: string, message: any): Promise<void> => {
-  if (!schoolId || !message?.id) return;
+  const targetSchoolId = (schoolId && schoolId !== 'global') ? schoolId : 'school_1';
+  if (!message?.id) return;
+  const docPath = `schools/${targetSchoolId}/messages/${message.id}`;
   try {
-    await setDoc(doc(db, 'schools', schoolId, 'messages', message.id), { ...message, schoolId }, { merge: true });
+    const cleanMsg = JSON.parse(JSON.stringify({ ...message, schoolId: targetSchoolId }));
+    await setDoc(doc(db, 'schools', targetSchoolId, 'messages', message.id), cleanMsg, { merge: true });
+    docSnapshots.set(docPath, stableSerialize(cleanMsg));
+    getOrCreateSyncedIds(targetSchoolId).messages.add(message.id);
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `schools/${schoolId}/messages/${message.id}`);
+    handleFirestoreError(error, OperationType.CREATE, docPath);
   }
 };
-

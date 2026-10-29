@@ -248,16 +248,16 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       if (data.state) {
         // Clear local DB assets
         const db = await DB.openDB();
-        const tx = db.transaction(['assets', 'appStore'], 'readwrite');
+        const tx = db.transaction(['assets', 'school_cache'], 'readwrite');
         await tx.objectStore('assets').clear();
-        await tx.objectStore('appStore').clear();
+        await tx.objectStore('school_cache').clear();
 
         // Restore assets
         if (data.assets && Array.isArray(data.assets)) {
            for (const a of data.assets) {
               const res = await fetch(a.data);
               const blob = await res.blob();
-              await DB.saveAsset(a.id, a.name, a.type, blob);
+              await DB.saveAsset(a.id, a.name, a.type, blob, a.schoolId || user.schoolId || 'school_1');
            }
         }
         
@@ -278,7 +278,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
   const handleFontUpload = async (file: File) => {
     const id = H.uid('font');
-    await DB.saveAsset(id, file.name, file.type, file);
+    await DB.saveAsset(id, file.name, file.type, file, user.schoolId || 'global');
     alert(t('font_loaded'));
     refreshFonts();
   };
@@ -288,11 +288,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
     if (state.settings.bodyFontId === id) state.settings.bodyFontId = undefined;
     if (state.settings.headingFontId === id) state.settings.headingFontId = undefined;
     
-    const db = await DB.openDB();
-    const tx = db.transaction('assets', 'readwrite');
-    await tx.objectStore('assets').delete(id);
+    await DB.deleteAsset(id, user.schoolId || 'global');
     
-    onUpdate(state);
+    onUpdate({ ...state });
     refreshFonts();
   };
 

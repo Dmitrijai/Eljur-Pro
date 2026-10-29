@@ -577,7 +577,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
           {isLarge && !expanded && visibleTextLines.length < textLines.length && '...'}
         </p>
         {visibleAttachments.map((att) => (
-          <FileDisplay key={att.id} id={att.id} name={att.name} lang={lang as 'ru' | 'en'} />
+          <FileDisplay key={att.id} id={att.id} name={att.name} schoolId={item.schoolId || currentUser.schoolId} lang={lang as 'ru' | 'en'} />
         ))}
 
         {isLarge && (
@@ -623,6 +623,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   const [composeTo, setComposeTo] = useState<string[]>([]);
   
   const [files, setFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
   
   // Send As Director logic for employees
   const [sendAsDirector, setSendAsDirector] = useState(false);
@@ -666,6 +667,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
 
         const targetList = isAnnounce ? state.announcements : state.messages;
         let hasChanges = false;
+        const updatedItems: Message[] = [];
 
         targetList.forEach((item) => {
           if (idsToMark.includes(item.id)) {
@@ -674,16 +676,24 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
               item.readBy.push(currentUser.id);
               item.read = true;
               hasChanges = true;
+              updatedItems.push(item);
             }
           }
         });
 
         if (hasChanges) {
+          const targetSchoolId = currentUser.schoolId || 'school_1';
+          const collectionName = isAnnounce ? 'announcements' : 'messages';
+          updatedItems.forEach((item) => {
+            DB.saveSchoolEntity(item.schoolId || targetSchoolId, collectionName, item.id, item).catch((e) => {
+              console.warn('Failed to persist read receipt:', e);
+            });
+          });
           onUpdate({ ...state });
         }
       }, 350);
     },
-    [isAnnounce, state, currentUser.id, onUpdate]
+    [isAnnounce, state, currentUser.id, currentUser.schoolId, onUpdate]
   );
 
   useEffect(() => {
@@ -698,100 +708,114 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   const director = state.users.find(u => u.schoolId === currentUser.schoolId && u.role === 'director');
 
   const handleSend = async () => {
+    if (sending) return;
     if (!composeTitle || !composeBody) return alert(t('fill_topic_text'));
     if (!isAnnounce && composeTo.length === 0) return alert(t('select_recipient_alert'));
 
-    const newAttachments: Attachment[] = [];
-    for (const f of files) {
-       const id = H.uid('att');
-       await DB.saveAsset(id, f.name, f.type, f);
-       newAttachments.push({ id, name: f.name, type: f.type });
-    }
+    setSending(true);
+    try {
+      const targetSchoolId = currentUser.schoolId || 'school_1';
+      const newAttachments: Attachment[] = [];
+      for (const f of files) {
+        const id = H.uid('att');
+        await DB.saveAsset(id, f.name, f.type, f, targetSchoolId);
+        newAttachments.push({ id, name: f.name, type: f.type });
+      }
 
-    // RESOLVE RECIPIENTS (GROUPS -> INDIVIDUALS)
-    let finalToIds: string[] = [];
-    if (!isAnnounce) {
-       composeTo.forEach(val => {
-           if (val === 'GROUP_TEACHERS') {
-              // Only teachers in SAME school
-              finalToIds.push(...state.users.filter(u => u.role === 'teacher' && u.schoolId === currentUser.schoolId).map(u => u.id));
-           } else if (val === 'GROUP_HEADMASTERS') {
-              // All class teachers in this school
-              const schoolClasses = H.getSchoolClasses(state, currentUser.schoolId);
-              const headmasterIds = schoolClasses.map(c => c.headmasterId).filter(Boolean) as string[];
-              finalToIds.push(...headmasterIds);
-           } else if (val.startsWith('GROUP_CLASS_')) {
-              const classKey = val.replace('GROUP_CLASS_', ''); // 10_A
-              finalToIds.push(...state.users.filter(u => u.role === 'student' && u.schoolId === currentUser.schoolId && `${u.class}_${u.letter}` === classKey).map(u => u.id));
-           } else {
-              finalToIds.push(val); // Single User ID
-           }
-       });
-       // Unique IDs
-       finalToIds = Array.from(new Set(finalToIds));
-    }
+      // RESOLVE RECIPIENTS (GROUPS -> INDIVIDUALS)
+      let finalToIds: string[] = [];
+      if (!isAnnounce) {
+        composeTo.forEach(val => {
+          if (val === 'GROUP_TEACHERS') {
+            // Only teachers in SAME school
+            finalToIds.push(...state.users.filter(u => u.role === 'teacher' && u.schoolId === currentUser.schoolId).map(u => u.id));
+          } else if (val === 'GROUP_HEADMASTERS') {
+            // All class teachers in this school
+            const schoolClasses = H.getSchoolClasses(state, currentUser.schoolId);
+            const headmasterIds = schoolClasses.map(c => c.headmasterId).filter(Boolean) as string[];
+            finalToIds.push(...headmasterIds);
+          } else if (val.startsWith('GROUP_CLASS_')) {
+            const classKey = val.replace('GROUP_CLASS_', ''); // 10_A
+            finalToIds.push(...state.users.filter(u => u.role === 'student' && u.schoolId === currentUser.schoolId && `${u.class}_${u.letter}` === classKey).map(u => u.id));
+          } else {
+            finalToIds.push(val); // Single User ID
+          }
+        });
+        // Unique IDs
+        finalToIds = Array.from(new Set(finalToIds));
+      }
 
-    // Determine Sender ID
-    let fromId = currentUser.id;
-    let realAuthorId: string | undefined = undefined;
+      // Determine Sender ID
+      let fromId = currentUser.id;
+      let realAuthorId: string | undefined = undefined;
 
-    // Logic: Employee always has option to send as Director if they have access to this tab
-    if (sendAsDirector && isEmployee && director && currentUser.employeePermissions?.canSendAsDirector) {
+      // Logic: Employee always has option to send as Director if they have access to this tab
+      if (sendAsDirector && isEmployee && director && currentUser.employeePermissions?.canSendAsDirector) {
         fromId = director.id;
         realAuthorId = currentUser.id;
-    }
+      }
 
-    if (editId) {
-      // Edit existing
-      const list = isAnnounce ? state.announcements : state.messages;
-      const idx = list.findIndex(m => m.id === editId);
-      if (idx > -1) {
-         const existing = list[idx];
-         // Append new
-         const mergedAtts = [...(existing.attachments || []), ...newAttachments];
-         if (existing.attachmentId) mergedAtts.push({id:existing.attachmentId, name:existing.attachmentName||'', type:''});
-         
-         const updated: Message = {
+      const collectionName = isAnnounce ? 'announcements' : 'messages';
+
+      if (editId) {
+        // Edit existing
+        const list = isAnnounce ? state.announcements : state.messages;
+        const idx = list.findIndex(m => m.id === editId);
+        if (idx > -1) {
+          const existing = list[idx];
+          const mergedAtts = [...(existing.attachments || []), ...newAttachments];
+          if (existing.attachmentId) mergedAtts.push({ id: existing.attachmentId, name: existing.attachmentName || '', type: '' });
+
+          const updated: Message = {
             ...existing,
+            schoolId: existing.schoolId || targetSchoolId,
             title: composeTitle,
             body: composeBody,
-            attachments: mergedAtts,
-            // clean legacy
-            attachmentId: undefined
-         };
-         if (!isAnnounce) updated.toIds = finalToIds;
+            attachments: mergedAtts
+          };
+          delete updated.attachmentId;
+          delete updated.attachmentName;
+          if (!isAnnounce) updated.toIds = finalToIds;
 
-         list[idx] = updated;
-      }
-      setEditId(null);
-    } else {
-      // Create New
-      const newItem: Message = {
-        id: H.uid(isAnnounce ? 'ann' : 'msg'),
-        schoolId: currentUser.schoolId,
-        fromId: fromId,
-        realAuthorId: realAuthorId,
-        toIds: isAnnounce ? [] : finalToIds, // Announcements are public/broadcast
-        title: composeTitle,
-        body: composeBody,
-        attachments: newAttachments,
-        date: new Date().toISOString()
-      };
-
-      if (isAnnounce) {
-        state.announcements.push(newItem);
+          list[idx] = updated;
+          await DB.saveSchoolEntity(updated.schoolId || targetSchoolId, collectionName, updated.id, updated);
+        }
+        setEditId(null);
       } else {
-        state.messages.push(newItem);
-      }
-    }
+        // Create New
+        const newItem: Message = {
+          id: H.uid(isAnnounce ? 'ann' : 'msg'),
+          schoolId: targetSchoolId,
+          fromId: fromId,
+          ...(realAuthorId ? { realAuthorId } : {}),
+          toIds: isAnnounce ? [] : finalToIds, // Announcements are public/broadcast
+          title: composeTitle,
+          body: composeBody,
+          attachments: newAttachments,
+          date: new Date().toISOString()
+        };
 
-    onUpdate(state);
-    setComposeTitle('');
-    setComposeBody('');
-    setFiles([]);
-    setComposeTo([]);
-    setSendAsDirector(false);
-    setActiveTab('sent');
+        if (isAnnounce) {
+          state.announcements.push(newItem);
+        } else {
+          state.messages.push(newItem);
+        }
+        await DB.saveSchoolEntity(targetSchoolId, collectionName, newItem.id, newItem);
+      }
+
+      onUpdate({ ...state });
+      setComposeTitle('');
+      setComposeBody('');
+      setFiles([]);
+      setComposeTo([]);
+      setSendAsDirector(false);
+      setActiveTab('sent');
+    } catch (err) {
+      console.error('Error sending message:', err);
+      alert(lang === 'ru' ? 'Не удалось отправить сообщение. Попробуйте еще раз.' : 'Failed to send message. Please try again.');
+    } finally {
+      setSending(false);
+    }
   };
 
   const startEdit = (m: Message) => {
@@ -824,12 +848,17 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
 
   const deleteItem = (id: string) => {
      if(!confirm(t('delete_msg_confirm'))) return;
+     const targetSchoolId = currentUser.schoolId || 'school_1';
+     const collectionName = isAnnounce ? 'announcements' : 'messages';
      if (isAnnounce) {
         state.announcements = state.announcements.filter(m => m.id !== id);
      } else {
         state.messages = state.messages.filter(m => m.id !== id);
      }
-     onUpdate(state);
+     DB.deleteSchoolEntity(targetSchoolId, collectionName, id).catch(e => {
+        console.warn('Failed to delete message entity:', e);
+     });
+     onUpdate({ ...state });
   };
 
   const getFilteredItems = () => {
@@ -1125,7 +1154,9 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             </div>
             <MultiFileUploader files={files} onFilesChange={setFiles} lang={lang as 'ru'|'en'} />
             <div className="pt-4 flex gap-3">
-              <Button variant="primary" onClick={handleSend} className="w-full md:w-auto px-8">{t('send')}</Button>
+              <Button variant="primary" disabled={sending} onClick={handleSend} className="w-full md:w-auto px-8">
+                {sending ? '...' : t('send')}
+              </Button>
               {editId && <Button variant="ghost" onClick={cancelEdit}>{t('cancel')}</Button>}
             </div>
           </div>

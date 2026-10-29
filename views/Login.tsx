@@ -4,7 +4,7 @@ import { User } from '../types';
 import { Button, Input, Select, Card, Modal } from '../components/ui';
 import * as H from '../utils/helpers';
 import { verifyUserPasswordDetailed, hashPassword } from '../utils/auth';
-import { saveSchoolEntity, syncUserAuthUidMap, ensureFirebaseAuthSession, getPublicCreatorGate, PublicCreatorGateConfig } from '../services/db';
+import { saveSchoolEntity, syncUserAuthUidMap, ensureFirebaseAuthSession, getPublicCreatorGate, PublicCreatorGateConfig, fetchUsersForLoginLookup, setCurrentSessionUser } from '../services/db';
 import { defaultState } from '../App';
 import { ShieldCheck } from 'lucide-react';
 
@@ -143,19 +143,35 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
 
     try {
       const normLogin = login.trim().toLowerCase();
-      // Enforce strict role matching: user must select the matching role in the dropdown
-      const candidates = availableUsers.filter(u => {
-        const loginMatches = (u.login?.trim().toLowerCase() === normLogin || u.login === login);
-        if (!loginMatches) return false;
-        if (role === 'employee') {
-          return u.role === 'employee' || (u.role === 'teacher' && !!u.customRole);
+      let pool = [...availableUsers];
+
+      const filterByLoginAndRole = (list: User[]) =>
+        list.filter(u => {
+          const loginMatches = (u.login?.trim().toLowerCase() === normLogin || u.login === login);
+          if (!loginMatches) return false;
+          if (role === 'employee') {
+            return u.role === 'employee' || (u.role === 'teacher' && !!u.customRole);
+          }
+          return u.role === role;
+        });
+
+      let candidates = filterByLoginAndRole(pool);
+
+      if (candidates.length === 0) {
+        // Fetch users from Firestore across schools in case user was created on another device
+        const remoteUsers = await fetchUsersForLoginLookup();
+        if (remoteUsers.length > 0) {
+          const mergedMap = new Map<string, User>();
+          pool.forEach(u => mergedMap.set(`${u.schoolId || 'school_1'}_${u.id}`, u));
+          remoteUsers.forEach(u => mergedMap.set(`${u.schoolId || 'school_1'}_${u.id}`, u));
+          pool = Array.from(mergedMap.values());
+          candidates = filterByLoginAndRole(pool);
         }
-        return u.role === role;
-      });
+      }
 
       if (candidates.length === 0) {
         // Check if user exists under a different role to provide a helpful clear error
-        const existsUnderOtherRole = availableUsers.find(u => (u.login?.trim().toLowerCase() === normLogin || u.login === login));
+        const existsUnderOtherRole = pool.find(u => (u.login?.trim().toLowerCase() === normLogin || u.login === login));
         if (existsUnderOtherRole) {
           setError(lang === 'ru' 
             ? 'Пользователь найден, но выбранная роль не совпадает. Выберите правильную роль!' 
@@ -217,6 +233,8 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
         } catch (fbAuthErr: any) {
           console.warn('Firebase Auth session warning (proceeding with local session):', fbAuthErr);
         }
+
+        setCurrentSessionUser(matchedUser);
 
         if (upgradedUserToSave && upgradedUserToSave.schoolId && isAuthEstablished) {
           saveSchoolEntity(upgradedUserToSave.schoolId, 'users', upgradedUserToSave.id, upgradedUserToSave).catch((e) => {

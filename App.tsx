@@ -229,6 +229,7 @@ export default function App() {
 
   // Ensure Firebase Auth session syncs UID mapping automatically
   useEffect(() => {
+    DB.setCurrentSessionUser(currentUser);
     const unsubAuth = DB.auth.onAuthStateChanged((fbUser) => {
       if (fbUser && currentUser) {
         DB.syncUserAuthUidMap(currentUser.schoolId || 'school_1', currentUser.id, currentUser.role, fbUser.uid).catch(() => {});
@@ -239,9 +240,6 @@ export default function App() {
 
   // Initialize Data with instant cache fast-path and Firestore real-time sync
   useEffect(() => {
-    let unsubscribe: any;
-    let isFirstSync = true;
-
     // Instant fast-path: restore cached state from IndexedDB if available
     const activeSchoolId = (currentUser?.schoolId && currentUser.schoolId !== 'global')
       ? currentUser.schoolId
@@ -257,25 +255,52 @@ export default function App() {
           subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
         }));
         setLoading(false);
+
+        // If session exists for a custom user stored in cache, restore it
+        if (!currentUser) {
+          const sessionStr = localStorage.getItem('eljur_session');
+          if (sessionStr) {
+            try {
+              const session = JSON.parse(sessionStr);
+              if (session.expires > Date.now()) {
+                const foundUser =
+                  (cached.users || []).find((user: any) => user.id === session.userId) ||
+                  session.user ||
+                  defaultState.users.find((user: any) => user.id === session.userId);
+                if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= new Date())) {
+                  DB.setCurrentSessionUser(foundUser);
+                  setCurrentUser(foundUser);
+                  if (session.viewMode) setViewMode(session.viewMode);
+                }
+              }
+            } catch {}
+          }
+        }
       }
     }).catch((e) => console.warn('IndexedDB cache load failed:', e));
 
-    const sessionStr = localStorage.getItem('eljur_session');
-    if (sessionStr) {
-      try {
-        const session = JSON.parse(sessionStr);
-        if (session.expires > Date.now()) {
-          const u = defaultState.users.find((user: any) => user.id === session.userId);
-          if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= new Date())) {
-            setCurrentUser(u);
-            if (session.viewMode) setViewMode(session.viewMode);
-            if (DB.auth.currentUser) {
-              DB.syncUserAuthUidMap(u.schoolId || activeSchoolId, u.id, u.role, DB.auth.currentUser.uid).catch(() => {});
+    if (!currentUser) {
+      const sessionStr = localStorage.getItem('eljur_session');
+      if (sessionStr) {
+        try {
+          const session = JSON.parse(sessionStr);
+          if (session.expires > Date.now()) {
+            const u =
+              (appState?.users || []).find((user: any) => user.id === session.userId) ||
+              session.user ||
+              defaultState.users.find((user: any) => user.id === session.userId);
+            if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= new Date())) {
+              DB.setCurrentSessionUser(u);
+              setCurrentUser(u);
+              if (session.viewMode) setViewMode(session.viewMode);
+              if (DB.auth.currentUser) {
+                DB.syncUserAuthUidMap(u.schoolId || activeSchoolId, u.id, u.role, DB.auth.currentUser.uid).catch(() => {});
+              }
             }
           }
+        } catch (e) {
+          console.warn('Session parse failed:', e);
         }
-      } catch (e) {
-        console.warn('Session parse failed:', e);
       }
     }
 
@@ -289,6 +314,21 @@ export default function App() {
     let unsubAllSchools: (() => void) | null = null;
 
     if (currentUser) {
+      // Ensure Firebase Auth session is active for this user even after page reload
+      const sId = currentUser.schoolId || activeSchoolId;
+      const domainSchool = sId.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase() || 'school1';
+      const userSafeId = currentUser.id.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
+      const virtualEmail = currentUser.role === 'creator'
+        ? 'creator@global.eljur.org'
+        : `${userSafeId}@${domainSchool}.eljur.org`;
+
+      DB.ensureFirebaseAuthSession(
+        virtualEmail,
+        currentUser.password || 'eljur123456',
+        currentUser.password ? [currentUser.password] : [],
+        { schoolId: sId, userId: currentUser.id, role: currentUser.role }
+      ).catch(() => {});
+
       if (currentUser.role === 'creator') {
         unsubAllSchools = DB.subscribeToAllSchools((schools) => {
           if (schools && schools.length > 0) {
@@ -347,10 +387,10 @@ export default function App() {
             schedules: { ...cur.schedules, ...(schoolUpdate.schedules || {}) },
             grades: { ...cur.grades, ...(schoolUpdate.grades || {}) },
             finalGrades: { ...cur.finalGrades, ...(schoolUpdate.finalGrades || {}) },
-            homework: schoolUpdate.homework || cur.homework || [],
-            messages: schoolUpdate.messages || cur.messages || [],
-            announcements: schoolUpdate.announcements || cur.announcements || [],
-            studentGroups: schoolUpdate.studentGroups || cur.studentGroups || [],
+            homework: schoolUpdate.homework !== undefined ? schoolUpdate.homework : (cur.homework || []),
+            messages: schoolUpdate.messages !== undefined ? schoolUpdate.messages : (cur.messages || []),
+            announcements: schoolUpdate.announcements !== undefined ? schoolUpdate.announcements : (cur.announcements || []),
+            studentGroups: schoolUpdate.studentGroups !== undefined ? schoolUpdate.studentGroups : (cur.studentGroups || []),
             settings: schoolUpdate.settings ? { ...cur.settings, ...schoolUpdate.settings } : cur.settings,
             gradingSystem: schoolUpdate.gradingSystem || cur.gradingSystem,
             gradeTypes: schoolUpdate.gradeTypes || cur.gradeTypes,
@@ -412,7 +452,7 @@ export default function App() {
 
         if (bodyFontId) {
             try {
-                const asset = await DB.getAsset(bodyFontId);
+                const asset = await DB.getAsset(bodyFontId, currentUser?.schoolId);
                 if (asset && asset.blob) {
                     const dataUrl = await readBlobAsDataURL(asset.blob);
                     const fontFace = new FontFace('CustomBodyFont', `url(${dataUrl})`);
@@ -426,7 +466,7 @@ export default function App() {
 
         if (headingFontId) {
             try {
-                const asset = await DB.getAsset(headingFontId);
+                const asset = await DB.getAsset(headingFontId, currentUser?.schoolId);
                 if (asset && asset.blob) {
                     const dataUrl = await readBlobAsDataURL(asset.blob);
                     const fontFace = new FontFace('CustomHeadingFont', `url(${dataUrl})`);
@@ -439,7 +479,7 @@ export default function App() {
         }
     };
     applyFonts();
-  }, [appState?.settings?.bodyFontId, appState?.settings?.headingFontId]);
+  }, [appState?.settings?.bodyFontId, appState?.settings?.headingFontId, currentUser?.schoolId]);
 
   // Effect to load custom fonts for Eljur Info
   useEffect(() => {
@@ -496,9 +536,22 @@ export default function App() {
   }, [currentUser?.schoolId]);
 
   const handleUpdateState = (newState: AppState) => {
-    // Pure immutable state update without JSON.parse(JSON.stringify(newState))
-    setAppState(newState);
-    pendingStateRef.current = newState;
+    const clonedState: AppState = {
+      ...newState,
+      schools: [...(newState.schools || [])],
+      users: [...(newState.users || [])],
+      homework: [...(newState.homework || [])],
+      messages: [...(newState.messages || [])],
+      announcements: [...(newState.announcements || [])],
+      teacherAssignments: [...(newState.teacherAssignments || [])],
+      studentGroups: [...(newState.studentGroups || [])],
+      schedules: { ...(newState.schedules || {}) },
+      grades: { ...(newState.grades || {}) },
+      finalGrades: { ...(newState.finalGrades || {}) },
+      settings: { ...(newState.settings || {}) }
+    };
+    setAppState(clonedState);
+    pendingStateRef.current = clonedState;
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -516,8 +569,12 @@ export default function App() {
   };
 
   const handleLogin = (u: User) => {
+    DB.setCurrentSessionUser(u);
     setCurrentUser(u);
     setViewMode('dashboard');
+    if (u.schoolId && u.schoolId !== 'global') {
+      try { localStorage.setItem('eljur_active_school_id', u.schoolId); } catch {}
+    }
     if (u.theme) {
         try { localStorage.setItem('eljur_theme', u.theme); } catch (_) {}
         if (appState) {
@@ -533,8 +590,10 @@ export default function App() {
         }
     }
     
+    const safeSessionUser = { ...u };
+    delete (safeSessionUser as any).password;
     const expires = Date.now() + 60 * 60 * 1000;
-    localStorage.setItem('eljur_session', JSON.stringify({ userId: u.id, expires, viewMode: 'dashboard' }));
+    localStorage.setItem('eljur_session', JSON.stringify({ userId: u.id, user: safeSessionUser, expires, viewMode: 'dashboard' }));
     
     const school = appState?.schools.find(s => s.id === u.schoolId);
     if (school) {
@@ -542,6 +601,7 @@ export default function App() {
     }
   };
   const handleLogout = () => {
+    DB.setCurrentSessionUser(null);
     setCurrentUser(null);
     setViewMode('dashboard');
     localStorage.removeItem('eljur_session');
