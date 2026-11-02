@@ -48,6 +48,7 @@ export interface User {
   employeePermissions?: EmployeePermissions;
   theme?: 'light' | 'dark';
   language?: 'ru' | 'en';
+  showSeasonalAnimations?: boolean;
 }
 
 export interface SubgroupLesson {

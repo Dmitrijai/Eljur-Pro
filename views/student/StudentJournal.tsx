@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { AppState, User, Grade } from '../../types';
 import * as H from '../../utils/helpers';
 import { Button, FileDisplay, Modal } from '../../components/ui';
@@ -26,29 +27,6 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
     const goPrevJournalWeek = () => setJournalWeekIso(H.dateToIso(H.addDays(journalWeekStart, -7)));
     const goNextJournalWeek = () => setJournalWeekIso(H.dateToIso(H.addDays(journalWeekStart, 7)));
     const goCurrentJournalWeek = () => setJournalWeekIso(H.dateToIso(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)))));
-
-    const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if (typeof window !== 'undefined' && window.innerWidth >= 768) return;
-        const target = e.target as HTMLElement | null;
-        if (target?.closest('input, textarea, select, button, [data-no-swipe]')) {
-            touchStartRef.current = null;
-            return;
-        }
-        if (e.touches.length === 1) {
-            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        }
-    };
-    const handleTouchEnd = (e: React.TouchEvent) => {
-        if (!touchStartRef.current || e.changedTouches.length === 0) return;
-        const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
-        const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
-        touchStartRef.current = null;
-        if (Math.abs(dx) >= 55 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-            if (dx > 0) goPrevJournalWeek();
-            else goNextJournalWeek();
-        }
-    };
     
     const journalDates = journalDays.map(d => d.date);
     const journalVacation = H.getVacationForWeek(journalWeekStart, scheduleSettings, journalDates);
@@ -107,7 +85,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
     };
 
     return (
-        <div className="space-y-3 sm:space-y-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div className="space-y-3 sm:space-y-6">
             <div className="hidden print:block p-3 mb-3 border-b-2 border-black text-center">
                 <div className="text-xs font-bold uppercase tracking-widest text-slate-600">{H.getSchool(state, user.schoolId)?.name || 'ЭлЖур'}</div>
                 <div className="text-xl font-bold text-black mt-0.5">{t('diary')} — {user.fio} ({user.class}{user.letter})</div>
@@ -299,7 +277,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                   )
               })}
             </div>
-            <Modal isOpen={!!selectedGradeDetails} onClose={() => setSelectedGradeDetails(null)} title={t('grade_details')}>{selectedGradeDetails && (<div className="space-y-3 sm:space-y-5"><div className="flex justify-between items-start gap-2"><div><div className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold tracking-wider mb-0.5 sm:mb-1">{t('subject')}</div><div className="text-sm sm:text-lg font-bold text-slate-800 dark:text-white">{selectedGradeDetails.subject}</div></div><div className="text-right"><div className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold tracking-wider mb-0.5 sm:mb-1">{t('date')}</div><div className="font-mono text-[11px] sm:text-xs bg-slate-100 px-2 py-0.5 sm:py-1 rounded dark:bg-slate-800">{H.formatDateDDMMYYYY(selectedGradeDetails.grade.date)}</div></div></div><div className="flex items-center justify-center py-2.5 sm:py-6"><div className={`text-3xl sm:text-5xl font-bold ${H.getGradeColorClass(String(selectedGradeDetails.grade.value), minGrade, maxGrade)}`}>{selectedGradeDetails.grade.value}</div></div>{selectedGradeDetails.grade.value === 'Н/У' && (() => { const sysNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); const deadline = selectedGradeDetails.grade.deadline ? new Date(selectedGradeDetails.grade.deadline) : H.addDays(new Date(selectedGradeDetails.grade.date), 7); const isExpired = sysNow >= deadline; return (<div className={`p-2 sm:p-3 rounded-xl border text-[11px] sm:text-xs font-medium text-center ${isExpired ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:border-red-800' : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800'}`}>{isExpired ? `${t('deadline_expired_msg')} (${H.formatDateDDMMYYYY(H.dateToIso(deadline))}): ${minGrade}.` : `${t('deadline_until_msg')} ${H.formatDateDDMMYYYY(H.dateToIso(deadline))}`}</div>); })()}<div className="grid grid-cols-2 gap-2 sm:gap-3 bg-slate-50 p-2.5 sm:p-3.5 rounded-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700"><div><div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase mb-0.5 sm:mb-1">{t('type_work')}</div><div className="font-semibold text-xs sm:text-sm text-slate-700 dark:text-slate-200">{getTypeLabel(selectedGradeDetails.grade.type) || t('other')}</div></div>{getEffectiveWeight(selectedGradeDetails.grade) > 0 && (<div><div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase mb-0.5 sm:mb-1">{t('weight')}</div><div className="font-semibold text-xs sm:text-sm text-slate-700 dark:text-slate-200">×{getEffectiveWeight(selectedGradeDetails.grade)}</div></div>)}</div>{selectedGradeDetails.grade.comment && (<div className="bg-blue-50 p-2.5 sm:p-3.5 rounded-xl border border-blue-100 dark:bg-blue-900/20 dark:border-blue-900/30"><div className="text-[10px] sm:text-xs font-bold text-blue-800 uppercase mb-1 dark:text-blue-300">{t('teacher_comment')}</div><p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 italic">{selectedGradeDetails.grade.comment}</p></div>)}<div className="flex justify-end pt-1"><Button onClick={() => setSelectedGradeDetails(null)} variant="secondary" size="sm">{t('close')}</Button></div></div>)}</Modal>
+            <Modal isOpen={!!selectedGradeDetails} onClose={() => setSelectedGradeDetails(null)} title={t('grade_details')}>{selectedGradeDetails && (<div className="space-y-3 sm:space-y-5"><div className="flex justify-between items-start gap-2"><div><div className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold tracking-wider mb-0.5 sm:mb-1">{t('subject')}</div><div className="text-sm sm:text-lg font-bold text-slate-800 dark:text-white">{selectedGradeDetails.subject}</div></div><div className="text-right"><div className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold tracking-wider mb-0.5 sm:mb-1">{t('date')}</div><div className="font-mono text-[11px] sm:text-xs bg-slate-100 px-2 py-0.5 sm:py-1 rounded dark:bg-slate-800">{H.formatDateDDMMYYYY(selectedGradeDetails.grade.date)}</div></div></div><div className="flex items-center justify-center py-2.5 sm:py-6"><div className={`text-3xl sm:text-5xl font-bold ${H.getGradeColorClass(String(selectedGradeDetails.grade.value), minGrade, maxGrade)}`}>{selectedGradeDetails.grade.value}</div></div>{selectedGradeDetails.grade.value === 'Н/У' && (() => { const deadlineIso = H.getNUDeadlineIso(selectedGradeDetails.grade); const isExpired = H.isGradeExpiredNU(selectedGradeDetails.grade, state.settings.systemTimeOffset); return (<div className={`p-2 sm:p-3 rounded-xl border text-[11px] sm:text-xs font-medium text-center ${isExpired ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:border-red-800' : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800'}`}>{isExpired ? `${t('deadline_expired_msg')} (${H.formatDateDDMMYYYY(deadlineIso)}): ${minGrade}.` : `${t('deadline_until_msg')} ${H.formatDateDDMMYYYY(deadlineIso)}`}</div>); })()}<div className="grid grid-cols-2 gap-2 sm:gap-3 bg-slate-50 p-2.5 sm:p-3.5 rounded-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700"><div><div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase mb-0.5 sm:mb-1">{t('type_work')}</div><div className="font-semibold text-xs sm:text-sm text-slate-700 dark:text-slate-200">{getTypeLabel(selectedGradeDetails.grade.type) || t('other')}</div></div>{getEffectiveWeight(selectedGradeDetails.grade) > 0 && (<div><div className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase mb-0.5 sm:mb-1">{t('weight')}</div><div className="font-semibold text-xs sm:text-sm text-slate-700 dark:text-slate-200">×{getEffectiveWeight(selectedGradeDetails.grade)}</div></div>)}</div>{selectedGradeDetails.grade.comment && (<div className="bg-blue-50 p-2.5 sm:p-3.5 rounded-xl border border-blue-100 dark:bg-blue-900/20 dark:border-blue-900/30"><div className="text-[10px] sm:text-xs font-bold text-blue-800 uppercase mb-1 dark:text-blue-300">{t('teacher_comment')}</div><p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 italic">{selectedGradeDetails.grade.comment}</p></div>)}<div className="flex justify-end pt-1"><Button onClick={() => setSelectedGradeDetails(null)} variant="secondary" size="sm">{t('close')}</Button></div></div>)}</Modal>
         </div>
     );
 };

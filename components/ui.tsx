@@ -52,11 +52,6 @@ export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ c
 };
 
 // --- SELECT ---
-export interface CustomSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
-  onChange?: (e: any) => void;
-  compact?: boolean;
-}
-
 interface ParsedSelectOption {
   value: string;
   label: React.ReactNode;
@@ -65,76 +60,99 @@ interface ParsedSelectOption {
   group?: string;
 }
 
-export const Select: React.FC<CustomSelectProps> = ({
+const extractNodeText = (node: React.ReactNode): string => {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractNodeText).join('');
+  if (React.isValidElement(node)) {
+    return extractNodeText((node.props as any)?.children);
+  }
+  return '';
+};
+
+const parseSelectChildren = (children: React.ReactNode, currentGroup?: string): ParsedSelectOption[] => {
+  const result: ParsedSelectOption[] = [];
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return;
+    const type = child.type;
+    const props = child.props as any;
+    if (type === React.Fragment) {
+      result.push(...parseSelectChildren(props.children, currentGroup));
+    } else if (type === 'optgroup') {
+      const groupLabel = props.label || '';
+      result.push(...parseSelectChildren(props.children, groupLabel));
+    } else if (type === 'option') {
+      const textLabel = props.label !== undefined ? String(props.label) : extractNodeText(props.children);
+      const val = props.value !== undefined ? String(props.value) : textLabel;
+      result.push({
+        value: val,
+        label: props.children ?? textLabel,
+        textLabel,
+        disabled: !!props.disabled,
+        group: currentGroup,
+      });
+    } else if (props?.children) {
+      result.push(...parseSelectChildren(props.children, currentGroup));
+    }
+  });
+  return result;
+};
+
+export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({
   className = '',
+  children,
   value,
   defaultValue,
   onChange,
-  disabled = false,
-  children,
+  disabled,
   title,
-  compact = false,
+  id,
+  name,
   style,
+  onClick,
 }) => {
+  const hasWidth = /\bw-\w+/.test(className);
   const [isOpen, setIsOpen] = useState(false);
   const [internalVal, setInternalVal] = useState<string>(() =>
-    value !== undefined ? String(value) : defaultValue !== undefined ? String(defaultValue) : ''
+    defaultValue !== undefined ? String(defaultValue) : ''
   );
-  const [menuPos, setMenuPos] = useState<{ top: number; bottom: number; left: number; width: number; openUp: boolean }>({
-    top: 0,
-    bottom: 0,
-    left: 0,
-    width: 180,
-    openUp: false,
-  });
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuRect, setMenuRect] = useState<{
+    top: number;
+    bottom: number;
+    left: number;
+    width: number;
+    openUp: boolean;
+  } | null>(null);
+
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const options: ParsedSelectOption[] = [];
-  const parseNodes = (nodes: React.ReactNode, groupLabel?: string) => {
-    React.Children.forEach(nodes, (child) => {
-      if (!React.isValidElement(child)) return;
-      const el = child as React.ReactElement<any>;
-      if (el.type === React.Fragment) {
-        parseNodes(el.props.children, groupLabel);
-      } else if (el.type === 'optgroup') {
-        parseNodes(el.props.children, String(el.props.label || ''));
-      } else if (el.type === 'option') {
-        const optVal = el.props.value !== undefined ? String(el.props.value) : String(el.props.children ?? '');
-        const rawText = React.Children.toArray(el.props.children)
-          .map((c) => (typeof c === 'string' || typeof c === 'number' ? String(c) : ''))
-          .join('')
-          .trim();
-        options.push({
-          value: optVal,
-          label: el.props.children,
-          textLabel: rawText || optVal,
-          disabled: Boolean(el.props.disabled),
-          group: groupLabel,
-        });
-      }
-    });
-  };
-  parseNodes(children);
+  const options = React.useMemo(() => parseSelectChildren(children), [children]);
 
-  const currentVal = value !== undefined ? String(value) : internalVal;
-  const selectedOpt = options.find((o) => o.value === currentVal) || options[0];
+  const currentValue =
+    value !== undefined
+      ? String(value)
+      : internalVal !== ''
+      ? internalVal
+      : options[0]?.value ?? '';
+
+  const selectedOption =
+    options.find((o) => o.value === currentValue) || options[0];
 
   const updatePosition = () => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    const estimatedHeight = Math.min(260, Math.max(options.length * 36 + 16, 80));
-    const openUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
-    const minMenuWidth = compact ? Math.max(rect.width, 165) : Math.max(rect.width, 160);
-    const maxLeft = Math.max(8, window.innerWidth - minMenuWidth - 8);
+    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const minWidth = Math.max(rect.width, 120);
+    const maxLeft = Math.max(8, window.innerWidth - minWidth - 8);
     const left = Math.min(Math.max(8, rect.left), maxLeft);
-    setMenuPos({
+    setMenuRect({
       top: rect.bottom + 4,
       bottom: window.innerHeight - rect.top + 4,
       left,
-      width: minMenuWidth,
+      width: minWidth,
       openUp,
     });
   };
@@ -142,150 +160,171 @@ export const Select: React.FC<CustomSelectProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     updatePosition();
+
     const handleOutside = (e: MouseEvent | TouchEvent) => {
       const target = e.target as Node;
       if (
-        triggerRef.current &&
-        !triggerRef.current.contains(target) &&
-        menuRef.current &&
-        !menuRef.current.contains(target)
+        buttonRef.current &&
+        !buttonRef.current.contains(target) &&
+        (!menuRef.current || !menuRef.current.contains(target))
       ) {
         setIsOpen(false);
       }
     };
+
     const handleScrollOrResize = (e: Event) => {
       if (menuRef.current && e.target && menuRef.current.contains(e.target as Node)) {
         return;
       }
       updatePosition();
     };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsOpen(false);
-    };
+
     document.addEventListener('mousedown', handleOutside);
     document.addEventListener('touchstart', handleOutside, { passive: true });
-    window.addEventListener('scroll', handleScrollOrResize, true);
     window.addEventListener('resize', handleScrollOrResize);
-    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', handleScrollOrResize, true);
     return () => {
       document.removeEventListener('mousedown', handleOutside);
       document.removeEventListener('touchstart', handleOutside);
-      window.removeEventListener('scroll', handleScrollOrResize, true);
       window.removeEventListener('resize', handleScrollOrResize);
-      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
     };
-  }, [isOpen, options.length]);
+  }, [isOpen]);
 
-  const handleSelectOption = (opt: ParsedSelectOption) => {
+  const handleSelectOption = (opt: ParsedSelectOption, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (opt.disabled) return;
-    if (value === undefined) setInternalVal(opt.value);
+    if (value === undefined) {
+      setInternalVal(opt.value);
+    }
     setIsOpen(false);
     if (onChange) {
       const syntheticEvent = {
-        target: { value: opt.value },
-        currentTarget: { value: opt.value },
+        target: { value: opt.value, name: name || '', id: id || '' },
+        currentTarget: { value: opt.value, name: name || '', id: id || '' },
         preventDefault: () => {},
         stopPropagation: () => {},
-      };
+      } as unknown as React.ChangeEvent<HTMLSelectElement>;
       onChange(syntheticEvent);
     }
   };
 
-  const hasWidth = /\b(w-|flex-1|min-w-)/.test(className);
-  const isTextCentered = /\btext-center\b/.test(className);
-
-  const groupedRender: { group?: string; items: ParsedSelectOption[] }[] = [];
-  options.forEach((opt) => {
-    const lastGroup = groupedRender[groupedRender.length - 1];
-    if (!lastGroup || lastGroup.group !== opt.group) {
-      groupedRender.push({ group: opt.group, items: [opt] });
-    } else {
-      lastGroup.items.push(opt);
-    }
-  });
+  const hasGroups = options.some((o) => !!o.group);
 
   return (
     <>
       <button
-        ref={triggerRef}
+        ref={buttonRef}
+        id={id}
         type="button"
         disabled={disabled}
         title={title}
         style={style}
-        data-no-swipe="true"
         onClick={(e) => {
-          e.stopPropagation();
+          if (onClick) onClick(e as any);
           if (disabled) return;
           if (!isOpen) updatePosition();
           setIsOpen((prev) => !prev);
         }}
-        className={
-          compact
-            ? `inline-flex items-center justify-between gap-0.5 rounded border border-slate-200 bg-white text-slate-900 px-1 py-0 text-[9px] sm:text-[10px] leading-tight h-4 sm:h-4.5 cursor-pointer hover:bg-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600 ${className}`
-            : `inline-flex items-center justify-between gap-1.5 ${hasWidth ? '' : 'w-full'} rounded-lg border border-slate-300 bg-white text-slate-900 shadow-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-xs sm:text-sm py-1 pl-2.5 pr-2 leading-normal min-h-[32px] sm:min-h-[36px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 ${className}`
-        }
+        className={`relative flex items-center justify-between text-left ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-xs focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm py-0.5 sm:py-1 pl-2 sm:pl-2.5 pr-6 sm:pr-7 leading-normal min-h-[32px] sm:min-h-[36px] border cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`}
       >
-        <span className={`truncate min-w-0 flex-1 ${compact || isTextCentered ? 'text-center' : 'text-left'}`}>
-          {selectedOpt ? selectedOpt.label : ''}
+        <span className="block truncate">
+          {selectedOption ? selectedOption.label : ''}
         </span>
-        {!compact && (
+        <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5 sm:pr-2 text-slate-400">
           <ChevronDown
             size={14}
-            className={`shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-blue-500' : ''}`}
+            className={`transition-transform duration-150 ${isOpen ? 'rotate-180 text-blue-500' : ''}`}
           />
-        )}
+        </span>
       </button>
+
       {isOpen &&
+        menuRect &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
             ref={menuRef}
-            data-no-swipe="true"
             style={{
               position: 'fixed',
-              left: `${menuPos.left}px`,
-              width: `${menuPos.width}px`,
+              left: `${menuRect.left}px`,
+              width: `${menuRect.width}px`,
               maxWidth: 'calc(100vw - 16px)',
-              ...(menuPos.openUp ? { bottom: `${menuPos.bottom}px` } : { top: `${menuPos.top}px` }),
+              ...(menuRect.openUp
+                ? { bottom: `${menuRect.bottom}px` }
+                : { top: `${menuRect.top}px` }),
+              zIndex: 99999,
             }}
-            className="z-[9999] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl py-1 max-h-64 overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-100 no-print"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-60 overflow-y-auto py-1 animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
           >
             {options.length === 0 ? (
               <div className="px-3 py-2 text-xs text-slate-400 text-center">—</div>
+            ) : hasGroups ? (
+              (() => {
+                const groups: { name: string; items: ParsedSelectOption[] }[] = [];
+                options.forEach((opt) => {
+                  const gName = opt.group || '';
+                  let grp = groups.find((g) => g.name === gName);
+                  if (!grp) {
+                    grp = { name: gName, items: [] };
+                    groups.push(grp);
+                  }
+                  grp.items.push(opt);
+                });
+                return groups.map((g, gIdx) => (
+                  <div key={`${g.name}_${gIdx}`}>
+                    {g.name && (
+                      <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/80 dark:bg-slate-800/60 dark:text-slate-500">
+                        {g.name}
+                      </div>
+                    )}
+                    {g.items.map((opt, idx) => {
+                      const isSelected = opt.value === currentValue;
+                      return (
+                        <button
+                          key={`${opt.value}_${idx}`}
+                          type="button"
+                          disabled={opt.disabled}
+                          onClick={(e) => handleSelectOption(opt, e)}
+                          className={`w-full text-left px-3 py-2 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors ${
+                            opt.disabled
+                              ? 'opacity-40 cursor-not-allowed text-slate-400'
+                              : isSelected
+                              ? 'bg-blue-50 text-blue-600 font-bold dark:bg-blue-900/30 dark:text-blue-400'
+                              : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className="truncate">{opt.label}</span>
+                          {isSelected && <Check size={14} className="shrink-0 text-blue-600 dark:text-blue-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ));
+              })()
             ) : (
-              groupedRender.map((grp, gIdx) => (
-                <div key={grp.group ? `${grp.group}_${gIdx}` : `grp_${gIdx}`}>
-                  {grp.group && (
-                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/80 dark:bg-slate-800/60 dark:text-slate-500 sticky top-0">
-                      {grp.group}
-                    </div>
-                  )}
-                  {grp.items.map((opt, idx) => {
-                    const isSelected = opt.value === currentVal;
-                    return (
-                      <button
-                        key={`${opt.value}_${idx}`}
-                        type="button"
-                        disabled={opt.disabled}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectOption(opt);
-                        }}
-                        className={`w-full text-left px-3 py-1.5 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors ${
-                          opt.disabled
-                            ? 'opacity-45 cursor-not-allowed text-slate-400 dark:text-slate-500 bg-slate-50/40 dark:bg-slate-800/30'
-                            : isSelected
-                            ? 'bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/40 dark:text-blue-300'
-                            : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="truncate">{opt.label}</span>
-                        {isSelected && <Check size={14} className="shrink-0 text-blue-600 dark:text-blue-400" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))
+              options.map((opt, idx) => {
+                const isSelected = opt.value === currentValue;
+                return (
+                  <button
+                    key={`${opt.value}_${idx}`}
+                    type="button"
+                    disabled={opt.disabled}
+                    onClick={(e) => handleSelectOption(opt, e)}
+                    className={`w-full text-left px-3 py-2 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors ${
+                      opt.disabled
+                        ? 'opacity-40 cursor-not-allowed text-slate-400'
+                        : isSelected
+                        ? 'bg-blue-50 text-blue-600 font-bold dark:bg-blue-900/30 dark:text-blue-400'
+                        : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="truncate">{opt.label}</span>
+                    {isSelected && <Check size={14} className="shrink-0 text-blue-600 dark:text-blue-400" />}
+                  </button>
+                );
+              })
             )}
           </div>,
           document.body

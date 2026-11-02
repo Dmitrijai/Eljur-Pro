@@ -1394,15 +1394,29 @@ export const parseGradeNumericValue = (val: string | number | undefined, minGrad
     return isNaN(parsed) ? null : parsed;
 };
 
+export const getNUDeadlineIso = (grade: Grade | undefined | null): string => {
+    if (!grade) return '';
+    if (grade.deadline && /^\d{4}-\d{2}-\d{2}$/.test(grade.deadline.trim())) {
+        return grade.deadline.trim();
+    }
+    if (!grade.date) return '';
+    const parts = grade.date.split('-').map(Number);
+    if (parts.length === 3 && !parts.some(isNaN)) {
+        const localDate = new Date(parts[0], parts[1] - 1, parts[2]);
+        localDate.setDate(localDate.getDate() + 7);
+        return dateToIso(localDate);
+    }
+    return dateToIso(addDays(new Date(grade.date), 7));
+};
+
 export const isGradeExpiredNU = (grade: Grade | undefined | null, systemTimeOffset: number = 0): boolean => {
     if (!grade || grade.value === undefined || grade.value === null) return false;
     const valStr = String(grade.value).trim().toUpperCase();
     if (valStr !== 'Н/У' && valStr !== 'N/U') return false;
-    const systemNow = new Date(Date.now() + systemTimeOffset);
-    systemNow.setHours(0, 0, 0, 0);
-    const created = new Date(grade.date);
-    const deadline = grade.deadline ? new Date(grade.deadline) : addDays(created, 7);
-    return systemNow >= deadline;
+    const systemNowIso = dateToIso(new Date(Date.now() + systemTimeOffset));
+    const deadlineIso = getNUDeadlineIso(grade);
+    if (!deadlineIso) return false;
+    return systemNowIso >= deadlineIso;
 };
 
 export const getEffectiveGradeValue = (grade: Grade | undefined | null, minGrade: number = 2, systemTimeOffset: number = 0): number | null => {
@@ -2794,4 +2808,47 @@ export function useSyncedState<T>(key: string, initialValue: T | (() => T)): [T,
 
     return [state, setSyncedState];
 }
+
+export interface UserPreferences {
+    theme?: 'light' | 'dark';
+    language?: 'ru' | 'en';
+    showSeasonalAnimations?: boolean;
+}
+
+export const getUserPreferences = (userId?: string | null, userObj?: { theme?: 'light' | 'dark'; language?: 'ru' | 'en'; showSeasonalAnimations?: boolean } | null): UserPreferences => {
+    const key = userId ? `eljur_user_prefs_${userId}` : 'eljur_guest_prefs';
+    let stored: UserPreferences = {};
+    if (typeof window !== 'undefined') {
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+                stored = JSON.parse(raw) || {};
+            }
+        } catch {}
+    }
+    return {
+        theme: userObj?.theme ?? stored.theme ?? 'light',
+        language: userObj?.language ?? stored.language ?? 'ru',
+        showSeasonalAnimations: userObj?.showSeasonalAnimations !== undefined
+            ? userObj.showSeasonalAnimations
+            : (stored.showSeasonalAnimations !== undefined ? stored.showSeasonalAnimations : true),
+    };
+};
+
+export const saveUserPreferences = (userId: string | undefined | null, prefs: Partial<UserPreferences>): UserPreferences => {
+    const key = userId ? `eljur_user_prefs_${userId}` : 'eljur_guest_prefs';
+    const current = getUserPreferences(userId, null);
+    const updated: UserPreferences = {
+        ...current,
+        ...prefs,
+    };
+    if (typeof window !== 'undefined') {
+        try {
+            localStorage.setItem(key, JSON.stringify(updated));
+            emitCrossTabSync('KV_UPDATE', key, updated);
+        } catch {}
+    }
+    return updated;
+};
+
 

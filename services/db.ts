@@ -1137,6 +1137,13 @@ export const subscribeToSchool = (
           }
         } catch {}
 
+        const schoolLevelSettings = data.settings ? { ...data.settings } : undefined;
+        if (schoolLevelSettings) {
+          delete schoolLevelSettings.theme;
+          delete schoolLevelSettings.language;
+          delete schoolLevelSettings.showSeasonalAnimations;
+        }
+
         docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
           name: data.name || 'Школа №1',
@@ -1149,7 +1156,7 @@ export const subscribeToSchool = (
           subjectRequirements: data.subjectRequirements,
           scheduleSettings: normalizedScheduleSettings,
           educationalResourceUrl: resolvedEduUrl,
-          settings: data.settings
+          settings: schoolLevelSettings
         }));
 
         onUpdate({
@@ -1174,7 +1181,7 @@ export const subscribeToSchool = (
           gradeTypes: data.gradeTypes,
           subjectRequirements: data.subjectRequirements,
           scheduleSettings: normalizedScheduleSettings,
-          settings: data.settings
+          settings: schoolLevelSettings
         });
       }
     }, (err) => handleSubError(err, OperationType.GET, `schools/${schoolId}`));
@@ -1481,7 +1488,15 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             gradeTypes: school.gradeTypes || plainState.schoolGradeTypes?.[schoolId] || (schoolId === 'school_1' ? plainState.gradeTypes : []),
             subjectRequirements: school.subjectRequirements || (schoolId === 'school_1' ? plainState.subjectRequirements : {}),
             scheduleSettings: school.scheduleSettings || plainState.schoolScheduleSettings?.[schoolId] || (schoolId === 'school_1' ? plainState.scheduleSettings : undefined),
-            settings: plainState.schoolsSettings?.[schoolId] || plainState.settings
+            settings: (() => {
+              const rawSettings = plainState.schoolsSettings?.[schoolId] || plainState.settings;
+              if (!rawSettings) return undefined;
+              const cleaned = { ...rawSettings };
+              delete cleaned.theme;
+              delete cleaned.language;
+              delete cleaned.showSeasonalAnimations;
+              return cleaned;
+            })()
           };
           if (resolvedEduUrl !== undefined) {
             schoolPayload.educationalResourceUrl = resolvedEduUrl;
@@ -1529,9 +1544,9 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
         synced.users.add(u.id);
       }
     } else if (currentUserId) {
-      // Non-admin user can only update their own user preferences (e.g. theme, language)
+      // Non-admin user can only update their own user preferences (e.g. theme, language, showSeasonalAnimations)
       const selfUser = schoolUsers.find((u: any) => u.id === currentUserId);
-      if (selfUser && synced.users.has(currentUserId)) {
+      if (selfUser) {
         const userDoc = { ...selfUser };
         queueSetIfChanged(doc(db, 'schools', schoolId, 'users', currentUserId), `schools/${schoolId}/users/${currentUserId}`, userDoc, true);
       }

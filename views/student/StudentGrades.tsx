@@ -431,9 +431,8 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                             </div>
                         </div>
                         {selectedGradeDetails.grade.value === 'Н/У' && (() => {
-                            const sysNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
-                            const deadline = selectedGradeDetails.grade.deadline ? new Date(selectedGradeDetails.grade.deadline) : H.addDays(new Date(selectedGradeDetails.grade.date), 7);
-                            const isExpired = sysNow >= deadline;
+                            const deadlineIso = H.getNUDeadlineIso(selectedGradeDetails.grade);
+                            const isExpired = H.isGradeExpiredNU(selectedGradeDetails.grade, state.settings.systemTimeOffset);
                             return (
                                 <div className={`p-2 sm:p-3 rounded-xl border text-[11px] sm:text-xs font-medium text-center ${
                                     isExpired
@@ -441,8 +440,8 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                         : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800'
                                 }`}>
                                     {isExpired
-                                        ? `${t('deadline_expired_msg')} (${H.formatDateDDMMYYYY(H.dateToIso(deadline))}): ${minGrade}.`
-                                        : `${t('deadline_until_msg')} ${H.formatDateDDMMYYYY(H.dateToIso(deadline))}`}
+                                        ? `${t('deadline_expired_msg')} (${H.formatDateDDMMYYYY(deadlineIso)}): ${minGrade}.`
+                                        : `${t('deadline_until_msg')} ${H.formatDateDDMMYYYY(deadlineIso)}`}
                                 </div>
                             );
                         })()}

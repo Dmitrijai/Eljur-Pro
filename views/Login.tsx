@@ -58,6 +58,32 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
 
   const pressCountRef = useRef(0);
   const resetTimerRef = useRef<any>(null);
+  const longPressTimerRef = useRef<any>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  const startLogoLongPress = () => {
+    longPressTriggeredRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      setShowCreatorModal(true);
+      setCreatorPassword('');
+      setError('');
+    }, 3000);
+  };
+
+  const cancelLogoLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    };
+  }, []);
 
   const lang = settings?.language || 'ru';
   const t = (k: string) => H.t(k, lang);
@@ -393,10 +419,27 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
       <Card className="w-full max-w-md p-5 sm:p-8 shadow-2xl border-t-[5px] sm:border-t-[6px] border-t-blue-600 dark:border-t-blue-500 relative">
         <div className="text-center mb-5 sm:mb-10">
           <img
-            onClick={onShowInfo}
+            onClick={(e) => {
+              if (longPressTriggeredRef.current) {
+                e.preventDefault();
+                e.stopPropagation();
+                longPressTriggeredRef.current = false;
+                return;
+              }
+              onShowInfo();
+            }}
+            onTouchStart={startLogoLongPress}
+            onTouchEnd={cancelLogoLongPress}
+            onTouchCancel={cancelLogoLongPress}
+            onTouchMove={cancelLogoLongPress}
+            onMouseDown={startLogoLongPress}
+            onMouseUp={cancelLogoLongPress}
+            onMouseLeave={cancelLogoLongPress}
+            onContextMenu={(e) => e.preventDefault()}
             src={`${import.meta.env.BASE_URL}assets/icon.png`}
             alt="ЭлЖур"
             draggable={false}
+            style={{ WebkitTouchCallout: 'none' }}
             className="w-[72px] h-[72px] sm:w-24 sm:h-24 object-contain mx-auto mb-3 sm:mb-6 transform hover:scale-105 transition-transform duration-300 cursor-pointer select-none"
           />
           <h2 className="text-xl sm:text-3xl font-bold text-slate-800 dark:text-white mb-1 sm:mb-2 font-heading">{schoolName}</h2>

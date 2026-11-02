@@ -119,7 +119,7 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
     if (!selectedClassNum || !selectedClassLetter) return [];
     return state.users
       .filter(u => u.role === 'student' && u.schoolId === user.schoolId && u.class === selectedClassNum && u.letter === selectedClassLetter)
-      .sort((a, b) => a.fio.localeCompare(b.fio));
+      .sort((a, b) => H.formatShortName(a.fio).localeCompare(H.formatShortName(b.fio), 'ru') || a.fio.localeCompare(b.fio, 'ru'));
   }, [state.users, user.schoolId, selectedClassNum, selectedClassLetter]);
 
   const filteredStudents = useMemo(() => {

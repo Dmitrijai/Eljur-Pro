@@ -793,65 +793,102 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
       <Card className="p-3.5 sm:p-8">
         <h3 className="font-bold text-sm sm:text-lg mb-3 sm:mb-6 text-slate-800 dark:text-white font-heading">{t('theme_appearance')}</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-6">
-           <div>
-             <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('app_theme')}</label>
-             <Select 
-               value={state.settings.theme} 
-               onChange={(e) => {
-                 const val = e.target.value as 'light' | 'dark';
-                 try { localStorage.setItem('eljur_theme', val); } catch (_) {}
-                 const u = state.users.find(usr => usr.id === user.id);
-                 if (u) u.theme = val;
-                 user.theme = val;
-                 state.settings.theme = val;
-                 onUpdate(state);
-               }}
-             >
-               <option value="light">{t('theme_light')}</option>
-               <option value="dark">{t('theme_dark')}</option>
-             </Select>
-           </div>
-           <div>
-             <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('language')}</label>
-             <Select 
-               value={state.settings.language || 'ru'} 
-               onChange={(e) => {
-                 const val = e.target.value as 'ru' | 'en';
-                 try { localStorage.setItem('eljur_lang', val); } catch (_) {}
-                 const u = state.users.find(usr => usr.id === user.id);
-                 if (u) u.language = val;
-                 user.language = val;
-                 state.settings.language = val;
-                 onUpdate(state);
-               }}
-             >
-               <option value="ru">Русский</option>
-               <option value="en">English</option>
-             </Select>
-           </div>
-           
-           <div className="col-span-1 md:col-span-2">
-               <label className="inline-flex sm:flex items-center gap-2 sm:gap-3 cursor-pointer py-1.5 px-2.5 sm:p-3 rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 transition-colors hover:border-blue-300 dark:hover:border-blue-700 w-full">
-                   <div className={`w-7 h-4 sm:w-10 sm:h-6 rounded-full p-0.5 sm:p-1 transition-colors shrink-0 ${state.settings.showSeasonalAnimations !== false ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                       <div className={`w-3 h-3 sm:w-4 sm:h-4 bg-white rounded-full shadow-sm transform transition-transform ${state.settings.showSeasonalAnimations !== false ? 'translate-x-3 sm:translate-x-4' : 'translate-x-0'}`}></div>
-                   </div>
-                   <input 
-                       type="checkbox" 
-                       className="hidden" 
-                       checked={state.settings.showSeasonalAnimations !== false} 
-                       onChange={(e) => { state.settings.showSeasonalAnimations = e.target.checked; onUpdate(state); }}
-                   />
-                   <div className="min-w-0">
-                       <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] sm:text-sm flex items-center gap-1 sm:gap-2 leading-tight">
-                           <Sparkles size={12} className="text-amber-500 shrink-0 sm:w-3.5 sm:h-3.5" />
-                           {t('seasonal_animations')}
-                       </span>
-                       <span className="block text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 leading-tight mt-0.5">{t('enable_seasonal')}</span>
-                   </div>
-               </label>
-           </div>
-        </div>
+        {(() => {
+          const userPrefs = H.getUserPreferences(user.id, user);
+          const currentTheme = user.theme ?? userPrefs.theme ?? state.settings.theme ?? 'light';
+          const currentLang = user.language ?? userPrefs.language ?? state.settings.language ?? 'ru';
+          const currentSeasonal = user.showSeasonalAnimations !== undefined
+            ? user.showSeasonalAnimations
+            : (userPrefs.showSeasonalAnimations !== undefined
+              ? userPrefs.showSeasonalAnimations
+              : state.settings.showSeasonalAnimations !== false);
+
+          const syncSessionUserPrefs = (patch: Partial<User>) => {
+            try {
+              const rawSession = localStorage.getItem('eljur_session');
+              if (rawSession) {
+                const parsed = JSON.parse(rawSession);
+                if (parsed && parsed.user && parsed.user.id === user.id) {
+                  parsed.user = { ...parsed.user, ...patch };
+                  localStorage.setItem('eljur_session', JSON.stringify(parsed));
+                }
+              }
+            } catch {}
+          };
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-6">
+               <div>
+                 <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('app_theme')}</label>
+                 <Select 
+                   value={currentTheme} 
+                   onChange={(e) => {
+                     const val = e.target.value as 'light' | 'dark';
+                     H.saveUserPreferences(user.id, { theme: val });
+                     const u = state.users.find(usr => usr.id === user.id);
+                     if (u) u.theme = val;
+                     user.theme = val;
+                     syncSessionUserPrefs({ theme: val });
+                     state.settings.theme = val;
+                     onUpdate({ ...state });
+                   }}
+                 >
+                   <option value="light">{t('theme_light')}</option>
+                   <option value="dark">{t('theme_dark')}</option>
+                 </Select>
+               </div>
+               <div>
+                 <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('language')}</label>
+                 <Select 
+                   value={currentLang} 
+                   onChange={(e) => {
+                     const val = e.target.value as 'ru' | 'en';
+                     H.saveUserPreferences(user.id, { language: val });
+                     const u = state.users.find(usr => usr.id === user.id);
+                     if (u) u.language = val;
+                     user.language = val;
+                     syncSessionUserPrefs({ language: val });
+                     state.settings.language = val;
+                     onUpdate({ ...state });
+                   }}
+                 >
+                   <option value="ru">Русский</option>
+                   <option value="en">English</option>
+                 </Select>
+               </div>
+               
+               <div className="col-span-1 md:col-span-2">
+                   <label className="inline-flex sm:flex items-center gap-2 sm:gap-3 cursor-pointer py-1.5 px-2.5 sm:p-3 rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 transition-colors hover:border-blue-300 dark:hover:border-blue-700 w-full">
+                       <div className={`w-7 h-4 sm:w-10 sm:h-6 rounded-full p-0.5 sm:p-1 transition-colors shrink-0 ${currentSeasonal ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                           <div className={`w-3 h-3 sm:w-4 sm:h-4 bg-white rounded-full shadow-sm transform transition-transform ${currentSeasonal ? 'translate-x-3 sm:translate-x-4' : 'translate-x-0'}`}></div>
+                       </div>
+                       <input 
+                           type="checkbox" 
+                           className="hidden" 
+                           checked={currentSeasonal} 
+                           onChange={(e) => {
+                             const val = e.target.checked;
+                             H.saveUserPreferences(user.id, { showSeasonalAnimations: val });
+                             const u = state.users.find(usr => usr.id === user.id);
+                             if (u) u.showSeasonalAnimations = val;
+                             user.showSeasonalAnimations = val;
+                             syncSessionUserPrefs({ showSeasonalAnimations: val });
+                             state.settings.showSeasonalAnimations = val;
+                             onUpdate({ ...state });
+                           }}
+                       />
+                       <div className="min-w-0">
+                           <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] sm:text-sm flex items-center gap-1 sm:gap-2 leading-tight">
+                               <Sparkles size={12} className="text-amber-500 shrink-0 sm:w-3.5 sm:h-3.5" />
+                               {t('seasonal_animations')}
+                           </span>
+                           <span className="block text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 leading-tight mt-0.5">{t('enable_seasonal')}</span>
+                       </div>
+                   </label>
+               </div>
+            </div>
+          );
+        })()}
       </Card>
 
       <Card className="p-3.5 sm:p-8">

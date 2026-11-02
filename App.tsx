@@ -939,6 +939,20 @@ export default function App() {
           });
         }
 
+        const activeSelfUser = currentUser
+          ? mergedUsers.find(u => u.id === currentUser.id) || currentUser
+          : null;
+        const userPrefs = activeSelfUser
+          ? H.getUserPreferences(activeSelfUser.id, activeSelfUser)
+          : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true };
+        if (activeSelfUser) {
+          H.saveUserPreferences(activeSelfUser.id, userPrefs);
+        }
+
+        const baseSettings = isPrimarySchool && schoolUpdate.settings
+          ? { ...cur.settings, ...schoolUpdate.settings }
+          : { ...cur.settings };
+
         const updated: AppState = {
           ...cur,
           schools: mergedSchools,
@@ -955,7 +969,12 @@ export default function App() {
           announcements: mergedAnnouncements,
           studentGroups: mergedGroups,
           quarters: isPrimarySchool && schoolUpdate.quarters ? schoolUpdate.quarters : cur.quarters,
-          settings: isPrimarySchool && schoolUpdate.settings ? { ...cur.settings, ...schoolUpdate.settings } : cur.settings,
+          settings: {
+            ...baseSettings,
+            theme: userPrefs.theme || 'light',
+            language: userPrefs.language || 'ru',
+            showSeasonalAnimations: userPrefs.showSeasonalAnimations !== false
+          },
           gradingSystem: isPrimarySchool ? (schoolUpdate.gradingSystem || cur.gradingSystem) : cur.gradingSystem,
           gradeTypes: isPrimarySchool ? (schoolUpdate.gradeTypes || cur.gradeTypes) : cur.gradeTypes,
           scheduleSettings: isPrimarySchool ? (schoolUpdate.scheduleSettings || cur.scheduleSettings) : cur.scheduleSettings,
@@ -1050,21 +1069,71 @@ export default function App() {
     };
   }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
 
+  // Synchronize active user's personal preferences (theme, language, seasonal animations) with appState.settings
+  useEffect(() => {
+    setAppState(prev => {
+      if (!prev) return prev;
+      if (!currentUser) {
+        if (
+          prev.settings.theme === 'light' &&
+          prev.settings.language === 'ru' &&
+          prev.settings.showSeasonalAnimations !== false
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          settings: {
+            ...prev.settings,
+            theme: 'light',
+            language: 'ru',
+            showSeasonalAnimations: true
+          }
+        };
+      }
+      const userInState = prev.users.find(u => u.id === currentUser.id) || currentUser;
+      const prefs = H.getUserPreferences(currentUser.id, userInState);
+      const nextTheme = prefs.theme || 'light';
+      const nextLang = prefs.language || 'ru';
+      const nextSeasonal = prefs.showSeasonalAnimations !== false;
+      if (
+        prev.settings.theme === nextTheme &&
+        prev.settings.language === nextLang &&
+        prev.settings.showSeasonalAnimations === nextSeasonal
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        settings: {
+          ...prev.settings,
+          theme: nextTheme,
+          language: nextLang,
+          showSeasonalAnimations: nextSeasonal
+        }
+      };
+    });
+  }, [currentUser?.id]);
+
   // Effect to toggle body class for theme
   useEffect(() => {
-    if (appState?.settings?.theme === 'dark') {
+    const activeTheme = currentUser
+      ? (H.getUserPreferences(currentUser.id, appState?.users.find(u => u.id === currentUser.id) || currentUser).theme || appState?.settings?.theme || 'light')
+      : 'light';
+    if (activeTheme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
-  }, [appState?.settings?.theme]);
+  }, [appState?.settings?.theme, currentUser?.id]);
 
   // Effect to set HTML lang for native input localization
   useEffect(() => {
-    if (appState?.settings?.language) {
-      document.documentElement.lang = appState.settings.language;
-    }
-  }, [appState?.settings?.language]);
+    const activeLang = currentUser
+      ? (H.getUserPreferences(currentUser.id, appState?.users.find(u => u.id === currentUser.id) || currentUser).language || appState?.settings?.language || 'ru')
+      : 'ru';
+    document.documentElement.lang = activeLang;
+  }, [appState?.settings?.language, currentUser?.id]);
 
   // Effect to Apply Fonts
   useEffect(() => {
@@ -1216,35 +1285,40 @@ export default function App() {
   };
 
   const handleLogin = (u: User) => {
-    DB.setCurrentSessionUser(u);
-    setCurrentUser(u);
+    const prefs = H.getUserPreferences(u.id, u);
+    H.saveUserPreferences(u.id, prefs);
+    const enrichedUser: User = {
+      ...u,
+      theme: prefs.theme || 'light',
+      language: prefs.language || 'ru',
+      showSeasonalAnimations: prefs.showSeasonalAnimations !== false
+    };
+    DB.setCurrentSessionUser(enrichedUser);
+    setCurrentUser(enrichedUser);
     setViewMode('dashboard');
-    if (u.schoolId && u.schoolId !== 'global') {
-      try { localStorage.setItem('eljur_active_school_id', u.schoolId); } catch {}
+    if (enrichedUser.schoolId && enrichedUser.schoolId !== 'global') {
+      try { localStorage.setItem('eljur_active_school_id', enrichedUser.schoolId); } catch {}
     }
-    if (u.theme) {
-        try { localStorage.setItem('eljur_theme', u.theme); } catch (_) {}
-        if (appState) {
-            appState.settings.theme = u.theme;
-            setAppState({ ...appState });
+    if (appState) {
+      setAppState({
+        ...appState,
+        settings: {
+          ...appState.settings,
+          theme: enrichedUser.theme || 'light',
+          language: enrichedUser.language || 'ru',
+          showSeasonalAnimations: enrichedUser.showSeasonalAnimations !== false
         }
-    }
-    if (u.language) {
-        try { localStorage.setItem('eljur_lang', u.language); } catch (_) {}
-        if (appState) {
-            appState.settings.language = u.language;
-            setAppState({ ...appState });
-        }
+      });
     }
     
-    const safeSessionUser = { ...u };
+    const safeSessionUser = { ...enrichedUser };
     delete (safeSessionUser as any).password;
     const expires = Date.now() + 60 * 60 * 1000;
-    const sessionPayload = { userId: u.id, user: safeSessionUser, expires, viewMode: 'dashboard' };
+    const sessionPayload = { userId: enrichedUser.id, user: safeSessionUser, expires, viewMode: 'dashboard' };
     localStorage.setItem('eljur_session', JSON.stringify(sessionPayload));
     H.emitCrossTabSync('SESSION_CHANGE', 'eljur_session', sessionPayload);
     
-    const school = appState?.schools.find(s => s.id === u.schoolId);
+    const school = appState?.schools.find(s => s.id === enrichedUser.schoolId);
     if (school) {
         localStorage.setItem('eljur_last_school_name', school.name);
     }
@@ -1253,12 +1327,26 @@ export default function App() {
     DB.setCurrentSessionUser(null);
     setCurrentUser(null);
     setViewMode('dashboard');
+    if (appState) {
+      setAppState({
+        ...appState,
+        settings: {
+          ...appState.settings,
+          theme: 'light',
+          language: 'ru',
+          showSeasonalAnimations: true
+        }
+      });
+    }
     localStorage.removeItem('eljur_session');
     H.emitCrossTabSync('SESSION_CHANGE', 'eljur_session', null);
   };
 
   const currentSchool = appState?.schools.find(s => s.id === currentUser?.schoolId);
-  const lang = appState?.settings?.language || 'ru';
+  const currentUserPrefs = currentUser
+    ? H.getUserPreferences(currentUser.id, appState?.users.find(u => u.id === currentUser.id) || currentUser)
+    : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true };
+  const lang = currentUser ? (currentUserPrefs.language || appState?.settings?.language || 'ru') : 'ru';
   const t = (k: string) => H.t(k, lang);
   const eduResourceUrl = currentUser && currentUser.role !== 'creator'
     ? H.formatExternalResourceUrl(H.getSchoolEducationalResourceUrl(appState, currentUser.schoolId))
@@ -1268,7 +1356,9 @@ export default function App() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-blue-600 font-medium dark:bg-slate-900">{H.t('loading', 'ru')}</div>;
   if (!appState) return <div className="p-10 text-red-600">{H.t('error_state', 'ru')}</div>;
 
-  const showAnimations = appState.settings.showSeasonalAnimations !== false; // Default to true
+  const showAnimations = currentUser
+    ? (currentUserPrefs.showSeasonalAnimations !== false)
+    : true;
 
   const renderEljurInfo = () => {
     const info = H.getSchoolEljurInfo(appState, currentUser?.schoolId) || H.DEFAULT_ELJUR_INFO_HTML;
