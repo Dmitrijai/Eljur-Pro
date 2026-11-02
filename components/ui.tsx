@@ -52,13 +52,245 @@ export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ c
 };
 
 // --- SELECT ---
-export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({ className = '', ...props }) => {
-  const hasWidth = /\bw-\w+/.test(className);
+export interface CustomSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
+  onChange?: (e: any) => void;
+  compact?: boolean;
+}
+
+interface ParsedSelectOption {
+  value: string;
+  label: React.ReactNode;
+  textLabel: string;
+  disabled?: boolean;
+  group?: string;
+}
+
+export const Select: React.FC<CustomSelectProps> = ({
+  className = '',
+  value,
+  defaultValue,
+  onChange,
+  disabled = false,
+  children,
+  title,
+  compact = false,
+  style,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [internalVal, setInternalVal] = useState<string>(() =>
+    value !== undefined ? String(value) : defaultValue !== undefined ? String(defaultValue) : ''
+  );
+  const [menuPos, setMenuPos] = useState<{ top: number; bottom: number; left: number; width: number; openUp: boolean }>({
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 180,
+    openUp: false,
+  });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const options: ParsedSelectOption[] = [];
+  const parseNodes = (nodes: React.ReactNode, groupLabel?: string) => {
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement(child)) return;
+      const el = child as React.ReactElement<any>;
+      if (el.type === React.Fragment) {
+        parseNodes(el.props.children, groupLabel);
+      } else if (el.type === 'optgroup') {
+        parseNodes(el.props.children, String(el.props.label || ''));
+      } else if (el.type === 'option') {
+        const optVal = el.props.value !== undefined ? String(el.props.value) : String(el.props.children ?? '');
+        const rawText = React.Children.toArray(el.props.children)
+          .map((c) => (typeof c === 'string' || typeof c === 'number' ? String(c) : ''))
+          .join('')
+          .trim();
+        options.push({
+          value: optVal,
+          label: el.props.children,
+          textLabel: rawText || optVal,
+          disabled: Boolean(el.props.disabled),
+          group: groupLabel,
+        });
+      }
+    });
+  };
+  parseNodes(children);
+
+  const currentVal = value !== undefined ? String(value) : internalVal;
+  const selectedOpt = options.find((o) => o.value === currentVal) || options[0];
+
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const estimatedHeight = Math.min(260, Math.max(options.length * 36 + 16, 80));
+    const openUp = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
+    const minMenuWidth = compact ? Math.max(rect.width, 165) : Math.max(rect.width, 160);
+    const maxLeft = Math.max(8, window.innerWidth - minMenuWidth - 8);
+    const left = Math.min(Math.max(8, rect.left), maxLeft);
+    setMenuPos({
+      top: rect.bottom + 4,
+      bottom: window.innerHeight - rect.top + 4,
+      left,
+      width: minMenuWidth,
+      openUp,
+    });
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (
+        triggerRef.current &&
+        !triggerRef.current.contains(target) &&
+        menuRef.current &&
+        !menuRef.current.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    const handleScrollOrResize = (e: Event) => {
+      if (menuRef.current && e.target && menuRef.current.contains(e.target as Node)) {
+        return;
+      }
+      updatePosition();
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, options.length]);
+
+  const handleSelectOption = (opt: ParsedSelectOption) => {
+    if (opt.disabled) return;
+    if (value === undefined) setInternalVal(opt.value);
+    setIsOpen(false);
+    if (onChange) {
+      const syntheticEvent = {
+        target: { value: opt.value },
+        currentTarget: { value: opt.value },
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      };
+      onChange(syntheticEvent);
+    }
+  };
+
+  const hasWidth = /\b(w-|flex-1|min-w-)/.test(className);
+  const isTextCentered = /\btext-center\b/.test(className);
+
+  const groupedRender: { group?: string; items: ParsedSelectOption[] }[] = [];
+  options.forEach((opt) => {
+    const lastGroup = groupedRender[groupedRender.length - 1];
+    if (!lastGroup || lastGroup.group !== opt.group) {
+      groupedRender.push({ group: opt.group, items: [opt] });
+    } else {
+      lastGroup.items.push(opt);
+    }
+  });
+
   return (
-    <select 
-      className={`block ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-xs focus:border-blue-500 focus:ring-blue-500 text-xs sm:text-sm py-0.5 sm:py-1 pl-2 sm:pl-2.5 pr-6 sm:pr-7 leading-normal min-h-[32px] sm:min-h-[36px] border cursor-pointer transition-colors dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`} 
-      {...props} 
-    />
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        title={title}
+        style={style}
+        data-no-swipe="true"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (disabled) return;
+          if (!isOpen) updatePosition();
+          setIsOpen((prev) => !prev);
+        }}
+        className={
+          compact
+            ? `inline-flex items-center justify-between gap-0.5 rounded border border-slate-200 bg-white text-slate-900 px-1 py-0 text-[9px] sm:text-[10px] leading-tight h-4 sm:h-4.5 cursor-pointer hover:bg-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600 ${className}`
+            : `inline-flex items-center justify-between gap-1.5 ${hasWidth ? '' : 'w-full'} rounded-lg border border-slate-300 bg-white text-slate-900 shadow-xs focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-xs sm:text-sm py-1 pl-2.5 pr-2 leading-normal min-h-[32px] sm:min-h-[36px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 ${className}`
+        }
+      >
+        <span className={`truncate min-w-0 flex-1 ${compact || isTextCentered ? 'text-center' : 'text-left'}`}>
+          {selectedOpt ? selectedOpt.label : ''}
+        </span>
+        {!compact && (
+          <ChevronDown
+            size={14}
+            className={`shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-blue-500' : ''}`}
+          />
+        )}
+      </button>
+      {isOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            data-no-swipe="true"
+            style={{
+              position: 'fixed',
+              left: `${menuPos.left}px`,
+              width: `${menuPos.width}px`,
+              maxWidth: 'calc(100vw - 16px)',
+              ...(menuPos.openUp ? { bottom: `${menuPos.bottom}px` } : { top: `${menuPos.top}px` }),
+            }}
+            className="z-[9999] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl py-1 max-h-64 overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-100 no-print"
+          >
+            {options.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-slate-400 text-center">—</div>
+            ) : (
+              groupedRender.map((grp, gIdx) => (
+                <div key={grp.group ? `${grp.group}_${gIdx}` : `grp_${gIdx}`}>
+                  {grp.group && (
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/80 dark:bg-slate-800/60 dark:text-slate-500 sticky top-0">
+                      {grp.group}
+                    </div>
+                  )}
+                  {grp.items.map((opt, idx) => {
+                    const isSelected = opt.value === currentVal;
+                    return (
+                      <button
+                        key={`${opt.value}_${idx}`}
+                        type="button"
+                        disabled={opt.disabled}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectOption(opt);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 text-xs sm:text-sm flex items-center justify-between gap-2 transition-colors ${
+                          opt.disabled
+                            ? 'opacity-45 cursor-not-allowed text-slate-400 dark:text-slate-500 bg-slate-50/40 dark:bg-slate-800/30'
+                            : isSelected
+                            ? 'bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/40 dark:text-blue-300'
+                            : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="truncate">{opt.label}</span>
+                        {isSelected && <Check size={14} className="shrink-0 text-blue-600 dark:text-blue-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>,
+          document.body
+        )}
+    </>
   );
 };
 

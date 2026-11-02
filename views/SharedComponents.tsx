@@ -5,7 +5,7 @@ import { AppState, User, Message, Attachment } from '../types';
 import * as H from '../utils/helpers';
 import * as DB from '../services/db';
 import { Button, Input, Card, Modal, FileDisplay, MultiFileUploader, SearchableSelect, Select } from '../components/ui';
-import { Trash2, Edit, Shield, CheckCheck, Clock, Eye, Users, Search, Info } from 'lucide-react';
+import { Trash2, Edit, Shield, CheckCheck, Clock, Eye, Users, Search, Info, X } from 'lucide-react';
 
 interface MessagingProps {
   state: AppState;

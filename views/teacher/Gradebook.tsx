@@ -405,10 +405,18 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
        return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
    };
 
+   const getDefaultDeadlineDate = (gradeDate?: string): string => {
+       if (!gradeDate || !/^\d{4}-\d{2}-\d{2}$/.test(gradeDate)) return '';
+       const [y, m, d] = gradeDate.split('-').map(Number);
+       const dt = new Date(y, m - 1, d + 7);
+       const pad = (n: number) => String(n).padStart(2, '0');
+       return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+   };
+
    const openDeadlineModal = (g: Grade) => {
        setDeadlineError(null);
-       const minDate = getMinDeadlineDate(g.date);
-       const initialDate = (g.deadline && (!g.date || g.deadline > g.date)) ? g.deadline : minDate;
+       const defaultDate = getDefaultDeadlineDate(g.date);
+       const initialDate = (g.deadline && (!g.date || g.deadline > g.date)) ? g.deadline : defaultDate;
        setDeadlineModal({ isOpen: true, grade: g });
        setDeadlineDate(initialDate);
    };
@@ -416,11 +424,19 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
    const saveDeadline = () => {
        if (!deadlineModal || !targetKey) return;
        const gradeDate = deadlineModal.grade.date;
-       if (deadlineDate && gradeDate && deadlineDate <= gradeDate) {
+       if (!deadlineDate) {
            setDeadlineError(
                lang === 'ru'
-                   ? `Нельзя выбрать дату выставления Н/У (${H.formatDateDDMMYYYY(gradeDate)}) или дату до неё.`
-                   : `Cannot select the Н/У grade date (${H.formatDateDDMMYYYY(gradeDate)}) or any earlier date.`
+                   ? 'Пожалуйста, выберите дату превращения Н/У в оценку.'
+                   : 'Please select a deadline date for Н/У.'
+           );
+           return;
+       }
+       if (gradeDate && deadlineDate <= gradeDate) {
+           setDeadlineError(
+               lang === 'ru'
+                   ? `Ошибка: нельзя выбрать дату выставления Н/У (${H.formatDateDDMMYYYY(gradeDate)}) или дату до неё. Выберите дату позже ${H.formatDateDDMMYYYY(gradeDate)}.`
+                   : `Error: cannot select the Н/У grade date (${H.formatDateDDMMYYYY(gradeDate)}) or any earlier date.`
            );
            return;
        }
@@ -531,10 +547,16 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
        }
    }, [visibleDates, selectedMobileDate, todayIso]);
 
-   const selectedTypeIsDynamic = selectedGrade ? gradeTypes.find(t => {
-       const nk = H.normalizeGradeTypeKey(selectedGrade.grade.type, gradeTypes);
-       return t.key === nk || t.id === nk || t.name === nk;
-   })?.isDynamicWeight : false;
+   const selectedTypeIsDynamic = selectedGrade ? Boolean(
+       gradeTypes.find(t => {
+           const nk = H.normalizeGradeTypeKey(selectedGrade.grade.type, gradeTypes);
+           return t.key === nk || t.id === nk || t.name === nk;
+       })?.isDynamicWeight ||
+       H.normalizeGradeTypeKey(selectedGrade.grade.type, gradeTypes) === 'nu' ||
+       String(selectedGrade.grade.value).trim().toUpperCase() === 'Н/У'
+   ) : false;
+
+   const mobileSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
    if (myClasses.length === 0) {
      return (
@@ -637,9 +659,10 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                    }}
                />
                <div className="flex items-center justify-center gap-0.5 w-full mt-0.5 overflow-hidden print:hidden">
-                   <select
+                   <Select
+                       compact
                        disabled={isDisabled}
-                       className="flex-1 min-w-0 max-w-full truncate text-[9px] sm:text-[10px] leading-tight h-4 sm:h-4.5 bg-white border border-slate-200 px-0.5 py-0 text-center text-slate-900 focus:text-slate-900 no-print cursor-pointer hover:bg-slate-100 rounded dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                       className="flex-1 min-w-0 max-w-full truncate text-center no-print"
                        value={selectedSelectVal}
                        onChange={e => {
                            updateGrade(s.id, d, String(g?.value || ''), e.target.value, lIdx);
@@ -651,7 +674,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                        {gradeTypes.filter(gt => gt.key !== 'default' && gt.name !== '...').map((gt, idx) => (
                            <option key={`${gt.key || gt.id || idx}_${idx}`} value={gt.key}>{gt.name}</option>
                        ))}
-                   </select>
+                   </Select>
                    {shouldShowWeight && (
                        <span className="text-[8px] sm:text-[9px] text-slate-400 font-mono shrink-0 leading-none">×{effectiveWeight}</span>
                    )}
@@ -754,7 +777,32 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
          </div>
 
          {mobileViewMode === 'by_date' && (
-           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+           <div
+             className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden"
+             onTouchStart={e => {
+               const target = e.target as HTMLElement | null;
+               if (target?.closest('input, textarea, select, button, [data-no-swipe]')) {
+                 mobileSwipeStartRef.current = null;
+                 return;
+               }
+               if (e.touches.length === 1) {
+                 mobileSwipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+               }
+             }}
+             onTouchEnd={e => {
+               if (!mobileSwipeStartRef.current || e.changedTouches.length === 0) return;
+               const dx = e.changedTouches[0].clientX - mobileSwipeStartRef.current.x;
+               const dy = e.changedTouches[0].clientY - mobileSwipeStartRef.current.y;
+               mobileSwipeStartRef.current = null;
+               if (Math.abs(dx) >= 55 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                 if (dx > 0 && activeMobileDateIdx > 0) {
+                   setSelectedMobileDate(visibleDates[activeMobileDateIdx - 1]);
+                 } else if (dx < 0 && activeMobileDateIdx >= 0 && activeMobileDateIdx < visibleDates.length - 1) {
+                   setSelectedMobileDate(visibleDates[activeMobileDateIdx + 1]);
+                 }
+               }
+             }}
+           >
              {visibleDates.length > 0 && activeMobileDate ? (
                <>
                  <div className="p-2 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-1.5">
@@ -951,37 +999,61 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                                    <span className="text-slate-400 ml-1">(×{getEffectiveWeight(selectedGrade.grade)})</span>
                                </span>
                            </div>
-                           {selectedTypeIsDynamic && (
-                               <div className="col-span-2 flex items-center gap-2 mt-1">
-                                   <span className="text-[11px] sm:text-xs font-bold text-slate-500">{t('weight_coeff')}</span>
-                                   <Input 
-                                      type="number" 
-                                      min={minWeight} 
-                                      max={maxWeight} 
-                                      value={editWeight} 
-                                      onChange={e => { 
-                                          const raw = parseInt(e.target.value);
-                                          const val = isNaN(raw) ? minWeight : Math.max(minWeight, Math.min(maxWeight, raw));
-                                          setEditWeight(val); 
-                                          if (selectedGrade && targetKey) {
-                                              const subjList = ensureMutableSubjectGrades();
-                                              const gIndex = subjList.findIndex((g:any) => g.id === selectedGrade.grade.id);
-                                              if (gIndex > -1) {
-                                                  subjList[gIndex].weight = val;
-                                                  const newState = {...localState};
-                                                  setLocalState(newState);
-                                                  commitGradebookChanges(newState);
-                                                  setSelectedGrade({...selectedGrade, grade: subjList[gIndex]}); 
-                                              }
-                                          }
-                                      }} 
-                                      className="w-14 sm:w-16 h-7 sm:h-8 text-xs sm:text-sm"
-                                   />
-                                   <Button onClick={() => openDeadlineModal(selectedGrade.grade)} variant="secondary" size="sm" className="h-7 sm:h-8 text-[11px] sm:text-xs whitespace-nowrap px-2">
-                                       <Clock size={13} className="mr-1"/> {t('timer_btn')}
-                                   </Button>
-                               </div>
-                           )}
+                           {selectedTypeIsDynamic && (() => {
+                               const effectiveDeadlineIso = selectedGrade.grade.deadline || getDefaultDeadlineDate(selectedGrade.grade.date);
+                               const isExpired = H.isGradeExpiredNU(selectedGrade.grade, localState.settings?.systemTimeOffset);
+                               return (
+                                   <div className="col-span-2 flex flex-col gap-2 mt-1">
+                                       {effectiveDeadlineIso && (
+                                           <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] sm:text-xs font-semibold w-fit ${
+                                               isExpired
+                                                   ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-950/40 dark:border-red-800 dark:text-red-300'
+                                                   : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300'
+                                           }`}>
+                                               <Clock size={13} className="shrink-0" />
+                                               <span>
+                                                   {lang === 'ru'
+                                                       ? (isExpired
+                                                           ? `Превратилась в ${minGrade}: ${H.formatDateDDMMYYYY(effectiveDeadlineIso)}`
+                                                           : `Превратится в ${minGrade}: ${H.formatDateDDMMYYYY(effectiveDeadlineIso)}`)
+                                                       : (isExpired
+                                                           ? `Turned into ${minGrade}: ${H.formatDateDDMMYYYY(effectiveDeadlineIso)}`
+                                                           : `Turns into ${minGrade}: ${H.formatDateDDMMYYYY(effectiveDeadlineIso)}`)}
+                                               </span>
+                                           </div>
+                                       )}
+                                       <div className="flex items-center gap-2">
+                                           <span className="text-[11px] sm:text-xs font-bold text-slate-500">{t('weight_coeff')}</span>
+                                           <Input 
+                                              type="number" 
+                                              min={minWeight} 
+                                              max={maxWeight} 
+                                              value={editWeight} 
+                                              onChange={e => { 
+                                                  const raw = parseInt(e.target.value);
+                                                  const val = isNaN(raw) ? minWeight : Math.max(minWeight, Math.min(maxWeight, raw));
+                                                  setEditWeight(val); 
+                                                  if (selectedGrade && targetKey) {
+                                                      const subjList = ensureMutableSubjectGrades();
+                                                      const gIndex = subjList.findIndex((g:any) => g.id === selectedGrade.grade.id);
+                                                      if (gIndex > -1) {
+                                                          subjList[gIndex].weight = val;
+                                                          const newState = {...localState};
+                                                          setLocalState(newState);
+                                                          commitGradebookChanges(newState);
+                                                          setSelectedGrade({...selectedGrade, grade: subjList[gIndex]}); 
+                                                      }
+                                                  }
+                                              }} 
+                                              className="w-14 sm:w-16 h-7 sm:h-8 text-xs sm:text-sm"
+                                           />
+                                           <Button onClick={() => openDeadlineModal(selectedGrade.grade)} variant="secondary" size="sm" className="h-7 sm:h-8 text-[11px] sm:text-xs whitespace-nowrap px-2">
+                                               <Clock size={13} className="mr-1"/> {t('timer_btn')}
+                                           </Button>
+                                       </div>
+                                   </div>
+                               );
+                           })()}
                        </div>
                    </div>
 
@@ -1040,25 +1112,34 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
            </div>
        </Modal>
        <Modal isOpen={!!deadlineModal} onClose={() => { setDeadlineError(null); setDeadlineModal(null); }} title={t('nu_deadline')}>
-           <div className="space-y-5">
-               <div className="bg-blue-50 dark:bg-blue-950/40 p-4 rounded-xl border border-blue-100 dark:border-blue-800 text-sm text-blue-900 dark:text-blue-200 flex items-start gap-3">
+           <div className="space-y-4">
+               <div className="bg-blue-50 dark:bg-blue-950/40 p-3.5 rounded-xl border border-blue-100 dark:border-blue-800 text-xs sm:text-sm text-blue-900 dark:text-blue-200 flex items-start gap-2.5">
                    <AlertCircle className="flex-shrink-0 mt-0.5" size={18}/>
-                   <p>{t('deadline_info')}</p>
+                   <div className="space-y-1">
+                       <p>{t('deadline_info')}</p>
+                       {deadlineModal?.grade.date && (
+                           <p className="font-semibold text-blue-800 dark:text-blue-300">
+                               {lang === 'ru'
+                                   ? `Дата выставления Н/У: ${H.formatDateDDMMYYYY(deadlineModal.grade.date)}`
+                                   : `Н/У placed on: ${H.formatDateDDMMYYYY(deadlineModal.grade.date)}`}
+                           </p>
+                       )}
+                   </div>
                </div>
                <div>
                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">{t('select_date')}</label>
                    <Input
                        type="date"
-                       min={getMinDeadlineDate(deadlineModal?.grade.date)}
                        value={deadlineDate}
+                       className={deadlineError ? 'border-red-500 focus:border-red-500 focus:ring-red-500 dark:border-red-500' : ''}
                        onChange={e => {
                            const val = e.target.value;
                            setDeadlineDate(val);
                            if (val && deadlineModal?.grade.date && val <= deadlineModal.grade.date) {
                                setDeadlineError(
                                    lang === 'ru'
-                                       ? `Нельзя выбрать дату выставления Н/У (${H.formatDateDDMMYYYY(deadlineModal.grade.date)}) или дату до неё.`
-                                       : `Cannot select the Н/У grade date (${H.formatDateDDMMYYYY(deadlineModal.grade.date)}) or any earlier date.`
+                                       ? `Ошибка: нельзя выбрать дату выставления Н/У (${H.formatDateDDMMYYYY(deadlineModal.grade.date)}) или дату до неё. Выберите дату позже ${H.formatDateDDMMYYYY(deadlineModal.grade.date)}.`
+                                       : `Error: cannot select the Н/У grade date (${H.formatDateDDMMYYYY(deadlineModal.grade.date)}) or any earlier date.`
                                );
                            } else {
                                setDeadlineError(null);
@@ -1066,15 +1147,15 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                        }}
                    />
                    {deadlineError && (
-                       <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
-                           <AlertCircle size={13} className="shrink-0" />
+                       <div className="mt-2.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/50 dark:border-red-800 dark:text-red-300 text-xs font-bold flex items-start gap-2 animate-in fade-in duration-150">
+                           <AlertCircle size={15} className="shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
                            <span>{deadlineError}</span>
-                       </p>
+                       </div>
                    )}
                </div>
                <div className="flex justify-end gap-2">
                    <Button onClick={() => { setDeadlineError(null); setDeadlineModal(null); }} variant="ghost">{t('cancel')}</Button>
-                   <Button onClick={saveDeadline} disabled={!!(deadlineDate && deadlineModal?.grade.date && deadlineDate <= deadlineModal.grade.date)} variant="primary">{t('save')}</Button>
+                   <Button onClick={saveDeadline} variant="primary">{t('save')}</Button>
                </div>
            </div>
        </Modal>
