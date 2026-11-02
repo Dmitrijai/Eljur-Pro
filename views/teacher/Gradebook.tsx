@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { AppState, User, Grade, FinalGradeEntry, GradeType } from '../../types';
 import * as H from '../../utils/helpers';
