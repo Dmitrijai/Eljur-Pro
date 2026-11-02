@@ -144,6 +144,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
    const [showFinalModal, setShowFinalModal] = H.useSyncedState<boolean>(`eljur_gb_final_modal_${user.id}`, false);
    const [deadlineModal, setDeadlineModal] = useState<{isOpen: boolean, grade: Grade} | null>(null);
    const [deadlineDate, setDeadlineDate] = useState('');
+   const [deadlineError, setDeadlineError] = useState<string | null>(null);
    const [uiNotice, setUiNotice] = useState<string | null>(null);
    const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
    const t = (k: string) => H.t(k, lang);
@@ -396,8 +397,48 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
            setIsCommentSaved(true);
        } 
    };
-   const openDeadlineModal = (g: Grade) => { setDeadlineModal({ isOpen: true, grade: g }); setDeadlineDate(g.deadline || ''); };
-   const saveDeadline = () => { if (!deadlineModal || !targetKey) return; const subjList = ensureMutableSubjectGrades(); const gIndex = subjList.findIndex(g => g.id === deadlineModal.grade.id); if (gIndex > -1) { subjList[gIndex].deadline = deadlineDate; const newState = {...localState}; setLocalState(newState); setHasUnsavedGrades?.(false); commitGradebookChanges(newState); setDeadlineModal(null); } };
+   const getMinDeadlineDate = (gradeDate?: string): string => {
+       if (!gradeDate || !/^\d{4}-\d{2}-\d{2}$/.test(gradeDate)) return '';
+       const [y, m, d] = gradeDate.split('-').map(Number);
+       const dt = new Date(y, m - 1, d + 1);
+       const pad = (n: number) => String(n).padStart(2, '0');
+       return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+   };
+
+   const openDeadlineModal = (g: Grade) => {
+       setDeadlineError(null);
+       const minDate = getMinDeadlineDate(g.date);
+       const initialDate = (g.deadline && (!g.date || g.deadline > g.date)) ? g.deadline : minDate;
+       setDeadlineModal({ isOpen: true, grade: g });
+       setDeadlineDate(initialDate);
+   };
+
+   const saveDeadline = () => {
+       if (!deadlineModal || !targetKey) return;
+       const gradeDate = deadlineModal.grade.date;
+       if (deadlineDate && gradeDate && deadlineDate <= gradeDate) {
+           setDeadlineError(
+               lang === 'ru'
+                   ? `Нельзя выбрать дату выставления Н/У (${H.formatDateDDMMYYYY(gradeDate)}) или дату до неё.`
+                   : `Cannot select the Н/У grade date (${H.formatDateDDMMYYYY(gradeDate)}) or any earlier date.`
+           );
+           return;
+       }
+       const subjList = ensureMutableSubjectGrades();
+       const gIndex = subjList.findIndex(g => g.id === deadlineModal.grade.id);
+       if (gIndex > -1) {
+           subjList[gIndex].deadline = deadlineDate;
+           const newState = { ...localState };
+           setLocalState(newState);
+           setHasUnsavedGrades?.(false);
+           commitGradebookChanges(newState);
+           if (selectedGrade && selectedGrade.grade.id === deadlineModal.grade.id) {
+               setSelectedGrade({ ...selectedGrade, grade: { ...subjList[gIndex] } });
+           }
+           setDeadlineError(null);
+           setDeadlineModal(null);
+       }
+   };
 
    const students = localState.users.filter((u: User) => u.schoolId === user.schoolId && u.role === 'student' && `${u.class}_${u.letter}` === cls);
    const quarterLabels: Record<string, string> = { 'Q1': '1', 'Q2': '2', 'Q3': '3', 'Q4': '4' };
@@ -998,7 +1039,45 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                </div>
            </div>
        </Modal>
-       <Modal isOpen={!!deadlineModal} onClose={() => setDeadlineModal(null)} title={t('nu_deadline')}><div className="space-y-6"><div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-900 flex items-start gap-3"><AlertCircle className="flex-shrink-0" size={18}/><p>{t('deadline_info')}</p></div><div><label className="block text-sm font-bold text-slate-700 mb-2">{t('select_date')}</label><Input type="date" value={deadlineDate} onChange={e => setDeadlineDate(e.target.value)} /></div><div className="flex justify-end gap-2"><Button onClick={() => setDeadlineModal(null)} variant="ghost">{t('cancel')}</Button><Button onClick={saveDeadline} variant="primary">{t('save')}</Button></div></div></Modal>
+       <Modal isOpen={!!deadlineModal} onClose={() => { setDeadlineError(null); setDeadlineModal(null); }} title={t('nu_deadline')}>
+           <div className="space-y-5">
+               <div className="bg-blue-50 dark:bg-blue-950/40 p-4 rounded-xl border border-blue-100 dark:border-blue-800 text-sm text-blue-900 dark:text-blue-200 flex items-start gap-3">
+                   <AlertCircle className="flex-shrink-0 mt-0.5" size={18}/>
+                   <p>{t('deadline_info')}</p>
+               </div>
+               <div>
+                   <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">{t('select_date')}</label>
+                   <Input
+                       type="date"
+                       min={getMinDeadlineDate(deadlineModal?.grade.date)}
+                       value={deadlineDate}
+                       onChange={e => {
+                           const val = e.target.value;
+                           setDeadlineDate(val);
+                           if (val && deadlineModal?.grade.date && val <= deadlineModal.grade.date) {
+                               setDeadlineError(
+                                   lang === 'ru'
+                                       ? `Нельзя выбрать дату выставления Н/У (${H.formatDateDDMMYYYY(deadlineModal.grade.date)}) или дату до неё.`
+                                       : `Cannot select the Н/У grade date (${H.formatDateDDMMYYYY(deadlineModal.grade.date)}) or any earlier date.`
+                               );
+                           } else {
+                               setDeadlineError(null);
+                           }
+                       }}
+                   />
+                   {deadlineError && (
+                       <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
+                           <AlertCircle size={13} className="shrink-0" />
+                           <span>{deadlineError}</span>
+                       </p>
+                   )}
+               </div>
+               <div className="flex justify-end gap-2">
+                   <Button onClick={() => { setDeadlineError(null); setDeadlineModal(null); }} variant="ghost">{t('cancel')}</Button>
+                   <Button onClick={saveDeadline} disabled={!!(deadlineDate && deadlineModal?.grade.date && deadlineDate <= deadlineModal.grade.date)} variant="primary">{t('save')}</Button>
+               </div>
+           </div>
+       </Modal>
        <Modal isOpen={showFinalModal} onClose={() => setShowFinalModal(false)} title={`${t('final_attestation')}: ${cls.replace('_', '')} — ${subj}`} maxWidth="max-w-5xl">
            <div className="hidden print:block pb-2 mb-3 border-b border-slate-300 text-center">
                <div className="text-xs font-bold uppercase tracking-widest text-slate-600">{H.getSchool(localState, user.schoolId)?.name || 'ЭлЖур'}</div>

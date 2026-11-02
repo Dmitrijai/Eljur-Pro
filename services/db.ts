@@ -847,6 +847,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 export const saveSchoolMetadata = async (schoolId: string, schoolData: any): Promise<void> => {
   const docPath = `schools/${schoolId}`;
   try {
+    if (typeof schoolData?.educationalResourceUrl === 'string') {
+      try {
+        localStorage.setItem(`eljur_edu_url_${schoolId}`, schoolData.educationalResourceUrl);
+      } catch {}
+    }
     const clean = JSON.parse(JSON.stringify(schoolData));
     await setDoc(doc(db, 'schools', schoolId), clean, { merge: true });
     docSnapshots.set(docPath, stableSerialize(clean));
@@ -1120,6 +1125,18 @@ export const subscribeToSchool = (
           }
         };
 
+        let resolvedEduUrl = typeof data.educationalResourceUrl === 'string' ? data.educationalResourceUrl : '';
+        try {
+          if (resolvedEduUrl) {
+            localStorage.setItem(`eljur_edu_url_${schoolId}`, resolvedEduUrl);
+          } else {
+            const cachedEduUrl = localStorage.getItem(`eljur_edu_url_${schoolId}`);
+            if (cachedEduUrl) {
+              resolvedEduUrl = cachedEduUrl;
+            }
+          }
+        } catch {}
+
         docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
           name: data.name || 'Школа №1',
@@ -1131,7 +1148,7 @@ export const subscribeToSchool = (
           gradeTypes: data.gradeTypes,
           subjectRequirements: data.subjectRequirements,
           scheduleSettings: normalizedScheduleSettings,
-          educationalResourceUrl: data.educationalResourceUrl ?? '',
+          educationalResourceUrl: resolvedEduUrl,
           settings: data.settings
         }));
 
@@ -1147,7 +1164,7 @@ export const subscribeToSchool = (
             gradeTypes: data.gradeTypes,
             subjectRequirements: data.subjectRequirements,
             scheduleSettings: normalizedScheduleSettings,
-            educationalResourceUrl: data.educationalResourceUrl ?? '',
+            educationalResourceUrl: resolvedEduUrl,
             eljurInfo: data.eljurInfo ?? data.settings?.eljurInfo
           }],
           classes: schoolClasses,
@@ -1437,7 +1454,16 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       if (school) {
         const schoolQuarters = school.quarters || (schoolId === 'school_1' ? plainState.quarters : undefined) || { Q1: [], Q2: [], Q3: [], Q4: [] };
         if (isDirectorOrCreator || isEmployee) {
-          const schoolPayload = {
+          let resolvedEduUrl: string | undefined = typeof school.educationalResourceUrl === 'string'
+            ? school.educationalResourceUrl
+            : undefined;
+          if (resolvedEduUrl === undefined) {
+            try {
+              const cachedEdu = localStorage.getItem(`eljur_edu_url_${schoolId}`);
+              if (cachedEdu !== null) resolvedEduUrl = cachedEdu;
+            } catch {}
+          }
+          const schoolPayload: any = {
             id: school.id || schoolId,
             name: school.name || 'Школа №1',
             directorId: school.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
@@ -1455,9 +1481,11 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             gradeTypes: school.gradeTypes || plainState.schoolGradeTypes?.[schoolId] || (schoolId === 'school_1' ? plainState.gradeTypes : []),
             subjectRequirements: school.subjectRequirements || (schoolId === 'school_1' ? plainState.subjectRequirements : {}),
             scheduleSettings: school.scheduleSettings || plainState.schoolScheduleSettings?.[schoolId] || (schoolId === 'school_1' ? plainState.scheduleSettings : undefined),
-            educationalResourceUrl: school.educationalResourceUrl ?? '',
             settings: plainState.schoolsSettings?.[schoolId] || plainState.settings
           };
+          if (resolvedEduUrl !== undefined) {
+            schoolPayload.educationalResourceUrl = resolvedEduUrl;
+          }
           queueSetIfChanged(doc(db, 'schools', schoolId), `schools/${schoolId}`, schoolPayload, true);
         }
 

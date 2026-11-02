@@ -97,9 +97,17 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const handleSaveEduUrl = () => {
     if (currentSchool) {
         const cleaned = localEduUrl.trim();
-        currentSchool.educationalResourceUrl = cleaned ? H.formatExternalResourceUrl(cleaned) : '';
-        setLocalEduUrl(currentSchool.educationalResourceUrl);
-        onUpdate(state);
+        const formatted = cleaned ? H.formatExternalResourceUrl(cleaned) : '';
+        currentSchool.educationalResourceUrl = formatted;
+        setLocalEduUrl(formatted);
+        try {
+            localStorage.setItem(`eljur_edu_url_${currentSchool.id}`, formatted);
+        } catch {}
+        DB.saveSchoolMetadata(currentSchool.id, { educationalResourceUrl: formatted });
+        onUpdate({
+            ...state,
+            schools: state.schools.map(s => s.id === currentSchool.id ? { ...s, educationalResourceUrl: formatted } : s)
+        });
         setEduUrlSaved(true);
         setTimeout(() => setEduUrlSaved(false), 2500);
     }

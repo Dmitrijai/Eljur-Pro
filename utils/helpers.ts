@@ -2600,9 +2600,13 @@ export const formatExternalResourceUrl = (rawUrl?: string): string => {
 export const getSchoolEducationalResourceUrl = (state: AppState, schoolId: string | undefined): string => {
     if (!schoolId) return '';
     const school = getSchool(state, schoolId);
-    if (school && typeof school.educationalResourceUrl === 'string') {
+    if (school && typeof school.educationalResourceUrl === 'string' && school.educationalResourceUrl.trim()) {
         return school.educationalResourceUrl.trim();
     }
+    try {
+        const cached = localStorage.getItem(`eljur_edu_url_${schoolId}`);
+        if (cached && cached.trim()) return cached.trim();
+    } catch {}
     return '';
 };
 

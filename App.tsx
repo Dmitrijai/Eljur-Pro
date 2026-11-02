@@ -754,23 +754,36 @@ export default function App() {
           (current || []).forEach(item => map.set(item.id, item));
           return Array.from(map.values());
         };
-        setAppState(prev => ({
-          ...defaultState,
-          ...cached,
-          schools: (Array.isArray(cached.schools) && cached.schools.length > 0) ? cached.schools : defaultState.schools,
-          classes: (Array.isArray(cached.classes) && cached.classes.length > 0) ? cached.classes : defaultState.classes,
-          subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
-          users: mergeById(defaultState.users, cached.users),
-          schedules: { ...defaultState.schedules, ...(cached.schedules || {}) },
-          grades: { ...defaultState.grades, ...(cached.grades || {}) },
-          finalGrades: { ...defaultState.finalGrades, ...(cached.finalGrades || {}) },
-          homework: mergeById(defaultState.homework, cached.homework),
-          messages: mergeById(defaultState.messages, cached.messages),
-          announcements: mergeById(defaultState.announcements, cached.announcements),
-          teacherAssignments: mergeById(defaultState.teacherAssignments, cached.teacherAssignments),
-          quarters: (cached.quarters?.Q1 && cached.quarters.Q1.length > 2) ? cached.quarters : defaultState.quarters,
-          scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings
-        }));
+        setAppState(prev => {
+          const baseSchools = (Array.isArray(cached.schools) && cached.schools.length > 0) ? cached.schools : defaultState.schools;
+          const prevSchoolMap = new Map((prev?.schools || []).map(s => [s.id, s]));
+          const hydratedSchools = baseSchools.map((s: any) => {
+            const pS = prevSchoolMap.get(s.id);
+            let fallbackEdu = '';
+            try { fallbackEdu = localStorage.getItem(`eljur_edu_url_${s.id}`) || ''; } catch {}
+            return {
+              ...s,
+              educationalResourceUrl: pS?.educationalResourceUrl || s.educationalResourceUrl || fallbackEdu || ''
+            };
+          });
+          return {
+            ...defaultState,
+            ...cached,
+            schools: hydratedSchools,
+            classes: (Array.isArray(cached.classes) && cached.classes.length > 0) ? cached.classes : defaultState.classes,
+            subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
+            users: mergeById(defaultState.users, cached.users),
+            schedules: { ...defaultState.schedules, ...(cached.schedules || {}) },
+            grades: { ...defaultState.grades, ...(cached.grades || {}) },
+            finalGrades: { ...defaultState.finalGrades, ...(cached.finalGrades || {}) },
+            homework: mergeById(defaultState.homework, cached.homework),
+            messages: mergeById(defaultState.messages, cached.messages),
+            announcements: mergeById(defaultState.announcements, cached.announcements),
+            teacherAssignments: mergeById(defaultState.teacherAssignments, cached.teacherAssignments),
+            quarters: (cached.quarters?.Q1 && cached.quarters.Q1.length > 2) ? cached.quarters : defaultState.quarters,
+            scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings
+          };
+        });
         setLoading(false);
 
         // If session exists for a custom user stored in cache, restore it

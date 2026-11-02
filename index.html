@@ -4,9 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ЭлЖур</title>
+    <title>E-Journal Pro</title>
     <meta name="description" content="Электронный журнал и дневник образовательного учреждения">
-    <meta property="og:title" content="ЭлЖур">
+    <meta property="og:title" content="E-Journal Pro">
     <meta property="og:description" content="Электронный журнал и дневник образовательного учреждения">
     <link rel="icon" type="image/png" href="./assets/icon.png">
     <link rel="apple-touch-icon" href="./assets/icon.png">
@@ -320,13 +320,14 @@
                 overflow: visible !important;
             }
             
-            /* Remove sticky positioning for print */
-            .sticky, [class*="sticky"] {
+            /* Remove sticky and relative positioning for print so cell PaintLayers never paint over collapsed borders */
+            .sticky, [class*="sticky"], table, thead, tbody, tfoot, tr, th, td {
                 position: static !important;
                 left: auto !important;
                 right: auto !important;
                 top: auto !important;
                 bottom: auto !important;
+                z-index: auto !important;
             }
 
             /* Ensure text contrast in print */
@@ -338,8 +339,8 @@
                 color: #0f172a !important;
             }
 
-            /* Remove decorative shadows */
-            .shadow-soft, .shadow-glow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+            /* Remove decorative and sticky column shadows */
+            .shadow-soft, .shadow-glow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl, [class*="shadow"] {
                 box-shadow: none !important;
             }
 
@@ -392,7 +393,8 @@
             table {
                 width: 100% !important;
                 border-collapse: collapse !important;
-                border: 1pt solid #94a3b8 !important;
+                border-spacing: 0 !important;
+                border: 1pt solid #64748b !important;
                 margin-top: 4px !important;
                 margin-bottom: 10px !important;
                 font-size: 8pt !important;
@@ -403,14 +405,16 @@
             }
             
             th, td { 
-                border: 1pt solid #cbd5e1 !important; 
+                border: 1pt solid #94a3b8 !important; 
                 padding: 3px 5px !important;
                 color: #0f172a !important;
+                background-color: transparent !important;
                 background: transparent !important;
                 word-wrap: break-word !important;
                 overflow-wrap: break-word !important;
                 vertical-align: middle !important;
                 height: auto !important;
+                box-shadow: none !important;
             }
 
             th {
@@ -419,11 +423,7 @@
                 font-weight: 700 !important;
                 font-size: 7.5pt !important;
                 letter-spacing: 0.01em;
-                border-bottom: 1.2pt solid #94a3b8 !important;
-            }
-
-            tr:nth-child(even) td {
-                background-color: #f8fafc !important;
+                border: 1pt solid #64748b !important;
             }
 
             thead { display: table-header-group !important; }

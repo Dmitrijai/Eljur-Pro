@@ -850,7 +850,7 @@ export const ScrollableTableWrapper: React.FC<{
   };
 
   return (
-    <div className={`border border-slate-200 rounded-xl sm:rounded-2xl bg-white shadow-soft overflow-hidden print:overflow-visible dark:bg-slate-900 dark:border-slate-800 ${className}`}>
+    <div className={`border border-slate-200 rounded-xl sm:rounded-2xl bg-white shadow-soft overflow-hidden print:overflow-visible print:border-none print:rounded-none print:shadow-none print:bg-transparent dark:bg-slate-900 dark:border-slate-800 ${className}`}>
       {/* Desktop Top Horizontal Scroll Bar */}
       {hasOverflow && (
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-50/90 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 no-print">
