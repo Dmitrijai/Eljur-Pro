@@ -189,7 +189,7 @@ service cloud.firestore {
           isSchoolMember(schoolId) && (
             resource.data.fromId == currentUserData().get('userId', '') ||
             resource.data.get('realAuthorId', '') == currentUserData().get('userId', '') ||
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readBy', 'schoolId'])
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readBy', 'readBeforeEditBy', 'readAfterEditBy', 'schoolId'])
           )
         );
         allow delete: if isDirector(schoolId) || (
@@ -206,7 +206,7 @@ service cloud.firestore {
         allow create, delete: if isDirector(schoolId) || isEmployee(schoolId);
         allow update: if isDirector(schoolId) || isEmployee(schoolId) || (
           isSchoolMember(schoolId) &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readBy', 'schoolId'])
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readBy', 'readBeforeEditBy', 'readAfterEditBy', 'schoolId'])
         );
       }
 

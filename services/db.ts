@@ -47,8 +47,8 @@ async function testConnection() {
 }
 testConnection();
 
-const DB_NAME = 'ElZhurDB_v9';
-const DB_VERSION = 3;
+const DB_NAME = 'ElZhurDB_v10';
+const DB_VERSION = 6;
 const STORE_ASSETS = 'assets';
 const STORE_SCHOOL_CACHE = 'school_cache';
 
@@ -92,15 +92,26 @@ const stableSerialize = (obj: any): string => {
  * Used by Firestore security rules (/authUidMap/{uid}) to enforce Attribute-Based Access Control.
  */
 export const syncUserAuthUidMap = async (schoolId: string, userId: string, role: string, firebaseUid: string): Promise<void> => {
-  try {
-    await setDoc(doc(db, 'authUidMap', firebaseUid), {
-      schoolId: schoolId || 'school_1',
-      userId,
-      role,
-      updatedAt: new Date().toISOString()
-    });
-  } catch (e) {
-    console.warn('Failed to update authUidMap:', e);
+  const payload = {
+    schoolId: schoolId || 'school_1',
+    userId,
+    role,
+    updatedAt: new Date().toISOString()
+  };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (auth.currentUser) {
+        await auth.currentUser.getIdToken(attempt > 0);
+      }
+      await setDoc(doc(db, 'authUidMap', firebaseUid), payload);
+      return;
+    } catch (e) {
+      if (attempt === 2) {
+        console.warn('Failed to update authUidMap:', e);
+      } else {
+        await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+      }
+    }
   }
 };
 
@@ -186,6 +197,9 @@ export const ensureFirebaseAuthSession = async (
   // Atomically guarantee authUidMap exists before returning credential
   if (metadata && cred!.user?.uid) {
     await syncUserAuthUidMap(metadata.schoolId, metadata.userId, metadata.role, cred!.user.uid);
+    try {
+      await cred!.user.getIdToken(true);
+    } catch {}
   }
 
   return cred!;
@@ -235,19 +249,37 @@ export const fetchUsersForLoginLookup = async (): Promise<User[]> => {
   }
 };
 
+const ensureObjectStores = (idb: IDBDatabase) => {
+  if (!idb.objectStoreNames.contains(STORE_ASSETS)) {
+    idb.createObjectStore(STORE_ASSETS, { keyPath: 'key' });
+  }
+  if (!idb.objectStoreNames.contains(STORE_SCHOOL_CACHE)) {
+    idb.createObjectStore(STORE_SCHOOL_CACHE, { keyPath: 'schoolId' });
+  }
+};
+
 export const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = (e: IDBVersionChangeEvent) => {
-      const idb = (e.target as IDBOpenDBRequest).result;
-      if (!idb.objectStoreNames.contains(STORE_ASSETS)) {
-        idb.createObjectStore(STORE_ASSETS, { keyPath: 'key' });
+      ensureObjectStores((e.target as IDBOpenDBRequest).result);
+    };
+    request.onsuccess = () => {
+      const idb = request.result;
+      if (idb.objectStoreNames.contains(STORE_ASSETS) && idb.objectStoreNames.contains(STORE_SCHOOL_CACHE)) {
+        resolve(idb);
+        return;
       }
-      if (!idb.objectStoreNames.contains(STORE_SCHOOL_CACHE)) {
-        idb.createObjectStore(STORE_SCHOOL_CACHE, { keyPath: 'schoolId' });
-      }
+      // Self-heal if a browser had a higher or stale DB version without one of the stores
+      const nextVersion = idb.version + 1;
+      idb.close();
+      const upgradeReq = indexedDB.open(DB_NAME, nextVersion);
+      upgradeReq.onerror = () => reject(upgradeReq.error);
+      upgradeReq.onupgradeneeded = (e: IDBVersionChangeEvent) => {
+        ensureObjectStores((e.target as IDBOpenDBRequest).result);
+      };
+      upgradeReq.onsuccess = () => resolve(upgradeReq.result);
     };
   });
 };
@@ -262,11 +294,7 @@ export const saveSchoolCache = async (schoolId: string, state: any): Promise<voi
     await new Promise<void>((resolve, reject) => {
       const tx = localDb.transaction(STORE_SCHOOL_CACHE, 'readwrite');
       const store = tx.objectStore(STORE_SCHOOL_CACHE);
-      const cleanUsers = (state.users || []).map((u: any) => {
-        const cu = { ...u };
-        delete cu.password;
-        return cu;
-      });
+      const cleanUsers = (state.users || []).map((u: any) => ({ ...u }));
       const payload = {
         schoolId,
         state: {
@@ -444,6 +472,148 @@ export const saveAsset = async (
   }
 };
 
+const BUILTIN_ATTACHMENTS: Record<string, { name: string; type: string; content: string }> = {
+  att_dir_report_1: {
+    name: 'Отчет_директора_Иванова_ИИ_I_четверть.txt',
+    type: 'text/plain;charset=utf-8',
+    content: [
+      'ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ ОБЩЕОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ',
+      '«Гимназия №1 им. А.С. Пушкина»',
+      '====================================================================',
+      'СВОДНЫЙ ОТЧЕТ ДИРЕКТОРА О РЕЗУЛЬТАТАХ I УЧЕБНОЙ ЧЕТВЕРТИ 2026/2027',
+      'Дата формирования: 30.10.2026 г.',
+      'Отправитель: Директор гимназии Иванов Иван Иванович',
+      'Получатель: Создатель и Главный администратор платформы «ЭлЖур»',
+      '====================================================================',
+      '',
+      '1. ОБЩИЕ ПОКАЗАТЕЛИ ШКОЛЫ:',
+      '   • Активных классов в системе: 10-А (профильный физико-математический), 9-А (общеобразовательный)',
+      '   • Успеваемость по гимназии: 100%',
+      '   • Качество знаний (доля ударников и отличников): 87.5%',
+      '   • Средний взвешенный балл по 10-А классу: 4.68',
+      '   • Средний взвешенный балл по 9-А классу: 4.52',
+      '',
+      '2. КОНТРОЛЬ ЭЛЕКТРОННОГО ЖУРНАЛА И РАСПИСАНИЯ:',
+      '   • Все уроки за октябрь и ноябрь внесены в конструктор расписания без накладок.',
+      '   • Выставление текущих и контрольных оценок ведется с учетом весовых коэффициентов.',
+      '   • Домашние задания публикуются своевременно с прикреплением учебных материалов.',
+      '',
+      '3. ЗАКЛЮЧЕНИЕ:',
+      '   Система «ЭлЖур v7 Release» работает стабильно, синхронизация между рабочими местами',
+      '   учителей, администрации и дневниками учеников проходит в режиме реального времени.',
+      '',
+      'Директор Гимназии №1 им. А.С. Пушкина',
+      '___________________ / И.И. Иванов /',
+      'М.П.'
+    ].join('\n')
+  },
+  att_dir_order_1: {
+    name: 'Приказ_№42_О_проведении_аттестации.svg',
+    type: 'image/svg+xml;charset=utf-8',
+    content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 460" width="680" height="460">
+      <rect width="680" height="460" rx="16" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/>
+      <rect x="24" y="24" width="632" height="68" rx="10" fill="#eff6ff"/>
+      <text x="340" y="52" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="800" fill="#1e3a8a" text-anchor="middle">ГИМНАЗИЯ №1 ИМ. А.С. ПУШКИНА</text>
+      <text x="340" y="74" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#2563eb" text-anchor="middle">ПРИКАЗ № 42-ОД от 28.10.2026 г.</text>
+      <text x="44" y="124" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="800" fill="#0f172a">О порядке проведения промежуточной аттестации за I четверть</text>
+      <text x="44" y="158" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">1. Утвердить график выставления итоговых отметок за I учебную четверть в системе «ЭлЖур»</text>
+      <text x="44" y="180" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">   в срок до 14 ноября 2026 года включительно.</text>
+      <text x="44" y="212" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">2. Классным руководителям (Петров П.П., Смирнова Е.В.) проверить заполнение электронных</text>
+      <text x="44" y="234" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">   журналов, закрытие отметок «Н/У» и довести сводные ведомости до сведения учащихся.</text>
+      <text x="44" y="266" font-family="Inter, Arial, sans-serif" font-size="13" fill="#334155">3. Контроль за исполнением настоящего приказа оставляю за собой.</text>
+      <line x1="44" y1="310" x2="636" y2="310" stroke="#e2e8f0" stroke-width="2"/>
+      <text x="44" y="356" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a">Директор гимназии:</text>
+      <text x="230" y="356" font-family="Georgia, serif" font-size="18" font-style="italic" fill="#1d4ed8">И.И. Иванов</text>
+      <text x="380" y="356" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a">Иванов И.И.</text>
+      <circle cx="545" cy="365" r="52" fill="none" stroke="#2563eb" stroke-width="3" stroke-dasharray="6,3"/>
+      <circle cx="545" cy="365" r="42" fill="none" stroke="#2563eb" stroke-width="1.5"/>
+      <text x="545" y="358" font-family="Inter, Arial, sans-serif" font-size="9" font-weight="800" fill="#2563eb" text-anchor="middle">ГИМНАЗИЯ №1</text>
+      <text x="545" y="372" font-family="Inter, Arial, sans-serif" font-size="8" font-weight="700" fill="#1d4ed8" text-anchor="middle">ДЛЯ ДОКУМЕНТОВ</text>
+      <text x="545" y="385" font-family="Inter, Arial, sans-serif" font-size="8" font-weight="700" fill="#2563eb" text-anchor="middle">ЭЛЖУР ЭЦП</text>
+    </svg>`
+  },
+  att_dir_schedule_reg: {
+    name: 'Регламент_выставления_оценок_и_весов_ЭлЖур.txt',
+    type: 'text/plain;charset=utf-8',
+    content: [
+      'РЕГЛАМЕНТ РАБОТЫ С ЭЛЕКТРОННЫМ ЖУРНАЛОМ «ЭЛЖУР»',
+      'Утверждено Директором Гимназии №1 им. А.С. Пушкина И.И. Ивановым',
+      '====================================================================',
+      '',
+      '1. ВЕСОВЫЕ КОЭФФИЦИЕНТЫ ОЦЕНОК:',
+      '   • Контрольная работа / Экзамен: вес 5',
+      '   • Самостоятельная работа / Диктант / Тест: вес 3',
+      '   • Сочинение / Изложение / Лабораторная работа: вес 3–4',
+      '   • Ответ на уроке / Домашнее задание: вес 1–2',
+      '',
+      '2. ПРАВИЛА РАБОТЫ С ОТМЕТКОЙ «Н/У» (НЕВЫПОЛНЕННАЯ РАБОТА):',
+      '   • При выставлении отметки «Н/У» система автоматически устанавливает срок',
+      '     исправления (по умолчанию 7 календарных дней).',
+      '   • Учитель может скорректировать дату дедлайна в карточке оценки.',
+      '',
+      '3. ДОМАШНИЕ ЗАДАНИЯ:',
+      '   • Домашнее задание публикуется не позднее 17:00 дня проведения урока.',
+      '',
+      'Директор гимназии: Иванов Иван Иванович'
+    ].join('\n')
+  },
+  att_dir_olymp_memo: {
+    name: 'График_олимпиад_и_памятка_ученика_10А.txt',
+    type: 'text/plain;charset=utf-8',
+    content: [
+      'ПАМЯТКА УЧАЩИМСЯ 10-А И 9-А КЛАССОВ',
+      'График проведения школьного этапа олимпиад и консультаций (Ноябрь 2026)',
+      'От: Директора гимназии Иванова Ивана Ивановича',
+      '====================================================================',
+      '',
+      '1. РАСПИСАНИЕ ОЛИМПИАДНЫХ ТУРОВ:',
+      '   • Математика (профильный тур): вторник, каб. 301, 14:30 – 16:30 (отв. Петров П.П.)',
+      '   • Физика (экспериментальный тур): четверг, каб. 305, 14:30 – 16:30 (отв. Петров П.П.)',
+      '   • Русский язык и литература: пятница, каб. 204, 14:30 – 16:00 (отв. Смирнова Е.В.)',
+      '   • Информатика и ИКТ: суббота, каб. 402, 12:30 – 15:00 (отв. Морозов А.С.)',
+      '',
+      '2. РЕКОМЕНДАЦИИ УЧАСТНИКАМ:',
+      '   • Проверьте расписание и материалы для подготовки в разделе «Домашние задания».',
+      '   • По всем вопросам обращайтесь к классному руководителю через раздел «Сообщения».',
+      '',
+      'Желаем успехов и высоких результатов!',
+      'Директор гимназии И.И. Иванов'
+    ].join('\n')
+  },
+  att_hw_math_10a: {
+    name: 'Вариант_подготовки_Тригонометрия_10А.txt',
+    type: 'text/plain;charset=utf-8',
+    content: [
+      'МАТЕМАТИКА • 10-А КЛАСС (Учитель: Петров Пётр Петрович)',
+      'Тема: Тригонометрические уравнения и формулы приведения',
+      '====================================================================',
+      'Задание №1. Решите уравнения:',
+      '  а) 2 sin²(x) - 5 sin(x) + 2 = 0',
+      '  б) cos(2x) + 3 sin(x) = 2',
+      '',
+      'Задание №2. Найдите корни уравнения на отрезке [π; 5π/2]:',
+      '  sin(2x) - √3 cos(x) = 0',
+      '',
+      'Задание №3 (дополнительное на «5»):',
+      '  Докажите тождество: (1 - cos(2α)) / sin(2α) = tg(α)'
+    ].join('\n')
+  },
+  att_hw_phys_10a: {
+    name: 'Лабораторный_практикум_Динамика_10А.txt',
+    type: 'text/plain;charset=utf-8',
+    content: [
+      'ФИЗИКА • 10-А КЛАСС (Учитель: Петров Пётр Петрович)',
+      'Тема: Законы Ньютона. Движение тела по наклонной плоскости',
+      '====================================================================',
+      'Задача 1. Брусок массой m = 2 кг скользит по наклонной плоскости с углом',
+      'наклона α = 30° и коэффициентом трения μ = 0.2. Найдите ускорение бруска.',
+      '',
+      'Задача 2. Постройте диаграмму сил, действующих на систему связанных тел',
+      'на невесомой нерастяжимой нити через блок.'
+    ].join('\n')
+  }
+};
+
 export const getAsset = async (id: string, schoolId?: string): Promise<Asset | null> => {
   const candidateSchools = Array.from(
     new Set(
@@ -526,6 +696,13 @@ export const getAsset = async (id: string, schoolId?: string): Promise<Asset | n
     }
   }
 
+  // 3. Fallback to built-in official documents & attachments
+  if (BUILTIN_ATTACHMENTS[id]) {
+    const def = BUILTIN_ATTACHMENTS[id];
+    const blob = new Blob([def.content], { type: def.type });
+    return { id, name: def.name, type: def.type, blob };
+  }
+
   return null;
 };
 
@@ -560,16 +737,49 @@ export const deleteAsset = async (id: string, schoolId?: string): Promise<void> 
   }
 };
 
-export const getAllAssets = async (): Promise<Asset[]> => {
-  const localDb = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = localDb.transaction(STORE_ASSETS, 'readonly');
-    const store = tx.objectStore(STORE_ASSETS);
-    const request = store.getAll();
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result || []);
-    tx.oncomplete = () => localDb.close();
-  });
+export const getAllAssets = async (schoolId?: string): Promise<Asset[]> => {
+  const assetMap = new Map<string, Asset>();
+  try {
+    const localDb = await openDB();
+    const localItems: any[] = await new Promise((resolve) => {
+      const tx = localDb.transaction(STORE_ASSETS, 'readonly');
+      const store = tx.objectStore(STORE_ASSETS);
+      const request = store.getAll();
+      request.onerror = () => resolve([]);
+      request.onsuccess = () => resolve(request.result || []);
+      tx.oncomplete = () => localDb.close();
+    });
+    for (const item of localItems) {
+      if (!item?.id || !item?.blob) continue;
+      if (!schoolId || !item.schoolId || item.schoolId === schoolId) {
+        assetMap.set(item.id, { id: item.id, name: item.name, type: item.type, blob: item.blob });
+      }
+    }
+  } catch (e) {
+    console.warn('getAllAssets local read warning:', e);
+  }
+
+  if (schoolId && schoolId !== 'global') {
+    try {
+      const snap = await getDocs(collection(db, 'schools', schoolId, 'attachments'));
+      for (const d of snap.docs) {
+        if (d.id.includes('_chunk_')) continue;
+        const data = d.data();
+        const assetId = data.id || d.id;
+        if (!assetMap.has(assetId) && data.data) {
+          const blob = await dataUrlToBlob(data.data, data.type);
+          assetMap.set(assetId, {
+            id: assetId,
+            name: data.name || assetId,
+            type: data.type || blob.type,
+            blob
+          });
+        }
+      }
+    } catch {}
+  }
+
+  return Array.from(assetMap.values());
 };
 
 // Firestore State Management with Scoped Subcollections and Error Notification
@@ -648,8 +858,12 @@ export const saveSchoolMetadata = async (schoolId: string, schoolData: any): Pro
 export interface PublicCreatorGateConfig {
   secretKey: string;
   secretCount: number;
+  adminPassword?: string;
   adminPasswordHash?: string;
   adminPasswordSalt?: string;
+  eljurInfo?: string;
+  bodyFontId?: string;
+  headingFontId?: string;
   updatedAt?: string;
 }
 
@@ -693,14 +907,42 @@ export const savePublicCreatorGate = async (
   }
 };
 
+export const deleteSchoolFromFirestore = async (schoolId: string): Promise<void> => {
+  if (!schoolId || schoolId === 'global') return;
+  const subcollections = [
+    'users',
+    'schedules',
+    'grades',
+    'finalGrades',
+    'homework',
+    'messages',
+    'announcements',
+    'teacherAssignments',
+    'studentGroups',
+    'publicConfig',
+    'attachments'
+  ];
+  try {
+    for (const sub of subcollections) {
+      try {
+        const snap = await getDocs(collection(db, 'schools', schoolId, sub));
+        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'schools', schoolId, sub, d.id)).catch(() => {})));
+      } catch {}
+    }
+    await deleteDoc(doc(db, 'schools', schoolId));
+    docSnapshots.delete(`schools/${schoolId}`);
+    syncedSchoolIds.delete(schoolId);
+    await clearSchoolCache(schoolId);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `schools/${schoolId}`);
+  }
+};
+
 export const saveSchoolEntity = async (schoolId: string, collName: string, entityId: string, data: any): Promise<void> => {
   const targetSchoolId = (schoolId && schoolId !== 'global') ? schoolId : 'school_1';
   const docPath = `schools/${targetSchoolId}/${collName}/${entityId}`;
   try {
     const cleanData = JSON.parse(JSON.stringify(data));
-    if (collName === 'users') {
-      delete cleanData.password;
-    }
     await setDoc(doc(db, 'schools', targetSchoolId, collName, entityId), cleanData, { merge: true });
     docSnapshots.set(docPath, stableSerialize(cleanData));
     const synced = getOrCreateSyncedIds(targetSchoolId);
@@ -811,8 +1053,35 @@ export const subscribeToSchool = (
     unsubs.length = 0;
   };
 
+  let hasRetriedListeners = false;
+
   const handleSubError = (err: unknown, op: OperationType, path: string) => {
     if (isCancelled) return;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!hasRetriedListeners && msg.toLowerCase().includes('permission')) {
+      hasRetriedListeners = true;
+      setTimeout(async () => {
+        if (isCancelled || !auth.currentUser) return;
+        try {
+          if (currentSessionUser) {
+            await syncUserAuthUidMap(
+              currentSessionUser.schoolId,
+              currentSessionUser.id,
+              currentSessionUser.role,
+              auth.currentUser.uid
+            );
+          }
+          await auth.currentUser.getIdToken(true);
+        } catch {}
+        if (isCancelled) return;
+        unsubs.forEach(u => {
+          try { u(); } catch {}
+        });
+        unsubs.length = 0;
+        startListeners();
+      }, 600);
+      return;
+    }
     console.warn(`Subscription warning on ${path}:`, err);
   };
 
@@ -831,20 +1100,38 @@ export const subscribeToSchool = (
         const schoolSubjects = (Array.isArray(data.subjects) && data.subjects.length > 0)
           ? data.subjects
           : defaultCurriculumSubjects;
-        const schoolClasses = (Array.isArray(data.classes) && data.classes.length > 0)
-          ? data.classes
-          : [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }];
+        const schoolClasses = Array.isArray(data.classes)
+          ? (data.classes.length > 0 || schoolId !== 'school_1' ? data.classes : [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }])
+          : (schoolId === 'school_1' ? [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }] : []);
+        const schoolQuarters = data.quarters || { Q1: [], Q2: [], Q3: [], Q4: [] };
+
+        const rawSchedSettings = data.scheduleSettings || {};
+        const normalizedScheduleSettings = {
+          ...rawSchedSettings,
+          daysToAddBatch: typeof rawSchedSettings.daysToAddBatch === 'number' && rawSchedSettings.daysToAddBatch > 0 ? rawSchedSettings.daysToAddBatch : 1,
+          skippedWeekDays: Array.isArray(rawSchedSettings.skippedWeekDays) ? rawSchedSettings.skippedWeekDays : [0],
+          holidays: Array.isArray(rawSchedSettings.holidays) ? rawSchedSettings.holidays : [],
+          vacations: Array.isArray(rawSchedSettings.vacations) ? rawSchedSettings.vacations : [],
+          quarterDefinitions: {
+            'Q1': rawSchedSettings.quarterDefinitions?.['Q1'] || { start: '', end: '' },
+            'Q2': rawSchedSettings.quarterDefinitions?.['Q2'] || { start: '', end: '' },
+            'Q3': rawSchedSettings.quarterDefinitions?.['Q3'] || { start: '', end: '' },
+            'Q4': rawSchedSettings.quarterDefinitions?.['Q4'] || { start: '', end: '' },
+          }
+        };
 
         docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
           name: data.name || 'Школа №1',
-          directorId: data.directorId || 'u_dir',
+          directorId: data.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
           classes: schoolClasses,
           subjects: schoolSubjects,
+          quarters: schoolQuarters,
           gradingSystem: data.gradingSystem,
           gradeTypes: data.gradeTypes,
           subjectRequirements: data.subjectRequirements,
-          scheduleSettings: data.scheduleSettings,
+          scheduleSettings: normalizedScheduleSettings,
+          educationalResourceUrl: data.educationalResourceUrl ?? '',
           settings: data.settings
         }));
 
@@ -852,16 +1139,24 @@ export const subscribeToSchool = (
           schools: [{
             id: data.id || schoolId,
             name: data.name || 'Школа №1',
-            directorId: data.directorId || 'u_dir',
+            directorId: data.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
             classes: schoolClasses,
-            subjects: schoolSubjects
+            subjects: schoolSubjects,
+            quarters: schoolQuarters,
+            gradingSystem: data.gradingSystem,
+            gradeTypes: data.gradeTypes,
+            subjectRequirements: data.subjectRequirements,
+            scheduleSettings: normalizedScheduleSettings,
+            educationalResourceUrl: data.educationalResourceUrl ?? '',
+            eljurInfo: data.eljurInfo ?? data.settings?.eljurInfo
           }],
           classes: schoolClasses,
           subjects: schoolSubjects,
+          quarters: schoolQuarters,
           gradingSystem: data.gradingSystem,
           gradeTypes: data.gradeTypes,
           subjectRequirements: data.subjectRequirements,
-          scheduleSettings: data.scheduleSettings,
+          scheduleSettings: normalizedScheduleSettings,
           settings: data.settings
         });
       }
@@ -874,10 +1169,9 @@ export const subscribeToSchool = (
       synced.users = new Set(snap.docs.map(d => d.id));
       const users = snap.docs.map(d => {
         const uData = d.data() as any;
-        const cleanDoc = { ...uData };
-        delete cleanDoc.password;
+        const cleanDoc = { ...uData, schoolId: uData.schoolId || schoolId };
         docSnapshots.set(`schools/${schoolId}/users/${d.id}`, stableSerialize(cleanDoc));
-        return uData;
+        return cleanDoc;
       });
       onUpdate({ users });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/users`));
@@ -891,8 +1185,23 @@ export const subscribeToSchool = (
       snap.docs.forEach(d => {
         const data = d.data();
         const key = `${schoolId}__${d.id}`;
-        schedules[key] = data.days || {};
-        docSnapshots.set(`schools/${schoolId}/schedules/${d.id}`, stableSerialize({ id: d.id, days: data.days || {} }));
+        const rawDays = data.days || {};
+        const byDate = new Map<string, { k: string; day: any; score: number }>();
+        Object.entries(rawDays).forEach(([k, day]: [string, any]) => {
+          if (!day || !day.date) return;
+          const lessons = Array.isArray(day.lessons) ? day.lessons : [];
+          const score = lessons.filter((l: any) => l && (l.lesson || (l.subgroups && l.subgroups.length > 0))).length;
+          const prev = byDate.get(day.date);
+          if (!prev || score >= prev.score) {
+            byDate.set(day.date, { k, day: { ...day, id: day.id || k, lessons }, score });
+          }
+        });
+        const cleanDays: Record<string, any> = {};
+        byDate.forEach(({ k, day }) => {
+          cleanDays[k] = day;
+        });
+        schedules[key] = cleanDays;
+        docSnapshots.set(`schools/${schoolId}/schedules/${d.id}`, stableSerialize({ id: d.id, days: cleanDays }));
       });
       onUpdate({ schedules });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/schedules`));
@@ -906,8 +1215,8 @@ export const subscribeToSchool = (
       snap.docs.forEach(d => {
         const data = d.data();
         const key = `${schoolId}__${d.id}`;
-        grades[key] = data.entries || [];
-        docSnapshots.set(`schools/${schoolId}/grades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || [] }));
+        grades[key] = data.entries || {};
+        docSnapshots.set(`schools/${schoolId}/grades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || {} }));
       });
       onUpdate({ grades });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/grades`));
@@ -921,8 +1230,8 @@ export const subscribeToSchool = (
       snap.docs.forEach(d => {
         const data = d.data();
         const key = `${schoolId}__${d.id}`;
-        finalGrades[key] = data.entries || [];
-        docSnapshots.set(`schools/${schoolId}/finalGrades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || [] }));
+        finalGrades[key] = data.entries || {};
+        docSnapshots.set(`schools/${schoolId}/finalGrades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || {} }));
       });
       onUpdate({ finalGrades });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/finalGrades`));
@@ -935,7 +1244,7 @@ export const subscribeToSchool = (
       const homework = snap.docs.map(d => {
         const hwData = d.data() as any;
         docSnapshots.set(`schools/${schoolId}/homework/${d.id}`, stableSerialize({ ...hwData, schoolId }));
-        return hwData;
+        return { ...hwData, schoolId: hwData.schoolId || schoolId };
       });
       onUpdate({ homework });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/homework`));
@@ -947,8 +1256,14 @@ export const subscribeToSchool = (
       synced.messages = new Set(snap.docs.map(d => d.id));
       const messages = snap.docs.map(d => {
         const msgData = d.data() as any;
-        docSnapshots.set(`schools/${schoolId}/messages/${d.id}`, stableSerialize({ ...msgData, schoolId }));
-        return msgData;
+        const normalized = {
+          ...msgData,
+          title: msgData.title || msgData.subject || '',
+          body: msgData.body || msgData.text || msgData.content || '',
+          schoolId: msgData.schoolId || schoolId
+        };
+        docSnapshots.set(`schools/${schoolId}/messages/${d.id}`, stableSerialize(normalized));
+        return normalized;
       });
       onUpdate({ messages });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/messages`));
@@ -960,8 +1275,14 @@ export const subscribeToSchool = (
       synced.announcements = new Set(snap.docs.map(d => d.id));
       const announcements = snap.docs.map(d => {
         const annData = d.data() as any;
-        docSnapshots.set(`schools/${schoolId}/announcements/${d.id}`, stableSerialize({ ...annData, schoolId }));
-        return annData;
+        const normalized = {
+          ...annData,
+          title: annData.title || annData.subject || '',
+          body: annData.body || annData.text || annData.content || '',
+          schoolId: annData.schoolId || schoolId
+        };
+        docSnapshots.set(`schools/${schoolId}/announcements/${d.id}`, stableSerialize(normalized));
+        return normalized;
       });
       onUpdate({ announcements });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/announcements`));
@@ -974,7 +1295,7 @@ export const subscribeToSchool = (
       const teacherAssignments = snap.docs.map(d => {
         const taData = d.data() as any;
         docSnapshots.set(`schools/${schoolId}/teacherAssignments/${d.id}`, stableSerialize({ ...taData, schoolId }));
-        return taData;
+        return { ...taData, schoolId: taData.schoolId || schoolId };
       });
       onUpdate({ teacherAssignments });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/teacherAssignments`));
@@ -987,7 +1308,7 @@ export const subscribeToSchool = (
       const studentGroups = snap.docs.map(d => {
         const sgData = d.data() as any;
         docSnapshots.set(`schools/${schoolId}/studentGroups/${d.id}`, stableSerialize({ ...sgData, schoolId }));
-        return sgData;
+        return { ...sgData, schoolId: sgData.schoolId || schoolId };
       });
       onUpdate({ studentGroups });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/studentGroups`));
@@ -1015,7 +1336,29 @@ export const subscribeToAllSchools = (callback: (schools: any[]) => void): (() =
   const start = () => {
     if (isCancelled || !auth.currentUser) return;
     unsub = onSnapshot(collection(db, 'schools'), (snap) => {
-      const schools = snap.docs.map(d => d.data());
+      const schools = snap.docs
+        .filter(d => d.id !== 'global')
+        .map(d => {
+          const data = d.data() || {};
+          const rawSched = data.scheduleSettings || {};
+          return {
+            ...data,
+            id: data.id || d.id,
+            scheduleSettings: {
+              ...rawSched,
+              daysToAddBatch: typeof rawSched.daysToAddBatch === 'number' && rawSched.daysToAddBatch > 0 ? rawSched.daysToAddBatch : 1,
+              skippedWeekDays: Array.isArray(rawSched.skippedWeekDays) ? rawSched.skippedWeekDays : [0],
+              holidays: Array.isArray(rawSched.holidays) ? rawSched.holidays : [],
+              vacations: Array.isArray(rawSched.vacations) ? rawSched.vacations : [],
+              quarterDefinitions: {
+                'Q1': rawSched.quarterDefinitions?.['Q1'] || { start: '', end: '' },
+                'Q2': rawSched.quarterDefinitions?.['Q2'] || { start: '', end: '' },
+                'Q3': rawSched.quarterDefinitions?.['Q3'] || { start: '', end: '' },
+                'Q4': rawSched.quarterDefinitions?.['Q4'] || { start: '', end: '' },
+              }
+            }
+          };
+        });
       callback(schools);
     }, (err) => console.warn('subscribeToAllSchools warning:', err));
   };
@@ -1054,7 +1397,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     const isEmployee = role === 'employee';
     const isTeacher = role === 'teacher';
 
-    const canWriteSchoolDoc = isDirectorOrCreator || isEmployee;
+    const canWriteSchoolDoc = isDirectorOrCreator || isEmployee || isTeacher;
     const canManageUsers = isDirectorOrCreator || isEmployee;
     const canWriteSchedules = isDirectorOrCreator || isTeacher || isEmployee;
     const canWriteGrades = isDirectorOrCreator || isTeacher || isEmployee;
@@ -1088,26 +1431,35 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       );
     };
 
-    // 1. School Root Document & Creator Gate (only if Director, Creator, or Employee)
+    // 1. School Root Document & Creator Gate
     if (canWriteSchoolDoc) {
       const school = (plainState.schools || []).find((s: any) => s.id === schoolId) || plainState.schools?.[0];
       if (school) {
-        const schoolPayload = {
-          id: school.id || schoolId,
-          name: school.name || 'Школа №1',
-          directorId: school.directorId || 'u_dir',
-          classes: school.classes || plainState.classes || [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }],
-          subjects: school.subjects || plainState.subjects || [
-            'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
-            'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
-          ],
-          gradingSystem: plainState.schoolGradingSystems?.[schoolId] || plainState.gradingSystem,
-          gradeTypes: plainState.schoolGradeTypes?.[schoolId] || plainState.gradeTypes,
-          subjectRequirements: plainState.subjectRequirements,
-          scheduleSettings: plainState.schoolScheduleSettings?.[schoolId] || plainState.scheduleSettings,
-          settings: plainState.schoolsSettings?.[schoolId] || plainState.settings
-        };
-        queueSetIfChanged(doc(db, 'schools', schoolId), `schools/${schoolId}`, schoolPayload, true);
+        const schoolQuarters = school.quarters || (schoolId === 'school_1' ? plainState.quarters : undefined) || { Q1: [], Q2: [], Q3: [], Q4: [] };
+        if (isDirectorOrCreator || isEmployee) {
+          const schoolPayload = {
+            id: school.id || schoolId,
+            name: school.name || 'Школа №1',
+            directorId: school.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
+            classes: Array.isArray(school.classes)
+              ? school.classes
+              : (schoolId === 'school_1' ? (plainState.classes || [{ class: '10', letter: 'А', headmasterId: 'u_teacher' }]) : []),
+            subjects: Array.isArray(school.subjects) && school.subjects.length > 0
+              ? school.subjects
+              : (schoolId === 'school_1' && plainState.subjects?.length ? plainState.subjects : [
+                  'Математика', 'Русский язык', 'Физика', 'Литература', 'История',
+                  'Химия', 'Биология', 'География', 'Английский язык', 'Физкультура', 'Информатика'
+                ]),
+            quarters: schoolQuarters,
+            gradingSystem: school.gradingSystem || plainState.schoolGradingSystems?.[schoolId] || (schoolId === 'school_1' ? plainState.gradingSystem : { minGrade: 2, maxGrade: 5, useWeights: true }),
+            gradeTypes: school.gradeTypes || plainState.schoolGradeTypes?.[schoolId] || (schoolId === 'school_1' ? plainState.gradeTypes : []),
+            subjectRequirements: school.subjectRequirements || (schoolId === 'school_1' ? plainState.subjectRequirements : {}),
+            scheduleSettings: school.scheduleSettings || plainState.schoolScheduleSettings?.[schoolId] || (schoolId === 'school_1' ? plainState.scheduleSettings : undefined),
+            educationalResourceUrl: school.educationalResourceUrl ?? '',
+            settings: plainState.schoolsSettings?.[schoolId] || plainState.settings
+          };
+          queueSetIfChanged(doc(db, 'schools', schoolId), `schools/${schoolId}`, schoolPayload, true);
+        }
 
         if (isDirectorOrCreator) {
           const activeSettings = plainState.schoolsSettings?.[schoolId] || plainState.settings;
@@ -1116,8 +1468,12 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
               secretKey: activeSettings.secretKey || 'Space',
               secretCount: activeSettings.secretCount || 4
             };
+            if (activeSettings.adminPassword) gatePayload.adminPassword = activeSettings.adminPassword;
             if (activeSettings.adminPasswordHash) gatePayload.adminPasswordHash = activeSettings.adminPasswordHash;
             if (activeSettings.adminPasswordSalt) gatePayload.adminPasswordSalt = activeSettings.adminPasswordSalt;
+            if (activeSettings.eljurInfo !== undefined) gatePayload.eljurInfo = activeSettings.eljurInfo;
+            if (activeSettings.bodyFontId !== undefined) gatePayload.bodyFontId = activeSettings.bodyFontId;
+            if (activeSettings.headingFontId !== undefined) gatePayload.headingFontId = activeSettings.headingFontId;
             queueSetIfChanged(
               doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'),
               `schools/${schoolId}/publicConfig/creatorGate`,
@@ -1141,7 +1497,6 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       }
       for (const u of schoolUsers) {
         const userDoc = { ...u };
-        delete userDoc.password;
         queueSetIfChanged(doc(db, 'schools', schoolId, 'users', u.id), `schools/${schoolId}/users/${u.id}`, userDoc, true);
         synced.users.add(u.id);
       }
@@ -1150,7 +1505,6 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       const selfUser = schoolUsers.find((u: any) => u.id === currentUserId);
       if (selfUser && synced.users.has(currentUserId)) {
         const userDoc = { ...selfUser };
-        delete userDoc.password;
         queueSetIfChanged(doc(db, 'schools', schoolId, 'users', currentUserId), `schools/${schoolId}/users/${currentUserId}`, userDoc, true);
       }
     }
@@ -1159,7 +1513,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     if (canWriteSchedules) {
       const currentActiveScheduleKeys = new Set<string>();
       for (const [k, days] of Object.entries(plainState.schedules || {})) {
-        if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
+        if (k.startsWith(`${schoolId}__`) || (!k.includes('__') && schoolId === 'school_1')) {
           const classKey = k.includes('__') ? k.split('__')[1] : k;
           currentActiveScheduleKeys.add(classKey);
           queueSetIfChanged(
@@ -1183,7 +1537,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     if (canWriteGrades) {
       const currentActiveGradeKeys = new Set<string>();
       for (const [k, entries] of Object.entries(plainState.grades || {})) {
-        if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
+        if (k.startsWith(`${schoolId}__`) || (!k.includes('__') && schoolId === 'school_1')) {
           const gradeKey = k.includes('__') ? k.split('__')[1] : k;
           currentActiveGradeKeys.add(gradeKey);
           queueSetIfChanged(
@@ -1205,7 +1559,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       // 5. Final grades diff & sync
       const currentActiveFinalGradeKeys = new Set<string>();
       for (const [k, entries] of Object.entries(plainState.finalGrades || {})) {
-        if (k.startsWith(`${schoolId}__`) || !k.includes('__')) {
+        if (k.startsWith(`${schoolId}__`) || (!k.includes('__') && schoolId === 'school_1')) {
           const classKey = k.includes('__') ? k.split('__')[1] : k;
           currentActiveFinalGradeKeys.add(classKey);
           queueSetIfChanged(
@@ -1227,7 +1581,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
 
     // 6. Homework diff & sync
     if (canWriteHomework) {
-      const schoolHomework = (plainState.homework || []).filter((h: any) => h.schoolId === schoolId || !h.schoolId);
+      const schoolHomework = (plainState.homework || []).filter((h: any) => h.schoolId === schoolId || (!h.schoolId && schoolId === 'school_1'));
       const currentHwIds = new Set(schoolHomework.map((h: any) => h.id));
       for (const prevId of Array.from(synced.homework)) {
         if (!currentHwIds.has(prevId)) {
@@ -1247,7 +1601,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     }
 
     // 7. Announcements diff & sync
-    const schoolAnnouncements = (plainState.announcements || []).filter((a: any) => a.schoolId === schoolId || !a.schoolId);
+    const schoolAnnouncements = (plainState.announcements || []).filter((a: any) => a.schoolId === schoolId || (!a.schoolId && schoolId === 'school_1'));
     if (canManageAnnouncements) {
       const currentAnnIds = new Set(schoolAnnouncements.map((a: any) => a.id));
       for (const prevId of Array.from(synced.announcements)) {
@@ -1280,7 +1634,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     }
 
     // 8. Messages diff & sync (all school members can create messages, update readBy, and delete their own messages)
-    const schoolMessages = (plainState.messages || []).filter((m: any) => m.schoolId === schoolId || !m.schoolId);
+    const schoolMessages = (plainState.messages || []).filter((m: any) => m.schoolId === schoolId || (!m.schoolId && schoolId === 'school_1'));
     const currentMsgIds = new Set(schoolMessages.map((m: any) => m.id));
     for (const prevId of Array.from(synced.messages)) {
       if (!currentMsgIds.has(prevId)) {
@@ -1300,7 +1654,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
 
     // 9. Teacher Assignments & Student Groups diff & sync
     if (canManageLoadAndGroups) {
-      const schoolAssignments = (plainState.teacherAssignments || []).filter((t: any) => t.schoolId === schoolId || !t.schoolId);
+      const schoolAssignments = (plainState.teacherAssignments || []).filter((t: any) => t.schoolId === schoolId || (!t.schoolId && schoolId === 'school_1'));
       const currentAssignIds = new Set(schoolAssignments.map((t: any) => t.id));
       for (const prevId of Array.from(synced.teacherAssignments)) {
         if (!currentAssignIds.has(prevId)) {
@@ -1318,7 +1672,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
         synced.teacherAssignments.add(ta.id);
       }
 
-      const schoolGroups = (plainState.studentGroups || []).filter((g: any) => g.schoolId === schoolId || !g.schoolId);
+      const schoolGroups = (plainState.studentGroups || []).filter((g: any) => g.schoolId === schoolId || (!g.schoolId && schoolId === 'school_1'));
       const currentGroupIds = new Set(schoolGroups.map((g: any) => g.id));
       for (const prevId of Array.from(synced.studentGroups)) {
         if (!currentGroupIds.has(prevId)) {

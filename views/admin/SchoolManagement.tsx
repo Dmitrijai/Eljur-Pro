@@ -1,7 +1,8 @@
-
 import React, { useState } from 'react';
 import { AppState, User } from '../../types';
 import * as H from '../../utils/helpers';
+import * as DB from '../../services/db';
+import { generateSalt, hashPassword, verifyUserPasswordDetailed } from '../../utils/auth';
 import { Button, Input, Card } from '../../components/ui';
 import { Edit, Trash2, AlertCircle, Save } from 'lucide-react';
 
@@ -20,45 +21,63 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
 
     const [error, setError] = useState<string | null>(null);
 
-    const addSchool = () => {
-        if (!newName || !directorFio || !directorLogin || !directorPass) {
+    const addSchool = async () => {
+        if (!newName.trim() || !directorFio.trim() || !directorLogin.trim() || !directorPass.trim()) {
             setError(t('fill_fields'));
             return;
         }
 
         const normLogin = directorLogin.trim().toLowerCase();
-        const comboExists = state.users.some(u => 
-            u.login?.trim().toLowerCase() === normLogin && 
-            u.password === directorPass
-        );
-        if (comboExists) {
-            setError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
-            return;
+        for (const u of state.users) {
+            if (u.login?.trim().toLowerCase() === normLogin) {
+                const isMatch = await verifyUserPasswordDetailed(u, directorPass);
+                if (isMatch.valid) {
+                    setError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
+                    return;
+                }
+            }
         }
         
         const schoolId = H.uid('school');
         const directorId = H.uid('u_dir');
+        const salt = generateSalt();
+        const passwordHash = await hashPassword(directorPass, salt);
         
-        const newSchool = { id: schoolId, name: newName, directorId, classes: [] };
-        const newDirector = {
+        const newSchool = {
+            id: schoolId,
+            name: newName.trim(),
+            directorId,
+            classes: [{ class: '10', letter: 'А' }],
+            subjects: [...H.DEFAULT_SUBJECTS],
+            quarters: { Q1: [], Q2: [], Q3: [], Q4: [] },
+            gradingSystem: { ...H.defaultGradingSystem },
+            gradeTypes: H.getDefaultGradeTypes(),
+            scheduleSettings: { ...H.defaultScheduleSettings }
+        };
+        const newDirector: User = {
             id: directorId,
             schoolId: schoolId,
-            fio: directorFio,
-            login: directorLogin,
-            password: directorPass,
+            fio: directorFio.trim(),
+            login: directorLogin.trim(),
+            password: directorPass.trim(),
+            passwordSalt: salt,
+            passwordHash: passwordHash,
             role: 'director'
         };
 
         state.schools.push(newSchool);
-        state.users.push(newDirector as User);
+        state.users.push(newDirector);
+        if (!state.userOrder) state.userOrder = [];
+        state.userOrder.push(directorId);
         onUpdate(state);
+        DB.saveSchoolState(schoolId, state).catch(() => {});
         
         setNewName(''); setDirectorFio(''); setDirectorLogin(''); setDirectorPass('');
         setError(null);
     };
 
     const deleteSchool = (schoolId: string, schoolName: string) => {
-        if (!confirm(`ВНИМАНИЕ! Вы собираетесь удалить школу "${schoolName}" и ВСЕХ её пользователей (директора, учителей, учеников) и все их данные. Это действие необратимо. Продолжить?`)) return;
+        if (!confirm(t('delete_school_confirm'))) return;
         
         const removedUserIds = new Set(state.users.filter(u => u.schoolId === schoolId).map(u => u.id));
 
@@ -129,6 +148,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
         // 11. Remove school itself
         state.schools = state.schools.filter(s => s.id !== schoolId);
         
+        DB.deleteSchoolFromFirestore(schoolId).catch(() => {});
         onUpdate(state);
     };
 
@@ -166,7 +186,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
         // Ensure this Director ID isn't already assigned to another school
         const existingSchoolWithSameDir = state.schools.find(s => s.directorId === editDirectorId && s.id !== editSchoolId);
         if (existingSchoolWithSameDir) {
-            setError(`Этот ID директора уже привязан к школе "${existingSchoolWithSameDir.name}". Один директор не может управлять несколькими школами.`);
+            setError(t('director_id_exists'));
             return;
         }
 
@@ -189,6 +209,9 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                         const suffix = k.substring(oldPrefix.length);
                         state.schedules[`${newPrefix}${suffix}`] = state.schedules[k];
                         delete state.schedules[k];
+                    } else if (editSchoolId === 'school_1' && !k.includes('__')) {
+                        state.schedules[`${newPrefix}${k}`] = state.schedules[k];
+                        delete state.schedules[k];
                     }
                 });
             }
@@ -200,6 +223,9 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                         const suffix = k.substring(oldPrefix.length);
                         state.grades[`${newPrefix}${suffix}`] = state.grades[k];
                         delete state.grades[k];
+                    } else if (editSchoolId === 'school_1' && !k.includes('__')) {
+                        state.grades[`${newPrefix}${k}`] = state.grades[k];
+                        delete state.grades[k];
                     }
                 });
             }
@@ -210,6 +236,9 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                     if (k.startsWith(oldPrefix)) {
                         const suffix = k.substring(oldPrefix.length);
                         state.finalGrades[`${newPrefix}${suffix}`] = state.finalGrades[k];
+                        delete state.finalGrades[k];
+                    } else if (editSchoolId === 'school_1' && !k.includes('__')) {
+                        state.finalGrades[`${newPrefix}${k}`] = state.finalGrades[k];
                         delete state.finalGrades[k];
                     }
                 });
@@ -243,6 +272,13 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                 });
             }
 
+            // Update messages
+            if (state.messages) {
+                state.messages.forEach(m => {
+                    if (m.schoolId === editSchoolId) m.schoolId = editSchoolIdVal;
+                });
+            }
+
             // Update schoolsSettings
             if (state.settings && (state.settings as any).schoolsSettings?.[editSchoolId]) {
                 (state.settings as any).schoolsSettings[editSchoolIdVal] = (state.settings as any).schoolsSettings[editSchoolId];
@@ -256,14 +292,27 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
         state.schools[schoolIndex].name = editName;
         state.schools[schoolIndex].directorId = editDirectorId;
 
+        const targetDirUser = state.users.find(u => u.id === editDirectorId);
+        if (targetDirUser) {
+            targetDirUser.role = 'director';
+            targetDirUser.schoolId = editSchoolIdVal;
+        }
+
+        const oldIdToCleanup = editSchoolIdVal !== editSchoolId ? editSchoolId : null;
+        const targetSaveId = editSchoolIdVal;
+
         onUpdate(state);
+        DB.saveSchoolState(targetSaveId, state).catch(() => {});
+        if (oldIdToCleanup) {
+            DB.deleteSchoolFromFirestore(oldIdToCleanup).catch(() => {});
+        }
         setEditSchoolId(null);
         setError(null);
     };
 
     return (
         <div className="space-y-8">
-            <Card className="p-6">
+            <Card className="p-4 sm:p-6">
                 <h3 className="font-bold text-lg mb-4 text-slate-800 dark:text-white">{t('add_school')}</h3>
                 {error && !editSchoolId && (
                     <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2 text-red-700 text-sm font-medium">
@@ -273,7 +322,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="text-xs font-bold text-slate-500">{t('school_name')}</label>
-                        <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Школа №X" />
+                        <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder={t('school_placeholder')} />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-slate-500">{t('director_fio')}</label>
@@ -311,8 +360,23 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                                         <Input value={editName} onChange={e => setEditName(e.target.value)} />
                                     </div>
                                     <div>
-                                        <label className="text-xs font-bold text-slate-500">ID {t('director')}</label>
-                                        <Input value={editDirectorId} onChange={e => setEditDirectorId(e.target.value)} placeholder="User ID" />
+                                        <label className="text-xs font-bold text-slate-500">{t('director')}</label>
+                                        <select
+                                            value={editDirectorId}
+                                            onChange={e => setEditDirectorId(e.target.value)}
+                                            className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                                        >
+                                            {state.users
+                                                .filter(u => u.role !== 'creator' && u.role !== 'student' && (u.schoolId === s.id || u.id === editDirectorId || !u.schoolId))
+                                                .map(u => (
+                                                    <option key={u.id} value={u.id}>
+                                                        {H.formatShortName(u.fio)} ({t(u.role)}) — ID: {u.id}
+                                                    </option>
+                                                ))}
+                                            {!state.users.some(u => u.id === editDirectorId) && editDirectorId && (
+                                                <option value={editDirectorId}>ID: {editDirectorId}</option>
+                                            )}
+                                        </select>
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-slate-500">{t('school_id')}</label>
@@ -328,10 +392,10 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                     }
 
                     return (
-                        <Card key={s.id} className="p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-l-[6px] border-l-indigo-500">
+                        <Card key={s.id} className="p-4 sm:p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 sm:gap-4 border-l-[6px] border-l-indigo-500">
                             <div className="w-full md:w-auto overflow-hidden">
-                                <h4 className="font-bold text-lg text-slate-800 dark:text-white truncate">{s.name}</h4>
-                                <p className="text-sm text-slate-500 truncate">{t('director')}: {dir ? `${dir.fio} (ID: ${dir.id})` : `ID: ${s.directorId} (${t('unknown')})`}</p>
+                                <h4 className="font-bold text-base sm:text-lg text-slate-800 dark:text-white truncate">{s.name}</h4>
+                                <p className="text-xs sm:text-sm text-slate-500 truncate">{t('director')}: {dir ? `${H.formatShortName(dir.fio)} (ID: ${dir.id})` : `ID: ${s.directorId} (${t('unknown')})`}</p>
                                 <p className="text-xs text-slate-400 mt-1 truncate">School ID: {s.id}</p>
                             </div>
                             <div className="flex flex-wrap gap-2 w-full md:w-auto">

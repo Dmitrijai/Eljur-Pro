@@ -1,0 +1,566 @@
+System
+Build
+ Render Start 
+17:14:36.775
+Backend
+Log
+ Starting build...
+  $ vite build
+  vite v6.4.1 building for production...
+  transforming...
+  ✓ 2852 modules transformed.
+  rendering chunks...
+  computing gzip size...
+  dist/index.html                    19.85 kB │ gzip:   4.68 kB
+  dist/assets/index-CfZ7kyuK.css     24.38 kB │ gzip:   3.71 kB
+  dist/assets/index-Bo9445zD.js   2,014.92 kB │ gzip: 531.82 kB
+  
+  (!) Some chunks are larger than 500 kB after minification. Consider:
+  - Using dynamic import() to code-split the application
+  - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+  - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+  ✓ built in 11.86s 
+17:14:36.775
+Backend
+Log
+ Build successful. 
+17:14:36.872
+Backend
+Log
+ CONNECTED 
+17:14:37.875
+System
+Build
+ Render End 
+17:14:37.886
+App
+Debug
+ [vite] connecting... 
+17:14:37.901
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:14:37.934
+App
+Debug
+ [vite] connected. 
+17:16:22.258
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:16:27.308
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.545
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.555
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:16:28.564
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:37.606
+Backend
+Log
+ CONNECTED 
+17:24:45.608
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:24:53.440
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:24:54.225
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.248
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.257
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:24:58.267
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:33.866
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:28:38.738
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:28:39.173
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.182
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:28:39.191
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:08.221
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:08.241
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:08.243
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:08.243
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:34.317
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:34.339
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:34.342
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:34.343
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:29:34.343
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:33:25.139
+Backend
+Log
+ CONNECTED 
+17:34:28.487
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:34:28.498
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:34:28.513
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:34:28.523
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:34:28.533
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:38:50.547
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:38:57.947
+App
+Warning
+ getSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:235:26
+    at new Promise (<anonymous>)
+    at Module.getSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:234:18) 
+17:39:02.991
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:02.992
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.004
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:39:03.005
+App
+Warning
+ saveSchoolCache failed:
+  NotFoundError: Failed to execute 'transaction' on 'IDBDatabase': One of the specified object stores was not found.
+    at https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:210:26
+    at new Promise (<anonymous>)
+    at Module.saveSchoolCache (https://ais-dev-mvzxpcuoxh7lenblqi2nz7-194264796211.europe-west1.run.app/services/db.ts:209:11) 
+17:43:25.251
+Backend
+Log
+ CONNECTED 

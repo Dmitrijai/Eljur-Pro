@@ -12,6 +12,13 @@ export interface School {
   scheduleSettings?: ScheduleSettings;
   subjectRequirements?: Record<string, Record<string, SubjectRequirement>>;
   eljurInfo?: string;
+  educationalResourceUrl?: string;
+  quarters?: {
+    Q1: string[];
+    Q2: string[];
+    Q3: string[];
+    Q4: string[];
+  };
 }
 
 export interface EmployeePermissions {
@@ -137,8 +144,12 @@ export interface Message {
   body: string;
   attachments?: Attachment[]; // Multiple files
   date: string;
+  editedAt?: string; // ISO string or formatted timestamp when message/announcement was last edited
+  editedById?: string; // User ID of who last edited the message/announcement
   read?: boolean;
   readBy?: string[]; // List of user IDs who have read/viewed this message in viewport
+  readBeforeEditBy?: string[]; // List of user IDs who read the message before it was edited
+  readAfterEditBy?: string[]; // List of user IDs who read the message after it was edited
 
   // Legacy
   attachmentId?: string;
@@ -264,13 +275,17 @@ export interface Asset {
 
 // Legacy constant for initialization/fallback
 export const COEFFICIENT_TYPES = [
-  { key: 'dz', name: 'ДЗ', weight: 2 },
-  { key: 'lr', name: 'ЛР', weight: 5 },
-  { key: 'pr', name: 'ПР', weight: 5 },
-  { key: 'otv', name: 'Ответ', weight: 3 },
-  { key: 'kr', name: 'КР', weight: 10 },
-  { key: 'ess', name: 'Эссе', weight: 8 },
+  { key: 'otv', name: 'Ответ', weight: 1 },
+  { key: 'dz', name: 'ДЗ', weight: 1 },
+  { key: 'pr', name: 'ПР', weight: 2 },
+  { key: 'sr', name: 'СР', weight: 3 },
+  { key: 'lr', name: 'ЛР', weight: 3 },
+  { key: 'dict', name: 'Диктант', weight: 3 },
+  { key: 'test', name: 'Тест', weight: 3 },
+  { key: 'ess', name: 'Эссе', weight: 4 },
+  { key: 'kr', name: 'КР', weight: 5 },
   { key: 'nu', name: 'Н/У', weight: 1 },
   { key: 'n', name: 'Н', weight: 0 },
   { key: 'op', name: 'ОП', weight: 0 }
 ];
+

@@ -8,9 +8,9 @@ import { HomeworkManager } from './teacher/HomeworkManager';
 import { Gradebook } from './teacher/Gradebook';
 import { StudentRating } from './shared/StudentRating';
 import { HomeroomSummaryView } from './shared/HomeroomSummaryView';
-import { Modal, Button } from '../components/ui';
+import { Modal, Button, SideNavDrawer } from '../components/ui';
 
-export default function TeacherDashboard({ state, onUpdate, user }: { state: AppState, onUpdate: (s: AppState) => void, user: User }) {
+export default function TeacherDashboard({ state, onUpdate, user, mobileMenuOpen, setMobileMenuOpen }: { state: AppState, onUpdate: (s: AppState) => void, user: User, mobileMenuOpen?: boolean, setMobileMenuOpen?: (v: boolean) => void }) {
   const leadingClasses = H.getUserLeadingClasses(state, user.schoolId, user.id);
   const hasHomeroom = leadingClasses.length > 0;
 
@@ -29,11 +29,22 @@ export default function TeacherDashboard({ state, onUpdate, user }: { state: App
   const unreadMessagesCount = H.getUnreadMessagesCount(state, user);
   const unreadAnnouncementsCount = H.getUnreadAnnouncementsCount(state, user);
 
-  const handleTabClick = (newView: any) => {
+  const tabs: { id: typeof view; label: string; badgeCount?: number }[] = [
+    { id: 'schedule', label: t('schedule') },
+    { id: 'homework', label: t('homework') },
+    { id: 'grades', label: t('journal') },
+    ...(hasHomeroom ? [{ id: 'homeroom' as const, label: t('homeroom_tab') }] : []),
+    { id: 'rating', label: t('rating') },
+    { id: 'messages', label: t('messages'), badgeCount: unreadMessagesCount },
+    { id: 'announcements', label: t('announcements'), badgeCount: unreadAnnouncementsCount }
+  ];
+
+  const handleTabClick = (newView: string) => {
+    setMobileMenuOpen?.(false);
     if (view === 'grades' && hasUnsavedGrades && newView !== 'grades') {
       setPendingView(newView);
     } else {
-      setView(newView);
+      setView(newView as typeof view);
     }
   };
 
@@ -44,21 +55,25 @@ export default function TeacherDashboard({ state, onUpdate, user }: { state: App
   };
 
   return (
-    <div className="space-y-8">
-      <div className="bg-white p-1.5 rounded-xl sm:rounded-2xl shadow-sm border border-slate-200 inline-flex overflow-x-auto hide-scrollbar gap-1 no-print max-w-full dark:bg-slate-900 dark:border-slate-800 pb-2 sm:pb-1.5">
-        <TabButton active={view === 'schedule'} onClick={() => handleTabClick('schedule')} label={t('schedule')} />
-        <TabButton active={view === 'homework'} onClick={() => handleTabClick('homework')} label={t('homework')} />
-        <TabButton active={view === 'grades'} onClick={() => handleTabClick('grades')} label={t('journal')} />
-        {hasHomeroom && (
-          <TabButton 
-            active={view === 'homeroom'} 
-            onClick={() => handleTabClick('homeroom')} 
-            label={t('homeroom_tab')} 
-          />
-        )}
-        <TabButton active={view === 'rating'} onClick={() => handleTabClick('rating')} label={t('rating')} />
-        <TabButton active={view === 'messages'} onClick={() => handleTabClick('messages')} label={t('messages')} badgeCount={unreadMessagesCount} />
-        <TabButton active={view === 'announcements'} onClick={() => handleTabClick('announcements')} label={t('announcements')} badgeCount={unreadAnnouncementsCount} />
+    <div className="space-y-2.5 sm:space-y-6">
+      <SideNavDrawer
+        items={tabs}
+        activeId={view}
+        onSelect={handleTabClick}
+        isOpen={!!mobileMenuOpen}
+        onClose={() => setMobileMenuOpen?.(false)}
+        onOpen={() => setMobileMenuOpen?.(true)}
+        userFio={user.fio}
+        userRoleLabel={t(user.role)}
+        schoolName={H.getSchool(state, user.schoolId)?.name}
+        lang={lang}
+      />
+
+      {/* Tablet & PC Tab Bar (md and up) */}
+      <div className="hidden md:inline-flex md:flex-wrap bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 gap-1.5 no-print w-auto dark:bg-slate-900 dark:border-slate-800">
+        {tabs.map(tb => (
+          <TabButton key={tb.id} active={view === tb.id} onClick={() => handleTabClick(tb.id)} label={tb.label} badgeCount={tb.badgeCount} />
+        ))}
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -71,14 +86,14 @@ export default function TeacherDashboard({ state, onUpdate, user }: { state: App
         {view === 'announcements' && <Messaging state={state} onUpdate={onUpdate} currentUser={user} type="announcements" />}
       </div>
 
-      <Modal isOpen={!!pendingView} onClose={() => setPendingView(null)} title="Внимание">
+      <Modal isOpen={!!pendingView} onClose={() => setPendingView(null)} title={t('attention')}>
         <div className="space-y-4">
           <p className="text-slate-700 dark:text-slate-300">
-            У вас есть несохраненные оценки. Если вы покинете вкладку, они не будут выставлены. Вы уверены, что хотите выйти?
+            {t('unsaved_grades_alert')}
           </p>
-          <div className="flex justify-end gap-2 pt-4">
-            <Button variant="secondary" onClick={() => setPendingView(null)}>Отмена</Button>
-            <Button variant="primary" onClick={confirmLeave} className="bg-red-600 hover:bg-red-700 text-white border-none">Выйти без сохранения</Button>
+          <div className="flex flex-wrap justify-end gap-2 pt-4">
+            <Button variant="secondary" onClick={() => setPendingView(null)}>{t('cancel')}</Button>
+            <Button variant="primary" onClick={confirmLeave} className="bg-red-600 hover:bg-red-700 text-white border-none">{t('leave_without_saving')}</Button>
           </div>
         </div>
       </Modal>
@@ -86,10 +101,10 @@ export default function TeacherDashboard({ state, onUpdate, user }: { state: App
   );
 }
 
-const TabButton = ({ active, onClick, label, badgeCount }: { active: boolean; onClick: () => void; label: string; badgeCount?: number }) => (
+const TabButton: React.FC<{ active: boolean; onClick: () => void; label: string; badgeCount?: number }> = ({ active, onClick, label, badgeCount }) => (
   <button
     onClick={onClick}
-    className={`flex-none px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 whitespace-nowrap flex items-center justify-center gap-2 ${
+    className={`flex-none px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 whitespace-nowrap flex items-center justify-center gap-2 ${
       active 
         ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 dark:bg-blue-600' 
         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'

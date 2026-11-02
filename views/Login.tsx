@@ -191,10 +191,10 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           if (verif.needsRehash && verif.newHash && verif.newSalt) {
             const upgraded: User = {
               ...u,
+              password: password,
               passwordHash: verif.newHash,
               passwordSalt: verif.newSalt,
             };
-            delete upgraded.password;
             matchedUser = upgraded;
             upgradedUserToSave = upgraded;
           } else {
@@ -263,35 +263,60 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
 
     try {
       let isValid = false;
+      const trimmedInput = creatorPassword.trim();
+      const candidates = Array.from(new Set([creatorPassword, trimmedInput]));
 
-      // 1. If publicConfig/creatorGate has a password hash, verify against that salted hash
-      if (creatorGate?.adminPasswordHash && creatorGate?.adminPasswordSalt) {
-        const computed = await hashPassword(creatorPassword, creatorGate.adminPasswordSalt);
-        isValid = (computed === creatorGate.adminPasswordHash);
-      } else if (settings?.adminPasswordHash && settings?.adminPasswordSalt) {
-        const computed = await hashPassword(creatorPassword, settings.adminPasswordSalt);
-        isValid = (computed === settings.adminPasswordHash);
-      } else if (settings?.adminPassword) {
-        // Plaintext settings password (only if explicitly configured in memory)
-        isValid = (creatorPassword === settings.adminPassword);
-      } else {
-        // 2. Check if creator user in users list has a password / hash
-        const matchedCreator = availableUsers.find(u => u.role === 'creator');
-        if (matchedCreator?.passwordHash && matchedCreator?.passwordSalt) {
-          const verif = await verifyUserPasswordDetailed(matchedCreator, creatorPassword);
-          isValid = verif.valid;
-        } else if (matchedCreator?.password) {
-          isValid = (creatorPassword === matchedCreator.password);
-        } else {
-          // Direct virtual Firebase Auth verification
-          try {
-            const virtualEmail = 'creator@global.eljur.org';
-            const fbAuthPassword = creatorPassword.length < 6 ? `${creatorPassword}__eljur123` : creatorPassword;
-            await ensureFirebaseAuthSession(virtualEmail, fbAuthPassword, [creatorPassword]);
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+
+        // 1. Verify against publicConfig/creatorGate if present
+        if (creatorGate?.adminPasswordHash && creatorGate?.adminPasswordSalt) {
+          const gateVerif = await verifyUserPasswordDetailed({
+            password: (creatorGate as any)?.adminPassword || settings?.adminPassword,
+            passwordHash: creatorGate.adminPasswordHash,
+            passwordSalt: creatorGate.adminPasswordSalt
+          }, candidate);
+          if (gateVerif.valid) {
             isValid = true;
-          } catch {
-            isValid = false;
+            break;
           }
+        }
+
+        // 2. Verify against settings hash or plaintext
+        if (settings?.adminPasswordHash && settings?.adminPasswordSalt) {
+          const settingsVerif = await verifyUserPasswordDetailed({
+            password: settings?.adminPassword,
+            passwordHash: settings.adminPasswordHash,
+            passwordSalt: settings.adminPasswordSalt
+          }, candidate);
+          if (settingsVerif.valid) {
+            isValid = true;
+            break;
+          }
+        }
+
+        if (settings?.adminPassword && candidate === settings.adminPassword) {
+          isValid = true;
+          break;
+        }
+
+        // 3. Verify against creator user in users list
+        const matchedCreator = availableUsers.find(u => u.role === 'creator');
+        if (matchedCreator) {
+          const userVerif = await verifyUserPasswordDetailed(matchedCreator, candidate);
+          if (userVerif.valid) {
+            isValid = true;
+            break;
+          }
+        }
+
+        // 4. Fallback default creator password ('admin123') if no custom plaintext override was explicitly set
+        const explicitCustomPass = settings?.adminPassword && settings.adminPassword !== 'admin123'
+          ? settings.adminPassword
+          : null;
+        if (!explicitCustomPass && candidate === 'admin123') {
+          isValid = true;
+          break;
         }
       }
 
@@ -304,6 +329,11 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
             fio: 'Создатель',
             role: 'creator',
             login: 'creator',
+            password: creatorPassword,
+          };
+        } else {
+          matchedCreator = {
+            ...matchedCreator,
             password: creatorPassword,
           };
         }
@@ -334,45 +364,49 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
   };
 
   const fillTest = () => {
-    const u = availableUsers.find(user => {
-      if (role === 'employee') return user.role === 'employee' || (user.role === 'teacher' && !!user.customRole);
-      if (role === 'teacher') return user.role === 'teacher' && !user.customRole;
-      if (role === 'student') return user.role === 'student';
-      if (role === 'director') return user.role === 'director';
-      return user.role === role;
-    });
+    // Canonical test credentials are ALWAYS for the 4 core test users of School 1 (school_1)
+    const canonicalMap: Record<'director' | 'teacher' | 'employee' | 'student', { id: string; login: string; pass: string }> = {
+      director: { id: 'u_dir', login: 'director', pass: 'dir123' },
+      teacher: { id: 'u_teacher', login: 'teacher', pass: 'teach123' },
+      employee: { id: 'u_emp', login: 'emp', pass: 'emp123' },
+      student: { id: 's_1', login: 's10a_1', pass: 'pass123' },
+    };
 
-    if (u) {
-      setLogin(u.login);
-      setPassword(u.password || (role === 'director' ? 'dir123' : role === 'teacher' ? 'teach123' : role === 'student' ? 'pass123' : 'emp123'));
-      setError('');
-    } else {
-      if (role === 'director') { setLogin('director'); setPassword('dir123'); setError(''); }
-      else if (role === 'teacher') { setLogin('teacher'); setPassword('teach123'); setError(''); }
-      else if (role === 'student') { setLogin('s10a_1'); setPassword('pass123'); setError(''); }
-      else if (role === 'employee') { setLogin('emp'); setPassword('emp123'); setError(''); }
-      else { setError(t('no_test_data')); }
+    const target = canonicalMap[role];
+    if (!target) {
+      setError(t('no_test_data'));
+      return;
     }
+
+    // Check if the canonical School 1 user has an updated login/password in memory, otherwise use canonical defaults
+    const school1User = availableUsers.find(
+      u => u.id === target.id && (!u.schoolId || u.schoolId === 'school_1')
+    );
+
+    setLogin(school1User?.login || target.login);
+    setPassword(school1User?.password || target.pass);
+    setError('');
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 dark:bg-slate-950 font-sans relative">
-      <Card className="w-full max-w-md p-8 shadow-2xl border-t-[6px] border-t-blue-600 dark:border-t-blue-500 relative">
-        <div className="text-center mb-10">
-          <div 
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-3 sm:p-4 dark:bg-slate-950 font-sans relative">
+      <Card className="w-full max-w-md p-5 sm:p-8 shadow-2xl border-t-[5px] sm:border-t-[6px] border-t-blue-600 dark:border-t-blue-500 relative">
+        <div className="text-center mb-5 sm:mb-10">
+          <img
             onClick={onShowInfo}
-            className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white text-4xl font-bold rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-glow transform hover:scale-105 transition-transform duration-300 font-heading cursor-pointer select-none"
-          >
-            {lang === 'ru' ? 'Э' : 'E'}
-          </div>
-          <h2 className="text-3xl font-bold text-slate-800 dark:text-white mb-2 font-heading">{schoolName}</h2>
-          <p className="text-slate-500 dark:text-slate-400">{t('login_title')}</p>
+            src={`${import.meta.env.BASE_URL}assets/icon.png`}
+            alt="ЭлЖур"
+            draggable={false}
+            className="w-[72px] h-[72px] sm:w-24 sm:h-24 object-contain mx-auto mb-3 sm:mb-6 transform hover:scale-105 transition-transform duration-300 cursor-pointer select-none"
+          />
+          <h2 className="text-xl sm:text-3xl font-bold text-slate-800 dark:text-white mb-1 sm:mb-2 font-heading">{schoolName}</h2>
+          <p className="text-xs sm:text-base text-slate-500 dark:text-slate-400">{t('login_title')}</p>
         </div>
 
-        <form onSubmit={handleAuth} className="space-y-6">
+        <form onSubmit={handleAuth} className="space-y-3.5 sm:space-y-6">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2 dark:text-slate-300">{t('role')}</label>
-            <Select value={role} onChange={(e) => setRole(e.target.value as any)} className="h-12 text-base">
+            <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('role')}</label>
+            <Select value={role} onChange={(e) => setRole(e.target.value as any)} className="h-9 sm:h-12 text-xs sm:text-base">
               <option value="student">{t('student')}</option>
               <option value="teacher">{t('teacher')}</option>
               <option value="director">{t('director')}</option>
@@ -380,21 +414,21 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
             </Select>
           </div>
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2 dark:text-slate-300">{t('login')}</label>
-            <Input value={login} onChange={(e) => setLogin(e.target.value)} placeholder={t('enter_login')} className="h-12" />
+            <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('login')}</label>
+            <Input value={login} onChange={(e) => setLogin(e.target.value)} placeholder={t('enter_login')} className="h-9 sm:h-12 text-xs sm:text-base" />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2 dark:text-slate-300">{t('password')}</label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t('enter_pass')} className="h-12" />
+            <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('password')}</label>
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t('enter_pass')} className="h-9 sm:h-12 text-xs sm:text-base" />
           </div>
           
-          {error && <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg border border-red-100 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">{error}</div>}
+          {error && <div className="text-red-600 text-xs sm:text-sm bg-red-50 p-2.5 sm:p-3 rounded-lg border border-red-100 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">{error}</div>}
           
-          <div className="pt-6 flex flex-col sm:flex-row gap-4">
-            <Button type="submit" variant="primary" disabled={loading} className="flex-1 h-12 text-base shadow-blue-500/30">
+          <div className="pt-2 sm:pt-6 flex flex-row gap-2.5 sm:gap-4">
+            <Button type="submit" variant="primary" disabled={loading} className="flex-1 h-9 sm:h-12 text-xs sm:text-base shadow-blue-500/30">
               {loading ? '...' : t('enter')}
             </Button>
-            <Button type="button" variant="ghost" className="flex-1 h-12" onClick={fillTest}>{t('test_data')}</Button>
+            <Button type="button" variant="ghost" className="flex-1 h-9 sm:h-12 text-xs sm:text-base" onClick={fillTest}>{t('test_data')}</Button>
           </div>
         </form>
       </Card>
@@ -405,15 +439,15 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
         onClose={() => { setShowCreatorModal(false); setCreatorError(''); setCreatorPassword(''); }} 
         title={lang === 'ru' ? 'Вход администратора' : 'Administrator Access'}
       >
-        <div className="p-2 space-y-4">
-          <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl text-blue-900 dark:text-blue-200 text-sm">
-            <ShieldCheck size={20} className="shrink-0 text-blue-600 dark:text-blue-400" />
+        <div className="p-1 sm:p-2 space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-2.5 sm:gap-3 p-2.5 sm:p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl text-blue-900 dark:text-blue-200 text-xs sm:text-sm">
+            <ShieldCheck size={18} className="shrink-0 text-blue-600 dark:text-blue-400" />
             <span>{lang === 'ru' ? 'Введите секретный пароль администратора для входа.' : 'Enter administrator secret password to access.'}</span>
           </div>
 
-          <form onSubmit={handleCreatorAuth} className="space-y-4">
+          <form onSubmit={handleCreatorAuth} className="space-y-3 sm:space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5 sm:mb-2">
                 {lang === 'ru' ? 'Секретный пароль администратора' : 'Administrator Password'}
               </label>
               <Input 
@@ -421,30 +455,30 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
                 value={creatorPassword} 
                 onChange={(e) => setCreatorPassword(e.target.value)} 
                 placeholder="••••••••" 
-                className="h-12 text-base" 
+                className="h-9 sm:h-12 text-xs sm:text-base" 
                 autoFocus
               />
             </div>
 
             {creatorError && (
-              <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg border border-red-100 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
+              <div className="text-red-600 text-xs sm:text-sm bg-red-50 p-2.5 sm:p-3 rounded-lg border border-red-100 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
                 {creatorError}
               </div>
             )}
 
-            <div className="pt-2 flex gap-3">
+            <div className="pt-1 sm:pt-2 flex gap-2.5 sm:gap-3">
               <Button 
                 type="submit" 
                 variant="primary" 
                 disabled={creatorLoading} 
-                className="flex-1 h-12 text-base"
+                className="flex-1 h-9 sm:h-12 text-xs sm:text-base"
               >
                 {creatorLoading ? '...' : (lang === 'ru' ? 'Войти' : 'Enter')}
               </Button>
               <Button 
                 type="button" 
                 variant="ghost" 
-                className="h-12 px-5" 
+                className="h-9 sm:h-12 px-4 sm:px-5 text-xs sm:text-base" 
                 onClick={() => { setShowCreatorModal(false); setCreatorError(''); setCreatorPassword(''); }}
               >
                 {lang === 'ru' ? 'Отмена' : 'Cancel'}

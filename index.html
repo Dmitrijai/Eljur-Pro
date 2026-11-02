@@ -8,7 +8,8 @@
     <meta name="description" content="Электронный журнал и дневник образовательного учреждения">
     <meta property="og:title" content="ЭлЖур">
     <meta property="og:description" content="Электронный журнал и дневник образовательного учреждения">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='64' height='64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='100%25' x2='100%25' y2='0%25'%3E%3Cstop offset='0%25' stop-color='%232563eb' /%3E%3Cstop offset='100%25' stop-color='%234f46e5' /%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='0' y='0' width='64' height='64' rx='16' fill='url(%23g)' /%3E%3Ctext x='32' y='46' fill='%23ffffff' font-family='system-ui, sans-serif' font-weight='bold' font-size='38' text-anchor='middle'%3EЭ%3C/text%3E%3C/svg%3E">
+    <link rel="icon" type="image/png" href="./assets/icon.png">
+    <link rel="apple-touch-icon" href="./assets/icon.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
@@ -75,9 +76,10 @@
             border-radius: 4px;
         }
         
-        /* Custom Scrollbar for Light Theme Search */
+        /* Custom Scrollbar for Light & Dark Themes */
         .custom-scrollbar::-webkit-scrollbar {
             width: 8px;
+            height: 8px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
             background: #f1f5f9;
@@ -90,11 +92,24 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
+        .dark .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
         
         /* Drag and Drop styling */
         .dragging-row {
             opacity: 0.5;
             background-color: #f0f9ff;
+        }
+        .dark .dragging-row {
+            opacity: 0.5;
+            background-color: #1e293b;
         }
         .dragging-over {
             border-top: 2px solid #3b82f6;
@@ -280,13 +295,11 @@
             nav, 
             button, 
             .lucide, 
-            input[type="file"], 
+            input[type="file"],
+            input[type="checkbox"]:not(.print-show),
+            input[type="range"],
             .tab-button, 
             select:not(.print-show), 
-            .shadow-soft, 
-            .shadow-glow, 
-            .bg-gradient-to-tr, 
-            .bg-gradient-to-br, 
             .season-element, 
             .season-petal, 
             .season-pollen, 
@@ -296,7 +309,7 @@
             }
             
             /* Reset Layout Containers */
-            #root, main, .max-w-7xl, .w-full, .p-8, .p-6, .card {
+            #root, main, .max-w-7xl, .max-w-5xl, .max-w-4xl {
                 width: 100% !important;
                 max-width: none !important;
                 margin: 0 !important;
@@ -308,71 +321,80 @@
             }
             
             /* Remove sticky positioning for print */
-            .sticky {
+            .sticky, [class*="sticky"] {
                 position: static !important;
                 left: auto !important;
                 right: auto !important;
                 top: auto !important;
                 bottom: auto !important;
-                background: transparent !important;
             }
 
-            /* Ensure text contrast */
+            /* Ensure text contrast in print */
             .text-white, .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400 {
                 color: #0f172a !important;
             }
             .bg-slate-900, .bg-slate-950, .bg-slate-800, .bg-slate-700 {
                 background: #f8fafc !important;
                 color: #0f172a !important;
-                border: 1pt solid #cbd5e1 !important;
             }
 
-            /* Flatten Cards */
-            .card, div[class*="bg-white"], div[class*="shadow-"] { 
-                box-shadow: none !important; 
-                border: 1pt solid #e2e8f0 !important; 
-                padding: 8px !important; 
-                margin: 0 0 12px 0 !important; 
-                background: #ffffff !important; 
+            /* Remove decorative shadows */
+            .shadow-soft, .shadow-glow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+                box-shadow: none !important;
             }
 
             /* Modals handling if printing from active modal */
             body.modal-open #root {
                 display: none !important;
             }
-            .fixed.inset-0 {
+            body.modal-open .modal-print-wrapper {
                 position: static !important;
                 width: 100% !important;
                 height: auto !important;
                 background: transparent !important;
                 padding: 0 !important;
+                margin: 0 !important;
                 display: block !important;
                 backdrop-filter: none !important;
+                overflow: visible !important;
             }
-            .fixed.inset-0 > div {
+            body.modal-open .modal-print-content {
+                position: static !important;
+                width: 100% !important;
                 max-width: 100% !important;
                 max-height: none !important;
+                height: auto !important;
                 box-shadow: none !important;
                 border: none !important;
                 background: transparent !important;
                 overflow: visible !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            body.modal-open .modal-print-body {
+                overflow: visible !important;
+                max-height: none !important;
+                height: auto !important;
+                padding: 0 !important;
             }
 
             /* --- CAPACIOUS TABLE STYLING --- */
-            .overflow-x-auto, .overflow-y-auto, .overflow-hidden {
+            .overflow-x-auto, .overflow-y-auto, .overflow-hidden, .overflow-auto {
                 overflow: visible !important;
-                display: block !important;
-                width: 100% !important;
                 max-height: none !important;
+            }
+
+            table, [class*="min-w-"] {
+                min-width: 0 !important;
+                max-width: 100% !important;
             }
 
             table {
                 width: 100% !important;
-                min-width: 0 !important;
                 border-collapse: collapse !important;
                 border: 1pt solid #94a3b8 !important;
-                margin-top: 8px !important;
-                margin-bottom: 16px !important;
+                margin-top: 4px !important;
+                margin-bottom: 10px !important;
                 font-size: 8pt !important;
                 table-layout: auto !important;
             }
@@ -383,19 +405,18 @@
                 color: #0f172a !important;
                 background: transparent !important;
                 word-wrap: break-word !important;
+                overflow-wrap: break-word !important;
                 vertical-align: middle !important;
-                text-align: center;
+                height: auto !important;
             }
 
             th {
                 background-color: #f1f5f9 !important;
                 color: #0f172a !important;
                 font-weight: 700 !important;
-                text-transform: uppercase;
                 font-size: 7.5pt !important;
-                letter-spacing: 0.02em;
-                text-align: center !important;
-                border-bottom: 1.5pt solid #94a3b8 !important;
+                letter-spacing: 0.01em;
+                border-bottom: 1.2pt solid #94a3b8 !important;
             }
 
             tr:nth-child(even) td {
@@ -403,7 +424,10 @@
             }
 
             thead { display: table-header-group !important; }
-            tr { page-break-inside: avoid !important; }
+            tr, .print-break-inside-avoid {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+            }
 
             /* Fix inputs/selects in tables to look like text */
             input, select, textarea {
@@ -411,18 +435,23 @@
                 background: transparent !important;
                 padding: 0 !important;
                 margin: 0 !important;
-                width: auto !important;
+                width: 100% !important;
+                min-width: 0 !important;
                 height: auto !important;
                 box-shadow: none !important;
-                font-weight: bold !important;
+                font-weight: 700 !important;
                 text-align: center !important;
                 color: #0f172a !important;
-                font-size: 9pt !important;
-                -webkit-appearance: none;
-                appearance: none;
+                font-size: 8.5pt !important;
+                -webkit-appearance: none !important;
+                appearance: none !important;
             }
             
-            /* Remove dropdown arrows and ensure options are somewhat readable if possible (though select in print is tricky) */
+            input::placeholder {
+                color: transparent !important;
+            }
+
+            /* Remove dropdown arrows */
             select { 
                 background-image: none !important; 
                 -moz-appearance: none !important;
@@ -432,32 +461,32 @@
                 font-weight: bold !important;
             }
 
-            /* Special handling for Schedule Day Boxes (Schedule View) */
-            /* These are usually rendered as Cards in the UI, convert to bordered blocks */
-            .border.rounded-xl {
-                border: 1pt solid #cbd5e1 !important;
-                border-radius: 4px !important;
-                margin-bottom: 15px !important;
-                page-break-inside: avoid;
-                box-shadow: none !important;
-            }
-            
-            /* Remove decorative backgrounds inside Schedule Day */
-            .bg-slate-50, .bg-slate-100 {
-                background-color: transparent !important;
-            }
-
             /* Ensure Title of Day is bold and clearly separated */
             .font-bold { font-weight: bold !important; }
 
             /* Special handling for marks color */
             .text-green-600, .text-blue-600, .text-amber-600, .text-red-600 {
                 font-weight: 700 !important;
-                color: black !important; /* Force B&W for clearer printing or keep color if preferred */
             }
             
             /* Links */
             a { text-decoration: none !important; color: black !important; }
+        }
+
+        /* Global Mobile & Utility Styles */
+        html, body {
+            overflow-x: hidden;
+            max-width: 100vw;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .text-center-all th, .text-center-all td, .text-center-all input, .text-center-all select {
+            text-align: center;
         }
 
         /* Basic Rich Text Styles for Quill */

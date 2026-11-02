@@ -10,14 +10,17 @@ import { HomeroomSummaryView } from './shared/HomeroomSummaryView';
 import { TeacherLoadManager } from './admin/TeacherLoadManager';
 import { GroupManager } from './admin/GroupManager';
 import { GradingSetup } from './admin/GradingSetup';
+import { SideNavDrawer } from '../components/ui';
 
 interface Props {
   state: AppState;
   onUpdate: (s: AppState) => void;
   user: User;
+  mobileMenuOpen?: boolean;
+  setMobileMenuOpen?: (v: boolean) => void;
 }
 
-export default function EmployeeDashboard({ state, onUpdate, user }: Props) {
+export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpen, setMobileMenuOpen }: Props) {
   const leadingClasses = H.getUserLeadingClasses(state, user.schoolId, user.id);
   const hasHomeroom = leadingClasses.length > 0;
 
@@ -45,27 +48,46 @@ export default function EmployeeDashboard({ state, onUpdate, user }: Props) {
   }, [view, user.id]);
 
   if (effectiveAllowedTabs.length === 0) {
-      return <div className="p-10 text-center text-slate-500">Нет доступных вкладок. Обратитесь к директору.</div>;
+      return <div className="p-10 text-center text-slate-500">{t('no_available_tabs')}</div>;
   }
 
+  const tabs: { id: string; label: string; badgeCount?: number }[] = [
+    ...(hasHomeroom ? [{ id: 'homeroom', label: `${t('homeroom_tab')} (${leadingClasses.map(c => `${c.class}${c.letter}`).join(', ')})` }] : []),
+    ...(allowedTabs.includes('messages') ? [{ id: 'messages', label: t('messages'), badgeCount: unreadMessagesCount }] : []),
+    ...(allowedTabs.includes('announcements') ? [{ id: 'announcements', label: t('announcements'), badgeCount: unreadAnnouncementsCount }] : []),
+    ...(allowedTabs.includes('rating') ? [{ id: 'rating', label: t('rating') }] : []),
+    ...(allowedTabs.includes('schedule') ? [{ id: 'schedule', label: t('schedule') }] : []),
+    ...(allowedTabs.includes('users') ? [{ id: 'users', label: t('users') }] : []),
+    ...(allowedTabs.includes('load') ? [{ id: 'load', label: t('teacher_load') }] : []),
+    ...(allowedTabs.includes('groups') ? [{ id: 'groups', label: t('groups') }] : []),
+    ...(allowedTabs.includes('grading') ? [{ id: 'grading', label: t('grading_setup') }] : [])
+  ];
+
+  const handleSelectTab = (id: string) => {
+    setView(id);
+    setMobileMenuOpen?.(false);
+  };
+
   return (
-    <div className="space-y-8">
-      <div className="bg-white p-1.5 rounded-xl sm:rounded-2xl shadow-sm border border-slate-200 inline-flex overflow-x-auto hide-scrollbar gap-1 no-print max-w-full dark:bg-slate-900 dark:border-slate-800 pb-2 sm:pb-1.5">
-        {hasHomeroom && (
-          <TabButton 
-            active={view === 'homeroom'} 
-            onClick={() => setView('homeroom')} 
-            label={`${t('homeroom_tab')} (${leadingClasses.map(c => `${c.class}${c.letter}`).join(', ')})`} 
-          />
-        )}
-        {allowedTabs.includes('messages') && <TabButton active={view === 'messages'} onClick={() => setView('messages')} label={t('messages')} badgeCount={unreadMessagesCount} />}
-        {allowedTabs.includes('announcements') && <TabButton active={view === 'announcements'} onClick={() => setView('announcements')} label={t('announcements')} badgeCount={unreadAnnouncementsCount} />}
-        {allowedTabs.includes('rating') && <TabButton active={view === 'rating'} onClick={() => setView('rating')} label={t('rating')} />}
-        {allowedTabs.includes('schedule') && <TabButton active={view === 'schedule'} onClick={() => setView('schedule')} label={t('schedule')} />}
-        {allowedTabs.includes('users') && <TabButton active={view === 'users'} onClick={() => setView('users')} label={t('users')} />}
-        {allowedTabs.includes('load') && <TabButton active={view === 'load'} onClick={() => setView('load')} label={t('teacher_load')} />}
-        {allowedTabs.includes('groups') && <TabButton active={view === 'groups'} onClick={() => setView('groups')} label={t('groups')} />}
-        {allowedTabs.includes('grading') && <TabButton active={view === 'grading'} onClick={() => setView('grading')} label={t('grading_setup')} />}
+    <div className="space-y-2.5 sm:space-y-6">
+      <SideNavDrawer
+        items={tabs}
+        activeId={view}
+        onSelect={handleSelectTab}
+        isOpen={!!mobileMenuOpen}
+        onClose={() => setMobileMenuOpen?.(false)}
+        onOpen={() => setMobileMenuOpen?.(true)}
+        userFio={user.fio}
+        userRoleLabel={user.customRole || t('employee')}
+        schoolName={H.getSchool(state, user.schoolId)?.name}
+        lang={lang}
+      />
+
+      {/* Tablet & PC Tab Bar (md and up) */}
+      <div className="hidden md:inline-flex md:flex-wrap bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 gap-1.5 no-print w-auto dark:bg-slate-900 dark:border-slate-800">
+        {tabs.map(tb => (
+          <TabButton key={tb.id} active={view === tb.id} onClick={() => handleSelectTab(tb.id)} label={tb.label} badgeCount={tb.badgeCount} />
+        ))}
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -83,10 +105,10 @@ export default function EmployeeDashboard({ state, onUpdate, user }: Props) {
   );
 }
 
-const TabButton = ({ active, onClick, label, badgeCount }: { active: boolean; onClick: () => void; label: string; badgeCount?: number }) => (
+const TabButton: React.FC<{ active: boolean; onClick: () => void; label: string; badgeCount?: number }> = ({ active, onClick, label, badgeCount }) => (
   <button
     onClick={onClick}
-    className={`flex-none px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 whitespace-nowrap flex items-center justify-center gap-2 ${
+    className={`flex-none px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 whitespace-nowrap flex items-center justify-center gap-2 ${
       active 
         ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 dark:bg-blue-600' 
         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'

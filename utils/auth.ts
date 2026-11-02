@@ -3,7 +3,7 @@
  * Uses standard Web Crypto API for PBKDF2-HMAC-SHA256 (100,000 iterations) with unique salt
  */
 
-export async function hashPassword(password: string, salt: string): Promise<string> {
+export async function hashPasswordWithBytes(password: string, saltBytes: Uint8Array): Promise<string> {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -15,7 +15,7 @@ export async function hashPassword(password: string, salt: string): Promise<stri
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
-      salt: enc.encode(salt),
+      salt: saltBytes,
       iterations: 100000,
       hash: 'SHA-256'
     },
@@ -24,6 +24,20 @@ export async function hashPassword(password: string, salt: string): Promise<stri
   );
   const hashArr = Array.from(new Uint8Array(derivedBits));
   return hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function hashPassword(password: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  return hashPasswordWithBytes(password, enc.encode(salt));
+}
+
+function hexToBytes(hex: string): Uint8Array | null {
+  if (!hex || hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) return null;
+  const arr = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    arr[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  return arr;
 }
 
 export function generateSalt(): string {
@@ -50,12 +64,30 @@ export async function verifyUserPasswordDetailed(
       return { valid: true, needsRehash: false };
     }
 
+    // Check if salt was encoded as raw hex bytes during server/cloud seed
+    const rawSaltBytes = hexToBytes(user.passwordSalt);
+    if (rawSaltBytes) {
+      const computedHexSalt = await hashPasswordWithBytes(inputPass, rawSaltBytes);
+      if (computedHexSalt === user.passwordHash) {
+        const newSalt = generateSalt();
+        const newHash = await hashPassword(inputPass, newSalt);
+        return { valid: true, needsRehash: true, newSalt, newHash };
+      }
+    }
+
     // Check if it was legacy single SHA-256
     const enc = new TextEncoder();
     const data = enc.encode(inputPass + '::' + user.passwordSalt);
     const hashBuf = await crypto.subtle.digest('SHA-256', data);
     const legacySha256 = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
     if (legacySha256 === user.passwordHash) {
+      const newSalt = generateSalt();
+      const newHash = await hashPassword(inputPass, newSalt);
+      return { valid: true, needsRehash: true, newSalt, newHash };
+    }
+
+    // Check if user.password was updated directly (e.g. by Creator/Director or seed) and re-hash
+    if (user.password !== undefined && user.password === inputPass) {
       const newSalt = generateSalt();
       const newHash = await hashPassword(inputPass, newSalt);
       return { valid: true, needsRehash: true, newSalt, newHash };
@@ -81,3 +113,4 @@ export async function verifyUserPassword(
   const res = await verifyUserPasswordDetailed(user, inputPass);
   return res.valid;
 }
+

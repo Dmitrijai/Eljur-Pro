@@ -33,34 +33,61 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
   lang,
   t,
 }) => {
-  const [filter, setFilter] = useState<'all' | 'read' | 'unread'>('all');
+  const [filter, setFilter] = useState<'all' | 'read' | 'after_edit' | 'before_edit' | 'unread'>('all');
   const [search, setSearch] = useState('');
+  const [showModalEditInfo, setShowModalEditInfo] = useState(false);
 
   if (!isOpen) return null;
+
+  const isEdited = !!(item.editedAt || item.editedById);
+  const realAuthor = item.realAuthorId ? state.users.find((u) => u.id === item.realAuthorId) : null;
+  const editorUser = item.editedById
+    ? state.users.find((u) => u.id === item.editedById)
+    : (realAuthor || state.users.find((u) => u.id === item.fromId));
+  const editedByDisplay = editorUser
+    ? (editorUser.role === 'employee' || (item.editedById && item.editedById !== item.fromId)
+        ? `${t('executed_by')} ${H.formatShortName(editorUser.fio)}`
+        : H.formatShortName(editorUser.fio))
+    : '';
+  const beforeSet = new Set(item.readBeforeEditBy || []);
+  const afterSet = new Set(item.readAfterEditBy || []);
 
   // For regular messages:
   if (!isAnnounce) {
     const recipients = (item.toIds || []).map((id) => {
       const user = state.users.find((u) => u.id === id);
-      const isRead = !!(item.readBy?.includes(id) || (item.read && (!item.readBy || item.readBy.length === 0)));
+      const readBefore = beforeSet.has(id);
+      const readAfter = afterSet.has(id);
+      const isRead = !!(
+        item.readBy?.includes(id) ||
+        readBefore ||
+        readAfter ||
+        (item.read && (!item.readBy || item.readBy.length === 0))
+      );
       return {
         id,
         user,
         fio: user?.fio || 'Unknown',
         role: user?.role || '',
-        classGrade: user?.classGrade,
-        classLetter: user?.classLetter,
-        subject: user?.subject,
+        classGrade: (user as any)?.classGrade || user?.class,
+        classLetter: (user as any)?.classLetter || user?.letter,
+        subject: (user as any)?.subject,
         isRead,
+        readBefore,
+        readAfter,
       };
     });
 
     const readCount = recipients.filter((r) => r.isRead).length;
+    const readBeforeCount = recipients.filter((r) => r.readBefore).length;
+    const readAfterCount = recipients.filter((r) => r.readAfter).length;
     const totalCount = recipients.length;
     const percent = totalCount > 0 ? Math.round((readCount / totalCount) * 100) : 0;
 
     const filteredRecipients = recipients.filter((r) => {
       if (filter === 'read' && !r.isRead) return false;
+      if (filter === 'after_edit' && !r.readAfter) return false;
+      if (filter === 'before_edit' && !r.readBefore) return false;
       if (filter === 'unread' && r.isRead) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -71,17 +98,48 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
 
     return (
       <Modal isOpen={isOpen} onClose={onClose} title={t('read_receipt_title')} maxWidth="max-w-xl">
-        <div className="space-y-5">
+        <div className="space-y-3 sm:space-y-5">
           {/* Header Info */}
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
-            <div className="text-xs font-semibold text-slate-400 mb-1">{t('theme')}:</div>
-            <div className="font-bold text-slate-800 dark:text-white text-base mb-3 line-clamp-1">{item.title}</div>
+          <div className="p-2.5 sm:p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="text-[11px] sm:text-xs font-semibold text-slate-400">{t('theme')}:</div>
+              {(isEdited || realAuthor) && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowModalEditInfo((v) => !v)}
+                    onBlur={() => setTimeout(() => setShowModalEditInfo(false), 200)}
+                    className="w-5 h-5 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded-md sm:rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-400 dark:border-amber-800/60 transition shadow-xs cursor-pointer"
+                  >
+                    <Edit size={11} className="sm:w-3 sm:h-3" />
+                  </button>
+                  {showModalEditInfo && (
+                    <div className="absolute right-0 top-7 z-30 whitespace-nowrap bg-slate-900 text-white dark:bg-slate-800 text-[10px] sm:text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-lg border border-slate-700 flex flex-col gap-0.5">
+                      {realAuthor && (
+                        <div className="text-amber-200 font-semibold">
+                          {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {t('executed_by')} {H.formatShortName(realAuthor.fio)}
+                        </div>
+                      )}
+                      {item.editedAt && (
+                        <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {new Date(item.editedAt).toLocaleString()}</div>
+                      )}
+                      {isEdited && editedByDisplay && (
+                        <div className="text-amber-300 font-semibold">
+                          {lang === 'ru' ? 'Отредактировал:' : 'Edited by:'} {editedByDisplay}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-2 sm:mb-3 line-clamp-1">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
 
             {/* Progress Bar */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs font-semibold">
+            <div className="space-y-1 sm:space-y-1.5">
+              <div className="flex justify-between text-[11px] sm:text-xs font-semibold">
                 <span className="text-slate-600 dark:text-slate-300">
-                  {t('read_by')}: <span className="font-bold text-blue-600 dark:text-blue-400">{readCount}</span> из {totalCount} ({percent}%)
+                  {t('read_by')}: <span className="font-bold text-blue-600 dark:text-blue-400">{readCount}</span> {t('of_total')} {totalCount} ({percent}%)
                 </span>
                 <span className={readCount === totalCount ? 'text-emerald-600 font-bold' : 'text-slate-400'}>
                   {readCount === totalCount ? t('all_read') : `${totalCount - readCount} ${t('unread_by').toLowerCase()}`}
@@ -93,38 +151,75 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                   style={{ width: `${percent}%` }}
                 />
               </div>
+              {isEdited && (
+                <div className="pt-2 flex flex-wrap gap-3 text-[11px] font-semibold">
+                  <span className="text-amber-700 dark:text-amber-400">
+                    • {lang === 'ru' ? 'Прочитали до исправления:' : 'Read before edit:'} <b>{readBeforeCount}</b>
+                  </span>
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    • {lang === 'ru' ? 'Прочитали после исправления:' : 'Read after edit:'} <b>{readAfterCount}</b>
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Filter Tabs & Search */}
           <div className="flex flex-col sm:flex-row gap-2.5 justify-between items-stretch sm:items-center">
-            <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1 text-xs font-semibold">
+            <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1 text-xs font-semibold overflow-x-auto hide-scrollbar">
               <button
                 type="button"
                 onClick={() => setFilter('all')}
-                className={`px-3 py-1.5 rounded-lg transition ${
+                className={`px-2.5 py-1.5 rounded-lg transition whitespace-nowrap ${
                   filter === 'all'
                     ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm font-bold'
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
-                Все ({totalCount})
+                {t('all_filter')} ({totalCount})
               </button>
-              <button
-                type="button"
-                onClick={() => setFilter('read')}
-                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1 ${
-                  filter === 'read'
-                    ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-bold'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                <CheckCheck size={13} /> {t('read_by')} ({readCount})
-              </button>
+              {!isEdited ? (
+                <button
+                  type="button"
+                  onClick={() => setFilter('read')}
+                  className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap ${
+                    filter === 'read'
+                      ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-bold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <CheckCheck size={13} /> {t('read_by')} ({readCount})
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setFilter('after_edit')}
+                    className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap ${
+                      filter === 'after_edit'
+                        ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-bold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <CheckCheck size={13} /> {lang === 'ru' ? 'После испр.' : 'After edit'} ({readAfterCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilter('before_edit')}
+                    className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap ${
+                      filter === 'before_edit'
+                        ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-sm font-bold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Clock size={12} /> {lang === 'ru' ? 'До испр.' : 'Before edit'} ({readBeforeCount})
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setFilter('unread')}
-                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1 ${
+                className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap ${
                   filter === 'unread'
                     ? 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 shadow-sm font-bold'
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -141,7 +236,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={lang === 'ru' ? 'Поиск получателя...' : 'Search recipient...'}
-                  className="w-full sm:w-48 text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
+                  className="w-full sm:w-44 text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
                 />
                 <Search size={12} className="absolute left-2.5 top-2.5 text-slate-400" />
               </div>
@@ -161,20 +256,20 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                   r.classGrade && r.classLetter ? `${r.classGrade}-${r.classLetter}` : r.subject || '';
 
                 return (
-                  <div key={r.id} className="py-2.5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div key={r.id} className="py-1.5 sm:py-2.5 flex items-center justify-between gap-2 sm:gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                       <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 ${
+                        className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold text-white shrink-0 ${
                           r.isRead ? 'bg-blue-600' : 'bg-slate-400'
                         }`}
                       >
                         {r.fio.charAt(0).toUpperCase() || '?'}
                       </div>
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
-                          {r.fio}
+                        <div className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                          {H.formatShortName(r.fio)}
                         </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500 truncate flex items-center gap-1.5">
+                        <div className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 truncate flex items-center gap-1.5">
                           <span>{roleLabel}</span>
                           {subDetails && (
                             <>
@@ -186,12 +281,38 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="shrink-0">
-                      {r.isRead ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                          <CheckCheck size={13} className="text-emerald-600 dark:text-emerald-400" />
-                          <span>{t('read_by')}</span>
-                        </span>
+                    <div className="shrink-0 flex flex-col items-end gap-1">
+                      {!isEdited ? (
+                        r.isRead ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                            <CheckCheck size={12} className="text-emerald-600 dark:text-emerald-400" />
+                            <span>{t('read_by')}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <Clock size={11} className="text-slate-400" />
+                            <span>{t('unread_by')}</span>
+                          </span>
+                        )
+                      ) : r.isRead ? (
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {r.readBefore && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 dark:bg-amber-950/50 dark:text-amber-300 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                              <Clock size={11} className="text-amber-600 dark:text-amber-400" />
+                              <span>{lang === 'ru' ? 'До испр.' : 'Before edit'}</span>
+                            </span>
+                          )}
+                          {r.readAfter ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                              <CheckCheck size={12} className="text-emerald-600 dark:text-emerald-400" />
+                              <span>{lang === 'ru' ? 'После испр.' : 'After edit'}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                              <span>{lang === 'ru' ? 'Новую не читал' : 'Not read after edit'}</span>
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
                           <Clock size={12} className="text-slate-400" />
@@ -210,20 +331,32 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
   }
 
   // For Announcements:
-  const viewedUsers = (item.readBy || []).map((id) => {
+  const allReadIds = Array.from(
+    new Set([...(item.readBy || []), ...(item.readBeforeEditBy || []), ...(item.readAfterEditBy || [])])
+  );
+  const viewedUsers = allReadIds.map((id) => {
     const user = state.users.find((u) => u.id === id);
+    const readBefore = beforeSet.has(id);
+    const readAfter = afterSet.has(id);
     return {
       id,
       user,
       fio: user?.fio || 'Unknown',
       role: user?.role || '',
-      classGrade: user?.classGrade,
-      classLetter: user?.classLetter,
-      subject: user?.subject,
+      classGrade: (user as any)?.classGrade || user?.class,
+      classLetter: (user as any)?.classLetter || user?.letter,
+      subject: (user as any)?.subject,
+      readBefore,
+      readAfter,
     };
   });
 
+  const readBeforeAnnCount = viewedUsers.filter((u) => u.readBefore).length;
+  const readAfterAnnCount = viewedUsers.filter((u) => u.readAfter).length;
+
   const filteredViewed = viewedUsers.filter((u) => {
+    if (isEdited && filter === 'after_edit' && !u.readAfter) return false;
+    if (isEdited && filter === 'before_edit' && !u.readBefore) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       return u.fio.toLowerCase().includes(q) || (u.user?.login && u.user.login.toLowerCase().includes(q));
@@ -233,28 +366,113 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t('read_receipt_announce_title')} maxWidth="max-w-xl">
-      <div className="space-y-5">
-        <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
-          <div className="text-xs font-semibold text-slate-400 mb-1">{t('theme')}:</div>
-          <div className="font-bold text-slate-800 dark:text-white text-base mb-2 line-clamp-1">{item.title}</div>
-          <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1.5">
-            <Eye size={14} />
-            <span>
-              {t('viewed_by_count')}: {viewedUsers.length} {lang === 'ru' ? 'чел.' : 'people'}
+      <div className="space-y-3 sm:space-y-5">
+        <div className="p-2.5 sm:p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="text-[11px] sm:text-xs font-semibold text-slate-400">{t('theme')}:</div>
+            {(isEdited || realAuthor) && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowModalEditInfo((v) => !v)}
+                  onBlur={() => setTimeout(() => setShowModalEditInfo(false), 200)}
+                  className="w-5 h-5 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded-md sm:rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-400 dark:border-amber-800/60 transition shadow-xs cursor-pointer"
+                >
+                  <Edit size={11} className="sm:w-3 sm:h-3" />
+                </button>
+                {showModalEditInfo && (
+                  <div className="absolute right-0 top-7 z-30 whitespace-nowrap bg-slate-900 text-white dark:bg-slate-800 text-[10px] sm:text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-lg border border-slate-700 flex flex-col gap-0.5">
+                    {realAuthor && (
+                      <div className="text-amber-200 font-semibold">
+                        {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {t('executed_by')} {H.formatShortName(realAuthor.fio)}
+                      </div>
+                    )}
+                    {item.editedAt && (
+                      <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {new Date(item.editedAt).toLocaleString()}</div>
+                    )}
+                    {isEdited && editedByDisplay && (
+                      <div className="text-amber-300 font-semibold">
+                        {lang === 'ru' ? 'Отредактировал:' : 'Edited by:'} {editedByDisplay}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-1.5 sm:mb-2 line-clamp-1">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
+          <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold flex flex-wrap items-center gap-3">
+            <span className="flex items-center gap-1.5">
+              <Eye size={14} />
+              <span>
+                {t('viewed_by_count')}: {viewedUsers.length} {lang === 'ru' ? 'чел.' : 'people'}
+              </span>
             </span>
+            {isEdited && (
+              <>
+                <span className="text-amber-700 dark:text-amber-400">
+                  • {lang === 'ru' ? 'До испр.:' : 'Before edit:'} <b>{readBeforeAnnCount}</b>
+                </span>
+                <span className="text-emerald-700 dark:text-emerald-400">
+                  • {lang === 'ru' ? 'После испр.:' : 'After edit:'} <b>{readAfterAnnCount}</b>
+                </span>
+              </>
+            )}
           </div>
         </div>
 
-        {viewedUsers.length > 5 && (
-          <div className="relative">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={lang === 'ru' ? 'Поиск пользователя...' : 'Search user...'}
-              className="w-full text-xs py-2 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
-            />
-            <Search size={12} className="absolute left-2.5 top-3 text-slate-400" />
+        {(isEdited || viewedUsers.length > 5) && (
+          <div className="flex flex-col sm:flex-row gap-2.5 justify-between items-stretch sm:items-center">
+            {isEdited && (
+              <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1 text-xs font-semibold overflow-x-auto hide-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setFilter('all')}
+                  className={`px-2.5 py-1.5 rounded-lg transition whitespace-nowrap ${
+                    filter === 'all'
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm font-bold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {t('all_filter')} ({viewedUsers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilter('after_edit')}
+                  className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap ${
+                    filter === 'after_edit'
+                      ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm font-bold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <CheckCheck size={13} /> {lang === 'ru' ? 'После испр.' : 'After edit'} ({readAfterAnnCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilter('before_edit')}
+                  className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 whitespace-nowrap ${
+                    filter === 'before_edit'
+                      ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-sm font-bold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <Clock size={12} /> {lang === 'ru' ? 'До испр.' : 'Before edit'} ({readBeforeAnnCount})
+                </button>
+              </div>
+            )}
+
+            {viewedUsers.length > 3 && (
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={lang === 'ru' ? 'Поиск пользователя...' : 'Search user...'}
+                  className="w-full text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
+                />
+                <Search size={12} className="absolute left-2.5 top-2.5 text-slate-400" />
+              </div>
+            )}
           </div>
         )}
 
@@ -276,16 +494,16 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                 u.classGrade && u.classLetter ? `${u.classGrade}-${u.classLetter}` : u.subject || '';
 
               return (
-                <div key={u.id} className="py-2.5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                <div key={u.id} className="py-2 sm:py-2.5 flex items-center justify-between gap-2 sm:gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-blue-600 flex items-center justify-center text-[11px] sm:text-xs font-bold text-white shrink-0">
                       {u.fio.charAt(0).toUpperCase() || '?'}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
-                        {u.fio}
+                      <div className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                        {H.formatShortName(u.fio)}
                       </div>
-                      <div className="text-xs text-slate-400 dark:text-slate-500 truncate flex items-center gap-1.5">
+                      <div className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 truncate flex items-center gap-1">
                         <span>{roleLabel}</span>
                         {subDetails && (
                           <>
@@ -297,10 +515,27 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                     </div>
                   </div>
 
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 shrink-0">
-                    <CheckCheck size={13} className="text-emerald-600 dark:text-emerald-400" />
-                    <span>{t('read_by')}</span>
-                  </span>
+                  {!isEdited ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 shrink-0">
+                      <CheckCheck size={13} className="text-emerald-600 dark:text-emerald-400" />
+                      <span>{t('read_by')}</span>
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap justify-end gap-1 shrink-0">
+                      {u.readBefore && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 dark:bg-amber-950/50 dark:text-amber-300 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                          <Clock size={11} className="text-amber-600 dark:text-amber-400" />
+                          <span>{lang === 'ru' ? 'До испр.' : 'Before edit'}</span>
+                        </span>
+                      )}
+                      {u.readAfter && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                          <CheckCheck size={12} className="text-emerald-600 dark:text-emerald-400" />
+                          <span>{lang === 'ru' ? 'После испр.' : 'After edit'}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -348,9 +583,15 @@ const MessageCard: React.FC<MessageCardProps> = ({
 }) => {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [showReceiptsModal, setShowReceiptsModal] = useState(false);
+  const [showEditedPopover, setShowEditedPopover] = useState(false);
+
+  const needsPostEditRead =
+    activeTab === 'inbox' &&
+    !!item.editedAt &&
+    !(item.readAfterEditBy || []).includes(currentUser.id);
 
   useEffect(() => {
-    if (!isUnread || activeTab !== 'inbox' || !cardRef.current) return;
+    if ((!isUnread && !needsPostEditRead) || activeTab !== 'inbox' || !cardRef.current) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -372,17 +613,32 @@ const MessageCard: React.FC<MessageCardProps> = ({
     return () => {
       observer.disconnect();
     };
-  }, [isUnread, activeTab, item.id, onVisible]);
+  }, [isUnread, needsPostEditRead, activeTab, item.id, onVisible]);
 
   const sender = state.users.find((u) => u.id === item.fromId);
   const realAuthor = item.realAuthorId ? state.users.find((u) => u.id === item.realAuthorId) : null;
+  const editorUser = item.editedById
+    ? state.users.find((u) => u.id === item.editedById)
+    : (realAuthor || sender || null);
+  const editedByDisplay = editorUser
+    ? (editorUser.role === 'employee' || (item.editedById && item.editedById !== item.fromId)
+        ? `${t('executed_by')} ${H.formatShortName(editorUser.fio)}`
+        : H.formatShortName(editorUser.fio))
+    : '';
   const canReply = activeTab === 'inbox' && !isAnnounce && sender && userOptions.some((opt) => opt.value === sender.id);
   const recipients = !isAnnounce
-    ? item.toIds.map((id) => state.users.find((u) => u.id === id)?.fio).join(', ')
-    : 'Все';
+    ? item.toIds.map((id) => {
+        const fio = state.users.find((u) => u.id === id)?.fio;
+        return fio ? H.formatShortName(fio) : '';
+      }).filter(Boolean).join(', ')
+    : t('all_filter');
 
   // Read status calculation for sent tab or author view
-  const isSenderOrAuthor = item.fromId === currentUser.id || item.realAuthorId === currentUser.id;
+  const isSenderOrAuthor =
+    item.fromId === currentUser.id ||
+    item.realAuthorId === currentUser.id ||
+    item.editedById === currentUser.id ||
+    (currentUser.role === 'employee' && currentUser.employeePermissions?.canSendAsDirector && sender?.role === 'director' && sender?.schoolId === currentUser.schoolId);
   const showReadReceipts = activeTab === 'sent' || (isAnnounce && isSenderOrAuthor);
 
   let singleRecipientRead = false;
@@ -398,9 +654,13 @@ const MessageCard: React.FC<MessageCardProps> = ({
     readCount = (item.toIds || []).filter((id) => item.readBy?.includes(id)).length;
   }
 
-  const viewedCount = isAnnounce ? (item.readBy || []).length : 0;
+  const viewedCount = isAnnounce
+    ? new Set([...(item.readBy || []), ...(item.readBeforeEditBy || []), ...(item.readAfterEditBy || [])]).size
+    : 0;
 
-  const textLines = (item.body || '').split('\n');
+  const itemTitle = item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject');
+  const itemBody = item.body || (item as any).text || (item as any).content || '';
+  const textLines = itemBody.split('\n');
   const allAttachments: { id: string; name: string }[] = [];
   if (item.attachmentId) allAttachments.push({ id: item.attachmentId, name: item.attachmentName || '' });
   if (item.attachments) allAttachments.push(...item.attachments);
@@ -418,24 +678,62 @@ const MessageCard: React.FC<MessageCardProps> = ({
     <>
       <div
         ref={cardRef}
-        className={`rounded-2xl p-6 transition duration-200 border bg-white dark:bg-slate-900 shadow-sm relative ${
+        className={`rounded-xl sm:rounded-2xl p-3 sm:p-6 transition duration-200 border bg-white dark:bg-slate-900 shadow-sm relative ${
           isUnread && activeTab === 'inbox'
-            ? 'border-blue-400 dark:border-blue-600 border-l-[6px] border-l-blue-600 dark:border-l-blue-500 bg-blue-50/30 dark:bg-blue-950/20 ring-1 ring-blue-500/20'
-            : 'border-slate-200 dark:border-slate-800 border-l-[6px] border-l-blue-500/70 dark:border-l-blue-600/70 hover:shadow-md'
+            ? 'border-blue-400 dark:border-blue-600 border-l-4 sm:border-l-[6px] border-l-blue-600 dark:border-l-blue-500 bg-blue-50/30 dark:bg-blue-950/20 ring-1 ring-blue-500/20'
+            : 'border-slate-200 dark:border-slate-800 border-l-4 sm:border-l-[6px] border-l-blue-500/70 dark:border-l-blue-600/70 hover:shadow-md'
         }`}
       >
-        <div className="flex justify-between items-start mb-3 gap-3">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <h4 className="font-bold text-lg text-slate-800 dark:text-white">{item.title}</h4>
+        <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h4 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white break-words leading-snug">{itemTitle}</h4>
             {isUnread && activeTab === 'inbox' && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-blue-700 bg-blue-100 dark:bg-blue-900/60 dark:text-blue-300 px-2.5 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
+              <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-blue-700 bg-blue-100 dark:bg-blue-900/60 dark:text-blue-300 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
                 {t('new_badge')}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded dark:bg-slate-800 dark:text-slate-500">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 self-end sm:self-auto relative">
+            {(item.editedAt || item.editedById || realAuthor) && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowEditedPopover((v) => !v)}
+                  onBlur={() => setTimeout(() => setShowEditedPopover(false), 200)}
+                  aria-label={
+                    lang === 'ru'
+                      ? `${item.editedAt || item.editedById ? 'Исправлено' : 'Информация об отправителе'}`
+                      : `${item.editedAt || item.editedById ? 'Edited' : 'Sender info'}`
+                  }
+                  className="w-5 h-5 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded-md sm:rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-400 dark:border-amber-800/60 transition shadow-xs cursor-pointer"
+                >
+                  {item.editedAt || item.editedById ? (
+                    <Edit size={11} className="sm:w-3 sm:h-3" />
+                  ) : (
+                    <Info size={11} className="sm:w-3 sm:h-3" />
+                  )}
+                </button>
+                {showEditedPopover && (
+                  <div className="absolute right-0 top-7 sm:top-8 z-30 whitespace-nowrap bg-slate-900 text-white dark:bg-slate-800 text-[10px] sm:text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-lg border border-slate-700 flex flex-col gap-0.5">
+                    {realAuthor && (
+                      <div className="text-amber-200 font-semibold">
+                        {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {t('executed_by')} {H.formatShortName(realAuthor.fio)}
+                      </div>
+                    )}
+                    {item.editedAt && (
+                      <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {new Date(item.editedAt).toLocaleString()}</div>
+                    )}
+                    {(item.editedAt || item.editedById) && editedByDisplay && (
+                      <div className="text-amber-300 font-semibold">
+                        {lang === 'ru' ? 'Отредактировал:' : 'Edited by:'} {editedByDisplay}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-400 bg-slate-100 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded dark:bg-slate-800 dark:text-slate-500">
               {new Date(item.date).toLocaleString()}
             </span>
             {activeTab === 'sent' && (
@@ -444,33 +742,25 @@ const MessageCard: React.FC<MessageCardProps> = ({
                   onClick={() => onStartEdit(item)}
                   className="text-blue-500 p-1 hover:bg-blue-50 dark:hover:bg-blue-900/40 rounded transition"
                 >
-                  <Edit size={14} />
+                  <Edit size={13} />
                 </button>
                 <button
                   onClick={() => onDelete(item.id)}
                   className="text-red-500 p-1 hover:bg-red-50 dark:hover:bg-red-900/40 rounded transition"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
                 </button>
               </>
             )}
           </div>
         </div>
-        <div className="text-xs text-slate-500 mb-4 pb-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3 dark:border-slate-800 dark:text-slate-400">
-          <div className="flex gap-4 sm:gap-6 flex-wrap items-center">
+        <div className="text-[11px] sm:text-xs text-slate-500 mb-2.5 sm:mb-4 pb-2.5 sm:pb-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2 sm:gap-3 dark:border-slate-800 dark:text-slate-400">
+          <div className="flex gap-2.5 sm:gap-6 flex-wrap items-center">
             <span className="flex items-center gap-2">
               {t('from')}:{' '}
               <span className="font-bold text-slate-700 dark:text-slate-300">
                 {sender?.fio ? H.formatShortName(sender.fio) : (isAnnounce ? t('school_admin') : 'Unknown')}
               </span>
-              {realAuthor && (
-                <span
-                  className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200 dark:bg-amber-900/40 dark:text-amber-300"
-                  title={`${t('sent_by_emp')}: ${realAuthor.fio}`}
-                >
-                  ({t('executed_by')} {H.formatShortName(realAuthor.fio)})
-                </span>
-              )}
             </span>
 
             {activeTab === 'sent' && (
@@ -482,30 +772,37 @@ const MessageCard: React.FC<MessageCardProps> = ({
           </div>
 
           {/* Right side: Read status badges / Reply button */}
-          <div className="flex items-center gap-2.5 shrink-0 ml-auto">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto">
             {showReadReceipts && (
               <>
                 {/* Single Recipient Message */}
                 {isSingleRecipient && (
-                  <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowReceiptsModal(true)}
+                    className="cursor-pointer"
+                    title={
+                      lang === 'ru'
+                        ? 'Нажмите, чтобы посмотреть детали прочтения (до и после исправления)'
+                        : 'Click to view read receipt details (before and after edit)'
+                    }
+                  >
                     {singleRecipientRead ? (
                       <span
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 px-2.5 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm"
-                        title={lang === 'ru' ? 'Получатель прочитал сообщение' : 'Recipient read this message'}
+                        className="inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl border border-emerald-200 dark:border-emerald-800/60 shadow-xs transition"
                       >
-                        <CheckCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
+                        <CheckCheck size={12} className="text-emerald-600 dark:text-emerald-400 sm:w-3.5 sm:h-3.5" />
                         <span>{t('read_by')}</span>
                       </span>
                     ) : (
                       <span
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm"
-                        title={lang === 'ru' ? 'Получатель еще не прочитал сообщение' : 'Recipient has not read yet'}
+                        className="inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 shadow-xs transition"
                       >
-                        <Clock size={13} className="text-slate-400" />
+                        <Clock size={11} className="text-slate-400 sm:w-3.5 sm:h-3.5" />
                         <span>{t('unread_by')}</span>
                       </span>
                     )}
-                  </div>
+                  </button>
                 )}
 
                 {/* Multiple Recipients Message */}
@@ -513,7 +810,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowReceiptsModal(true)}
-                    className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-xl border transition-all duration-150 shadow-sm cursor-pointer ${
+                    className={`inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-semibold px-2 py-0.5 sm:px-3 sm:py-1 rounded-lg sm:rounded-xl border transition-all duration-150 shadow-xs cursor-pointer ${
                       readCount === totalCount
                         ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
                         : readCount > 0
@@ -527,16 +824,16 @@ const MessageCard: React.FC<MessageCardProps> = ({
                     }
                   >
                     {readCount === totalCount ? (
-                      <CheckCheck size={14} className="text-emerald-600 dark:text-emerald-400" />
+                      <CheckCheck size={12} className="text-emerald-600 dark:text-emerald-400 sm:w-3.5 sm:h-3.5" />
                     ) : readCount > 0 ? (
-                      <CheckCheck size={14} className="text-blue-600 dark:text-blue-400" />
+                      <CheckCheck size={12} className="text-blue-600 dark:text-blue-400 sm:w-3.5 sm:h-3.5" />
                     ) : (
-                      <Clock size={13} className="text-slate-400" />
+                      <Clock size={11} className="text-slate-400 sm:w-3.5 sm:h-3.5" />
                     )}
                     <span>
                       {t('read_by')}: {readCount}/{totalCount}
                     </span>
-                    <Users size={12} className="opacity-60 ml-0.5" />
+                    <Users size={10} className="opacity-60 ml-0.5 sm:w-3 sm:h-3" />
                   </button>
                 )}
 
@@ -545,18 +842,18 @@ const MessageCard: React.FC<MessageCardProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowReceiptsModal(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-xl border bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800 transition-all duration-150 shadow-sm cursor-pointer"
+                    className="inline-flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-semibold px-2 py-0.5 sm:px-3 sm:py-1 rounded-lg sm:rounded-xl border bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800 transition-all duration-150 shadow-xs cursor-pointer"
                     title={
                       lang === 'ru'
                         ? 'Нажмите, чтобы посмотреть, кто просмотрел объявление'
                         : 'Click to see who viewed this announcement'
                     }
                   >
-                    <Eye size={14} className="text-blue-600 dark:text-blue-400" />
+                    <Eye size={12} className="text-blue-600 dark:text-blue-400 sm:w-3.5 sm:h-3.5" />
                     <span>
                       {t('viewed_by_count')}: {viewedCount}
                     </span>
-                    <Users size={12} className="opacity-60 ml-0.5" />
+                    <Users size={10} className="opacity-60 ml-0.5 sm:w-3 sm:h-3" />
                   </button>
                 )}
               </>
@@ -572,7 +869,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
             )}
           </div>
         </div>
-        <p className="whitespace-pre-wrap text-slate-700 leading-relaxed dark:text-slate-300">
+        <p className="whitespace-pre-wrap text-xs sm:text-sm text-slate-700 leading-relaxed dark:text-slate-300">
           {visibleTextLines.join('\n')}
           {isLarge && !expanded && visibleTextLines.length < textLines.length && '...'}
         </p>
@@ -581,10 +878,10 @@ const MessageCard: React.FC<MessageCardProps> = ({
         ))}
 
         {isLarge && (
-          <div className="mt-4">
+          <div className="mt-2.5 sm:mt-4">
             <button
               onClick={onToggleExpand}
-              className="text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+              className="text-xs sm:text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
             >
               {expanded
                 ? lang === 'ru'
@@ -630,6 +927,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   
   // Edit Mode
   const [editId, setEditId] = useState<string | null>(null);
+  const [existingAttachments, setExistingAttachments] = useState<Attachment[]>([]);
 
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const toggleExpand = (id: string) => setExpandedItems(prev => ({...prev, [id]: !prev[id]}));
@@ -671,10 +969,21 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
 
         targetList.forEach((item) => {
           if (idsToMark.includes(item.id)) {
+            let itemModified = false;
             if (!item.readBy) item.readBy = [];
             if (!item.readBy.includes(currentUser.id)) {
               item.readBy.push(currentUser.id);
               item.read = true;
+              itemModified = true;
+            }
+            if (item.editedAt) {
+              if (!item.readAfterEditBy) item.readAfterEditBy = [];
+              if (!item.readAfterEditBy.includes(currentUser.id)) {
+                item.readAfterEditBy.push(currentUser.id);
+                itemModified = true;
+              }
+            }
+            if (itemModified) {
               hasChanges = true;
               updatedItems.push(item);
             }
@@ -709,24 +1018,23 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
 
   const handleSend = async () => {
     if (sending) return;
-    if (!composeTitle || !composeBody) return alert(t('fill_topic_text'));
+    const trimmedTitle = H.sanitizeInputText(composeTitle).trim();
+    const trimmedBody = H.sanitizeInputText(composeBody).trim();
+    if (!trimmedTitle || !trimmedBody) return alert(t('fill_topic_text'));
     if (!isAnnounce && composeTo.length === 0) return alert(t('select_recipient_alert'));
 
     setSending(true);
     try {
-      const targetSchoolId = currentUser.schoolId || 'school_1';
-      const newAttachments: Attachment[] = [];
-      for (const f of files) {
-        const id = H.uid('att');
-        await DB.saveAsset(id, f.name, f.type, f, targetSchoolId);
-        newAttachments.push({ id, name: f.name, type: f.type });
-      }
-
       // RESOLVE RECIPIENTS (GROUPS -> INDIVIDUALS)
       let finalToIds: string[] = [];
       if (!isAnnounce) {
         composeTo.forEach(val => {
-          if (val === 'GROUP_TEACHERS') {
+          if (val === 'GROUP_ALL_DIRECTORS') {
+            finalToIds.push(...state.users.filter(u => u.role === 'director').map(u => u.id));
+          } else if (val.startsWith('GROUP_SCHOOL_')) {
+            const sId = val.replace('GROUP_SCHOOL_', '');
+            finalToIds.push(...state.users.filter(u => u.schoolId === sId && (u.role as string) !== 'creator').map(u => u.id));
+          } else if (val === 'GROUP_TEACHERS') {
             // Only teachers in SAME school
             finalToIds.push(...state.users.filter(u => u.role === 'teacher' && u.schoolId === currentUser.schoolId).map(u => u.id));
           } else if (val === 'GROUP_HEADMASTERS') {
@@ -743,6 +1051,23 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         });
         // Unique IDs
         finalToIds = Array.from(new Set(finalToIds));
+      }
+
+      const recipientSchoolIds = isCreator
+        ? Array.from(new Set(finalToIds.map(uid => state.users.find(u => u.id === uid)?.schoolId).filter((s): s is string => !!s && s !== 'global')))
+        : [];
+      const targetSchoolIds = recipientSchoolIds.length > 0
+        ? recipientSchoolIds
+        : [(currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : (state.schools[0]?.id || 'school_1')];
+      const targetSchoolId = targetSchoolIds[0];
+
+      const newAttachments: Attachment[] = [];
+      for (const f of files) {
+        const id = H.uid('att');
+        for (const sId of targetSchoolIds) {
+          await DB.saveAsset(id, f.name, f.type, f, sId);
+        }
+        newAttachments.push({ id, name: f.name, type: f.type });
       }
 
       // Determine Sender ID
@@ -763,22 +1088,31 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         const idx = list.findIndex(m => m.id === editId);
         if (idx > -1) {
           const existing = list[idx];
-          const mergedAtts = [...(existing.attachments || []), ...newAttachments];
-          if (existing.attachmentId) mergedAtts.push({ id: existing.attachmentId, name: existing.attachmentName || '', type: '' });
+          const mergedAtts = [...existingAttachments, ...newAttachments];
+
+          const prevReadBefore = Array.from(
+            new Set([...(existing.readBeforeEditBy || []), ...(existing.readBy || [])])
+          );
 
           const updated: Message = {
             ...existing,
-            schoolId: existing.schoolId || targetSchoolId,
-            title: composeTitle,
-            body: composeBody,
-            attachments: mergedAtts
+            schoolId: (existing.schoolId && existing.schoolId !== 'global') ? existing.schoolId : targetSchoolId,
+            title: trimmedTitle,
+            body: trimmedBody,
+            attachments: mergedAtts,
+            editedAt: new Date().toISOString(),
+            editedById: currentUser.id,
+            readBeforeEditBy: prevReadBefore,
+            readAfterEditBy: [],
           };
           delete updated.attachmentId;
           delete updated.attachmentName;
           if (!isAnnounce) updated.toIds = finalToIds;
 
           list[idx] = updated;
-          await DB.saveSchoolEntity(updated.schoolId || targetSchoolId, collectionName, updated.id, updated);
+          for (const sId of targetSchoolIds) {
+            await DB.saveSchoolEntity(sId, collectionName, updated.id, { ...updated, schoolId: sId });
+          }
         }
         setEditId(null);
       } else {
@@ -789,8 +1123,8 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
           fromId: fromId,
           ...(realAuthorId ? { realAuthorId } : {}),
           toIds: isAnnounce ? [] : finalToIds, // Announcements are public/broadcast
-          title: composeTitle,
-          body: composeBody,
+          title: trimmedTitle,
+          body: trimmedBody,
           attachments: newAttachments,
           date: new Date().toISOString()
         };
@@ -800,13 +1134,16 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         } else {
           state.messages.push(newItem);
         }
-        await DB.saveSchoolEntity(targetSchoolId, collectionName, newItem.id, newItem);
+        for (const sId of targetSchoolIds) {
+          await DB.saveSchoolEntity(sId, collectionName, newItem.id, { ...newItem, schoolId: sId });
+        }
       }
 
       onUpdate({ ...state });
       setComposeTitle('');
       setComposeBody('');
       setFiles([]);
+      setExistingAttachments([]);
       setComposeTo([]);
       setSendAsDirector(false);
       setActiveTab('sent');
@@ -822,7 +1159,13 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      setComposeTitle(m.title);
      setComposeBody(m.body);
      setComposeTo(m.toIds); // This puts IDs back. Groups are lost visually but functionality remains valid.
-     setFiles([]); 
+     setSendAsDirector(!!(isEmployee && director && m.fromId === director.id));
+     setFiles([]);
+     const initialAtts: Attachment[] = [...(m.attachments || [])];
+     if (m.attachmentId && !initialAtts.some(a => a.id === m.attachmentId)) {
+       initialAtts.push({ id: m.attachmentId, name: m.attachmentName || 'File', type: '' });
+     }
+     setExistingAttachments(initialAtts);
      setEditId(m.id);
      setActiveTab('compose');
   };
@@ -832,6 +1175,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
     setComposeTitle('');
     setComposeBody('');
     setFiles([]);
+    setExistingAttachments([]);
     setComposeTo([]);
     setSendAsDirector(false);
     setActiveTab('sent');
@@ -848,16 +1192,26 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
 
   const deleteItem = (id: string) => {
      if(!confirm(t('delete_msg_confirm'))) return;
-     const targetSchoolId = currentUser.schoolId || 'school_1';
+     const list = isAnnounce ? state.announcements : state.messages;
+     const existingItem = list.find(m => m.id === id);
+     const targetSchoolId = (existingItem?.schoolId && existingItem.schoolId !== 'global')
+       ? existingItem.schoolId
+       : ((currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : 'school_1');
      const collectionName = isAnnounce ? 'announcements' : 'messages';
      if (isAnnounce) {
         state.announcements = state.announcements.filter(m => m.id !== id);
      } else {
         state.messages = state.messages.filter(m => m.id !== id);
      }
-     DB.deleteSchoolEntity(targetSchoolId, collectionName, id).catch(e => {
-        console.warn('Failed to delete message entity:', e);
-     });
+     if (isCreator) {
+        (state.schools || []).forEach(s => {
+           DB.deleteSchoolEntity(s.id, collectionName, id).catch(() => {});
+        });
+     } else {
+        DB.deleteSchoolEntity(targetSchoolId, collectionName, id).catch(e => {
+           console.warn('Failed to delete message entity:', e);
+        });
+     }
      onUpdate({ ...state });
   };
 
@@ -867,8 +1221,10 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
       return list.filter(m => {
           // I see messages I sent as myself
           if (m.fromId === currentUser.id) return true;
-          // I see messages I sent on behalf of director
-          if (m.realAuthorId === currentUser.id) return true;
+          // I see messages I sent or edited on behalf of director
+          if (m.realAuthorId === currentUser.id || m.editedById === currentUser.id) return true;
+          // Employee with canSendAsDirector can also see and edit messages sent by the school's director
+          if (isEmployee && currentUser.employeePermissions?.canSendAsDirector && director && m.fromId === director.id) return true;
           return false;
       }).reverse();
     } else {
@@ -904,12 +1260,26 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   const actingAsRestrictedEmployee = isEmployee && !sendAsDirector;
   const isAdministrationEmployee = isEmployee && currentUser.employeePermissions?.isAdministration;
 
-  const canMessageAll = actingAsDirector || 
+  const canMessageAll = isCreator ||
+                        actingAsDirector || 
                         isAdministrationEmployee || // Administration can write to all
                         (actingAsRestrictedEmployee && employeeScopes.includes('ALL')) || 
                         currentUser.role === 'teacher';
 
-  if (isDirector || currentUser.role === 'teacher' || isEmployee) {
+  if (isCreator) {
+     userOptions.push({
+         value: 'GROUP_ALL_DIRECTORS',
+         label: lang === 'ru' ? 'Все директора школ' : 'All School Directors',
+         group: t('groups')
+     });
+     (state.schools || []).forEach(s => {
+         userOptions.push({
+             value: `GROUP_SCHOOL_${s.id}`,
+             label: `${lang === 'ru' ? 'Вся школа' : 'Whole school'}: ${s.name}`,
+             group: t('groups')
+         });
+     });
+  } else if (isDirector || currentUser.role === 'teacher' || isEmployee) {
      if (isDirector || isEmployee) {
         userOptions.push({ value: 'GROUP_TEACHERS', label: t('all_teachers'), group: t('groups') });
         userOptions.push({ value: 'GROUP_HEADMASTERS', label: t('all_class_teachers'), group: t('groups') });
@@ -955,13 +1325,13 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
          return; 
      }
      
-     // NORMAL SCHOOL LOGIC (Same School Only)
-     if (u.schoolId !== currentUser.schoolId && (u.role as string) !== 'creator') return;
+     // NORMAL SCHOOL LOGIC (Same School Only, except Creator who can message across all schools)
+     if (!isCreator && u.schoolId !== currentUser.schoolId && (u.role as string) !== 'creator') return;
 
      let canSee = false;
      
-     if (actingAsDirector || isAdministrationEmployee) {
-         canSee = true; // Director/Admin mode sees all (except Creator usually handled above)
+     if (isCreator || actingAsDirector || isAdministrationEmployee) {
+         canSee = true; // Creator/Director/Admin mode sees all
      } else if (currentUser.role === 'teacher') {
          if (u.role === 'director' || u.role === 'teacher') canSee = true;
          // Can see employees who are Administration
@@ -997,7 +1367,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      }
 
      if (canSee) {
-        const uLeadingClasses = H.getUserLeadingClasses(state, currentUser.schoolId, u.id);
+        const uLeadingClasses = H.getUserLeadingClasses(state, isCreator ? u.schoolId : currentUser.schoolId, u.id);
         let groupName = '';
         
         if (currentUser.role === 'student') {
@@ -1017,9 +1387,9 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
                 groupName = `${t('students')} ${u.class || ''}${u.letter || ''}`;
             }
         } else {
-            // Non-student (Director, Teacher, Employee)
+            // Non-student (Creator, Director, Teacher, Employee)
             if (uLeadingClasses.length > 0 && u.role !== 'student') {
-                const classNames = uLeadingClasses.map(c => `${c.class}${c.letter}`).join(' и ');
+                const classNames = uLeadingClasses.map(c => `${c.class}${c.letter}`).join(lang === 'ru' ? ' и ' : ' & ');
                 groupName = lang === 'ru' ? `Клас. рук. ${classNames}` : `Class Teacher ${classNames}`;
             } else if ((u.role as string) === 'creator') {
                 groupName = t('developer');
@@ -1032,6 +1402,12 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
                 groupName = t('teachers');
             } else {
                 groupName = `${t('students')} ${u.class || ''}${u.letter || ''}`;
+            }
+            if (isCreator && u.schoolId) {
+                const uSchoolName = state.schools.find(s => s.id === u.schoolId)?.name;
+                if (uSchoolName) {
+                    groupName = `${uSchoolName} — ${groupName}`;
+                }
             }
         }
         
@@ -1065,11 +1441,11 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   const showControls = isDirector || isCreator || isEmployee || !isAnnounce;
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 inline-flex flex-wrap gap-1 dark:bg-slate-900 dark:border-slate-800">
+    <div className="space-y-3.5 sm:space-y-6">
+      <div className="bg-white p-1 sm:p-1.5 rounded-xl sm:rounded-2xl shadow-sm border border-slate-200 inline-flex flex-wrap gap-1 dark:bg-slate-900 dark:border-slate-800">
         <button 
           onClick={() => { setActiveTab('inbox'); setEditId(null); }} 
-          className={`px-5 py-2 rounded-xl font-semibold text-sm transition-all duration-200 flex items-center gap-2 ${
+          className={`px-2.5 sm:px-5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl font-semibold text-xs sm:text-sm transition-all duration-200 flex items-center gap-1.5 sm:gap-2 ${
             activeTab==='inbox' 
               ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' 
               : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'
@@ -1077,7 +1453,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         >
           <span>{t('inbox')}</span>
           {unreadInboxCount > 0 && (
-            <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold rounded-full leading-none transition-transform duration-200 ${
+            <span className={`inline-flex items-center justify-center min-w-[18px] sm:min-w-[20px] h-4 sm:h-5 px-1 sm:px-1.5 text-[10px] sm:text-xs font-bold rounded-full leading-none transition-transform duration-200 ${
               activeTab === 'inbox' 
                 ? 'bg-white text-blue-600 shadow-sm' 
                 : 'bg-red-500 text-white shadow-sm'
@@ -1089,15 +1465,15 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         {showControls && (
         <button 
           onClick={() => { setActiveTab('sent'); setEditId(null); }} 
-          className={`px-5 py-2 rounded-xl font-semibold text-sm transition-all duration-200 ${activeTab==='sent' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+          className={`px-2.5 sm:px-5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl font-semibold text-xs sm:text-sm transition-all duration-200 ${activeTab==='sent' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}
         >
           {t('sent')}
         </button>
         )}
         {showControls && (
           <button 
-            onClick={() => { setActiveTab('compose'); setEditId(null); setComposeTitle(''); setComposeBody(''); setFiles([]); }} 
-            className={`px-5 py-2 rounded-xl font-semibold text-sm transition-all duration-200 ${activeTab==='compose' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+            onClick={() => { setActiveTab('compose'); setEditId(null); setComposeTitle(''); setComposeBody(''); setFiles([]); setExistingAttachments([]); }} 
+            className={`px-2.5 sm:px-5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl font-semibold text-xs sm:text-sm transition-all duration-200 ${activeTab==='compose' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}
           >
             + {t('write')}
           </button>
@@ -1105,31 +1481,31 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
       </div>
 
       {activeTab === 'compose' ? (
-        <Card className="p-8 max-w-2xl shadow-soft">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white">{editId ? t('editing') : (isAnnounce ? t('new_announcement') : t('new_message'))}</h3>
-            {editId && <button onClick={cancelEdit} className="text-red-500 hover:underline text-sm font-semibold">{t('cancel')}</button>}
+        <Card className="p-3.5 sm:p-8 max-w-2xl shadow-soft">
+          <div className="flex justify-between items-center mb-2.5 sm:mb-6">
+            <h3 className="text-base sm:text-xl font-bold text-slate-800 dark:text-white">{editId ? t('editing') : (isAnnounce ? t('new_announcement') : t('new_message'))}</h3>
+            {editId && <button onClick={cancelEdit} className="text-red-500 hover:underline text-xs sm:text-sm font-semibold">{t('cancel')}</button>}
           </div>
-          <div className="space-y-5">
-            {/* SEND AS DIRECTOR OPTION - Always available for employee in this tab */}
-            {!isAnnounce && isEmployee && currentUser.employeePermissions?.canSendAsDirector && !editId && (
-                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 dark:bg-amber-900/20 dark:border-amber-900/30">
-                    <label className="block text-sm font-bold text-amber-900 mb-2 dark:text-amber-400 flex items-center gap-2">
-                        <Shield size={16}/> {t('send_as')}:
+          <div className="space-y-2.5 sm:space-y-5">
+            {/* SEND AS DIRECTOR OPTION - Available for employee in messages & announcements */}
+            {isEmployee && currentUser.employeePermissions?.canSendAsDirector && !editId && (
+                <div className="bg-amber-50 p-3 sm:p-4 rounded-xl border border-amber-100 dark:bg-amber-900/20 dark:border-amber-900/30">
+                    <label className="block text-xs sm:text-sm font-bold text-amber-900 mb-1.5 sm:mb-2 dark:text-amber-400 flex items-center gap-1.5 sm:gap-2">
+                        <Shield size={15}/> {t('send_as')}:
                     </label>
                     <Select value={sendAsDirector ? 'director' : 'self'} onChange={e => {
                         setSendAsDirector(e.target.value === 'director');
                         setComposeTo([]); // Reset recipients when switching mode
                     }}>
-                        <option value="self">{currentUser.fio} ({t('me')})</option>
-                        <option value="director">{director ? `${director.fio} (${t('director')})` : t('director')}</option>
+                        <option value="self">{H.formatShortName(currentUser.fio)} ({t('me')})</option>
+                        <option value="director">{director ? `${H.formatShortName(director.fio)} (${t('director')})` : t('director')}</option>
                     </Select>
                 </div>
             )}
 
             {!isAnnounce && (
               <div>
-                <label className="block text-sm font-bold text-slate-600 mb-2 dark:text-slate-300">{t('to_label')}</label>
+                <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('to_label')}</label>
                 <SearchableSelect 
                    multi={true}
                    options={userOptions} 
@@ -1141,30 +1517,52 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
               </div>
             )}
             <div>
-              <label className="block text-sm font-bold text-slate-600 mb-2 dark:text-slate-300">{t('theme')}</label>
+              <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('theme')}</label>
               <Input value={composeTitle} onChange={e => setComposeTitle(e.target.value)} />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-600 mb-2 dark:text-slate-300">{t('text')}</label>
+              <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('text')}</label>
               <textarea 
-                className="w-full border border-slate-300 rounded-xl p-4 h-36 focus:ring-blue-500 focus:border-blue-500 text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200"
+                className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-36 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200"
                 value={composeBody}
                 onChange={e => setComposeBody(e.target.value)}
               />
             </div>
+            {editId && existingAttachments.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-slate-400">
+                  {lang === 'ru' ? 'Прикреплённые файлы:' : 'Attached files:'}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {existingAttachments.map(att => (
+                    <div key={att.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200">
+                      <span className="truncate max-w-[180px] font-medium">{att.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setExistingAttachments(prev => prev.filter(a => a.id !== att.id))}
+                        className="text-red-500 hover:text-red-700 font-bold ml-1"
+                        title={t('delete')}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <MultiFileUploader files={files} onFilesChange={setFiles} lang={lang as 'ru'|'en'} />
-            <div className="pt-4 flex gap-3">
-              <Button variant="primary" disabled={sending} onClick={handleSend} className="w-full md:w-auto px-8">
+            <div className="pt-0.5 sm:pt-3 flex gap-2.5 sm:gap-3">
+              <Button variant="primary" size="sm" disabled={sending} onClick={handleSend} className="w-full md:w-auto px-6 sm:px-8 sm:h-10 sm:text-sm">
                 {sending ? '...' : t('send')}
               </Button>
-              {editId && <Button variant="ghost" onClick={cancelEdit}>{t('cancel')}</Button>}
+              {editId && <Button variant="ghost" size="sm" onClick={cancelEdit}>{t('cancel')}</Button>}
             </div>
           </div>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2.5 sm:space-y-4">
           {items.length === 0 && (
-            <p className="text-slate-400 italic text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200 dark:bg-slate-900 dark:border-slate-800">
+            <p className="text-slate-400 italic text-xs sm:text-sm text-center py-6 sm:py-10 bg-slate-50 rounded-xl sm:rounded-2xl border border-dashed border-slate-200 dark:bg-slate-900 dark:border-slate-800">
               {t('list_empty')}
             </p>
           )}
