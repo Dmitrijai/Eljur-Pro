@@ -39,11 +39,12 @@ const isSubjectMatching = (subjName: string, targetSubj: string): boolean => {
 };
 
 export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: AppState, schoolId?: string, isGlobal?: boolean }) => {
-    const [selectedProfile, setSelectedProfile] = useState('');
-    const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
-    const [filterSchool, setFilterSchool] = useState(schoolId || '');
-    const [filterClass, setFilterClass] = useState('');
-    const [searchFio, setSearchFio] = useState('');
+    const scopeKey = isGlobal ? 'global' : (schoolId || 'school_1');
+    const [selectedProfile, setSelectedProfile] = H.useSyncedState<string>(`eljur_rating_prof_${scopeKey}`, '');
+    const [selectedSubjects, setSelectedSubjects] = H.useSyncedState<string[]>(`eljur_rating_subj_${scopeKey}`, []);
+    const [filterSchool, setFilterSchool] = H.useSyncedState<string>(`eljur_rating_sch_${scopeKey}`, schoolId || '');
+    const [filterClass, setFilterClass] = H.useSyncedState<string>(`eljur_rating_cls_${scopeKey}`, '');
+    const [searchFio, setSearchFio] = H.useSyncedState<string>(`eljur_rating_fio_${scopeKey}`, '');
     
     // Custom filter dropdown states
     const [showSubjects, setShowSubjects] = useState(false);

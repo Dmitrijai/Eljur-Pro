@@ -21,13 +21,7 @@ interface Props {
 }
 
 export default function DirectorDashboard({ state, onUpdate, user, mobileMenuOpen, setMobileMenuOpen }: Props) {
-  const [view, setView] = useState<'users' | 'schedule' | 'rating' | 'homeroom' | 'messages' | 'announcements' | 'load' | 'groups' | 'grading'>(() => {
-    return (localStorage.getItem(`eljur_tab_${user.id}`) as any) || 'users';
-  });
-
-  React.useEffect(() => {
-    localStorage.setItem(`eljur_tab_${user.id}`, view);
-  }, [view, user.id]);
+  const [view, setView] = H.useSyncedState<'users' | 'schedule' | 'rating' | 'homeroom' | 'messages' | 'announcements' | 'load' | 'groups' | 'grading'>(`eljur_tab_${user.id}`, 'users');
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 

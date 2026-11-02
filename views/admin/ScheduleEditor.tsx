@@ -110,7 +110,7 @@ const BufferedDateInput = ({
 export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onUpdate: (s: AppState) => void, user: import("../../types").User }) => {
   const schoolClasses = H.getSchoolClasses(state, user.schoolId);
   const schoolSubjects = H.getSchoolSubjects(state, user.schoolId);
-  const [activeClass, setActiveClass] = useState(schoolClasses[0] ? `${schoolClasses[0].class}_${schoolClasses[0].letter}` : '');
+  const [activeClass, setActiveClass] = H.useSyncedState<string>(`eljur_admin_sched_cls_${user.id}`, schoolClasses[0] ? `${schoolClasses[0].class}_${schoolClasses[0].letter}` : '');
   const [newSubj, setNewSubj] = useState('');
   const [showSubjModal, setShowSubjModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -126,11 +126,15 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
   
   const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
-  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(H.getStartOfWeek(systemNow));
-  
-  useEffect(() => {
-      setCurrentWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
-  }, [state.settings.systemTimeOffset]);
+  const [currentWeekStartIso, setCurrentWeekStartIso] = H.useSyncedState<string>(`eljur_admin_sched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
+  const currentWeekStart = React.useMemo(() => {
+      const parsed = new Date(currentWeekStartIso);
+      return isNaN(parsed.getTime()) ? H.getStartOfWeek(systemNow) : H.getStartOfWeek(parsed);
+  }, [currentWeekStartIso]);
+  const setCurrentWeekStart = (val: Date | ((prev: Date) => Date)) => {
+      const nextDate = typeof val === 'function' ? val(currentWeekStart) : val;
+      setCurrentWeekStartIso(H.dateToIso(H.getStartOfWeek(nextDate)));
+  };
 
   useEffect(() => {
       if (schoolClasses.length > 0) {
@@ -773,8 +777,8 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
 
                 {/* Desktop & Print Table */}
                 <div className="hidden md:block print:block p-0 text-center-all bg-white/50 dark:bg-slate-900/50 overflow-x-auto">
-                  <table className="w-full text-sm border-collapse min-w-[600px]">
-                    <thead><tr className="text-center text-slate-500 border-b border-slate-100 bg-white dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"><th className="p-2 w-48 min-w-[150px] font-semibold text-center whitespace-nowrap">{t('time')}</th>{isGroupColVisible && <th className="p-2 w-20 font-semibold text-center border-l border-slate-100 dark:border-slate-800">{t('grp')}</th>}<th className="p-2 font-semibold text-center border-l border-slate-100 dark:border-slate-800">{t('subject')}</th><th className="p-2 font-semibold text-center border-l border-slate-100 dark:border-slate-800">{t('teacher')}</th><th className="p-2 w-24 font-semibold text-center border-l border-slate-100 dark:border-slate-800">{t('cabinet')}</th><th className="p-2 w-10 no-print"></th></tr></thead>
+                  <table className="w-full text-sm border-collapse table-fixed min-w-[600px] print:min-w-0">
+                    <thead><tr className="text-center text-slate-500 border-b border-slate-100 bg-white dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"><th className="p-2 w-[20%] font-semibold text-center whitespace-nowrap">{t('time')}</th>{isGroupColVisible && <th className="p-2 w-[10%] font-semibold text-center border-l border-slate-100 dark:border-slate-800">{t('grp')}</th>}<th className={`p-2 ${isGroupColVisible ? 'w-[30%]' : 'w-[36%]'} font-semibold text-center border-l border-slate-100 dark:border-slate-800`}>{t('subject')}</th><th className={`p-2 ${isGroupColVisible ? 'w-[26%]' : 'w-[30%]'} font-semibold text-center border-l border-slate-100 dark:border-slate-800`}>{t('teacher')}</th><th className="p-2 w-[14%] font-semibold text-center border-l border-slate-100 dark:border-slate-800">{t('cabinet')}</th><th className="p-2 w-10 no-print"></th></tr></thead>
                     <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                       {day.lessons.map((lesson, idx) => {
                         const isSplit = lesson.subgroups && lesson.subgroups.length > 0;

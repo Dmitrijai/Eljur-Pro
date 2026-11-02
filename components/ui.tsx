@@ -796,7 +796,7 @@ export const ScrollableTableWrapper: React.FC<{
   className?: string;
   maxHeightClass?: string;
   lang?: 'ru' | 'en';
-}> = ({ children, className = '', maxHeightClass = 'md:max-h-[70vh]', lang = 'ru' }) => {
+}> = ({ children, className = '', maxHeightClass = 'max-h-none !overflow-y-visible', lang = 'ru' }) => {
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const [scrollWidth, setScrollWidth] = useState(0);
@@ -850,7 +850,7 @@ export const ScrollableTableWrapper: React.FC<{
   };
 
   return (
-    <div className={`border border-slate-200 rounded-xl sm:rounded-2xl bg-white shadow-soft overflow-hidden dark:bg-slate-900 dark:border-slate-800 ${className}`}>
+    <div className={`border border-slate-200 rounded-xl sm:rounded-2xl bg-white shadow-soft overflow-hidden print:overflow-visible dark:bg-slate-900 dark:border-slate-800 ${className}`}>
       {/* Desktop Top Horizontal Scroll Bar */}
       {hasOverflow && (
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-50/90 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 no-print">
@@ -867,11 +867,11 @@ export const ScrollableTableWrapper: React.FC<{
         </div>
       )}
 
-      {/* Main Scrollable Viewport (Bounded height on PC so sticky headers & bottom scrollbar are always reachable) */}
+      {/* Main Scrollable Viewport (Full vertical height on PC, horizontal scrolling preserved) */}
       <div
         ref={tableContainerRef}
         onScroll={handleTableScroll}
-        className={`overflow-x-auto overflow-y-auto ${maxHeightClass} print:max-h-none print:overflow-visible`}
+        className={`overflow-x-auto ${maxHeightClass} print:max-h-none print:overflow-visible`}
       >
         {children}
       </div>

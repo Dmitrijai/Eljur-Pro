@@ -18,14 +18,15 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
     
     const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
-    const [journalWeekStart, setJournalWeekStart] = useState<Date>(H.getStartOfWeek(systemNow));
+    const defaultWeekIso = H.dateToIso(H.getStartOfWeek(systemNow));
+    const [journalWeekIso, setJournalWeekIso] = H.useSyncedState<string>(`eljur_st_journal_week_${user.id}`, defaultWeekIso);
+    const journalWeekStart = new Date(journalWeekIso || defaultWeekIso);
     const journalDays = Object.values(schedule).filter(d => H.isDateInWeek(d.date, journalWeekStart)).sort((a,b) => a.date.localeCompare(b.date));
     const [selectedGradeDetails, setSelectedGradeDetails] = useState<{grade: Grade, subject: string} | null>(null);
 
-    useEffect(() => { setJournalWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)))); }, [state.settings.systemTimeOffset]);
-    const goPrevJournalWeek = () => setJournalWeekStart(d => H.addDays(d, -7));
-    const goNextJournalWeek = () => setJournalWeekStart(d => H.addDays(d, 7));
-    const goCurrentJournalWeek = () => setJournalWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
+    const goPrevJournalWeek = () => setJournalWeekIso(H.dateToIso(H.addDays(journalWeekStart, -7)));
+    const goNextJournalWeek = () => setJournalWeekIso(H.dateToIso(H.addDays(journalWeekStart, 7)));
+    const goCurrentJournalWeek = () => setJournalWeekIso(H.dateToIso(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)))));
     
     const journalDates = journalDays.map(d => d.date);
     const journalVacation = H.getVacationForWeek(journalWeekStart, scheduleSettings, journalDates);
@@ -171,7 +172,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                   })();
 
                   return (
-                      <div key={day.id} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+                      <div key={day.id} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs overflow-hidden break-inside-avoid dark:bg-slate-900 dark:border-slate-800">
                          <div className={`px-3 sm:px-6 py-2 sm:py-3.5 border-b flex justify-between items-center ${headerClass}`}><div className="font-bold flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs sm:text-base">{day.title || H.getDayOfWeek(day.date, lang as 'ru' | 'en')} <span className="text-slate-400 font-normal text-xs sm:text-sm">{H.formatDateDDMMYYYY(day.date)}</span>{(isHolidayDay || isVacationDay) && <span className="text-[10px] sm:text-xs uppercase px-1.5 py-0.5 rounded bg-white/50 border border-black/5 font-bold">{holidayInfo ? holidayInfo.title : vacForDay?.title}</span>}</div></div>
                          
                          {/* Mobile Card Layout (Compact, No horizontal scroll) */}
@@ -248,14 +249,28 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                          </div>
 
                          {/* Desktop & Print Table */}
-                         <div className="hidden md:block print:block overflow-x-auto">
-                           <table className="w-full text-sm min-w-[500px]"><thead className="bg-white border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider dark:bg-slate-900 dark:border-slate-800 dark:text-slate-500"><tr><th className="p-3.5 w-32 text-center border-r border-slate-100 dark:border-slate-800">{t('time')}</th><th className="p-3.5 w-1/4 text-center border-r border-slate-100 dark:border-slate-800">{t('subject')}</th><th className="p-3.5 text-center border-r border-slate-100 dark:border-slate-800">{t('homework')}</th><th className="p-3.5 w-28 text-center">{t('grade')}</th></tr></thead>
-                               <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                         <div className="hidden md:block print:block overflow-x-auto print:overflow-visible">
+                           <table className="w-full text-sm table-fixed min-w-[500px] print:min-w-0">
+                             <colgroup>
+                               <col className="w-[16%]" />
+                               <col className="w-[24%]" />
+                               <col className="w-[45%]" />
+                               <col className="w-[15%]" />
+                             </colgroup>
+                             <thead className="bg-white border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider dark:bg-slate-900 dark:border-slate-800 dark:text-slate-500">
+                               <tr>
+                                 <th className="p-3.5 w-[16%] text-center border-r border-slate-100 dark:border-slate-800">{t('time')}</th>
+                                 <th className="p-3.5 w-[24%] text-center border-r border-slate-100 dark:border-slate-800">{t('subject')}</th>
+                                 <th className="p-3.5 w-[45%] text-center border-r border-slate-100 dark:border-slate-800">{t('homework')}</th>
+                                 <th className="p-3.5 w-[15%] text-center">{t('grade')}</th>
+                               </tr>
+                             </thead>
+                             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                                {resolvedLessons.map(({ l, subject, teacherLabel, hwList, grades }) => (
-                                 <tr key={l.id} className="hover:bg-slate-50 transition-colors dark:hover:bg-slate-800/30"><td className="p-3.5 font-mono text-xs text-slate-500 text-center border-r border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.timeRange}</td><td className="p-3.5 font-bold text-slate-800 text-center border-r border-slate-50 dark:text-white dark:border-slate-800">{subject}{teacherLabel && <div className="text-[10px] text-amber-600 mt-1 font-normal">({teacherLabel})</div>}</td><td className="p-3.5 text-center text-slate-600 border-r border-slate-50 dark:text-slate-300 dark:border-slate-800">{hwList.length > 0 ? (<div className="space-y-1.5"><div className="space-y-1 whitespace-pre-line">{hwList.map(h => (<div key={h.id}>{h.text}</div>))}</div>{hwList.some(h => (h.attachments && h.attachments.length > 0) || h.attachmentId) && (<div className="pt-1 flex flex-wrap justify-center gap-1.5">{hwList.map(h => (<React.Fragment key={`d_att_${h.id}`}>{h.attachmentId && <FileDisplay id={h.attachmentId} name={h.attachmentName} schoolId={h.schoolId || user.schoolId} lang={lang as 'ru'|'en'} />}{(h.attachments || []).map(att => (<FileDisplay key={att.id} id={att.id} name={att.name} schoolId={h.schoolId || user.schoolId} lang={lang as 'ru'|'en'} />))}</React.Fragment>))}</div>)}</div>) : <span className="text-slate-300">-</span>}</td><td className="p-3.5 text-center align-middle">{grades.length > 0 ? (<div className="flex flex-col items-center gap-1">{grades.map(g => { const isExpiredNU = H.isGradeExpiredNU(g, state.settings.systemTimeOffset); const typeName = getTypeLabel(g.type); const effWeight = getEffectiveWeight(g); return (<div key={g.id} className="cursor-pointer group" onClick={() => { setSelectedGradeDetails({grade: g, subject}); playGradeSound(isExpiredNU ? minGrade : g.value); }}><div className={`text-xl font-bold ${isExpiredNU ? 'text-red-600' : H.getGradeColorClass(String(g.value), minGrade, maxGrade)}`} title={isExpiredNU ? `${t('deadline_expired_msg')} (${minGrade})` : undefined}>{isExpiredNU ? `${minGrade} (Н/У)` : g.value}</div>{typeName && (<div className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold dark:bg-slate-800">{typeName}{useWeights && effWeight > 1 ? ` ×${effWeight}` : ''}</div>)}</div>); })}</div>) : <span className="text-slate-200">-</span>}</td></tr>
+                                 <tr key={l.id} className="hover:bg-slate-50 transition-colors dark:hover:bg-slate-800/30"><td className="p-3.5 w-[16%] font-mono text-xs text-slate-500 text-center border-r border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.timeRange}</td><td className="p-3.5 w-[24%] font-bold text-slate-800 text-center border-r border-slate-50 dark:text-white dark:border-slate-800">{subject}{teacherLabel && <div className="text-[10px] text-amber-600 mt-1 font-normal">({teacherLabel})</div>}</td><td className="p-3.5 w-[45%] text-center text-slate-600 border-r border-slate-50 dark:text-slate-300 dark:border-slate-800">{hwList.length > 0 ? (<div className="space-y-1.5"><div className="space-y-1 whitespace-pre-line">{hwList.map(h => (<div key={h.id}>{h.text}</div>))}</div>{hwList.some(h => (h.attachments && h.attachments.length > 0) || h.attachmentId) && (<div className="pt-1 flex flex-wrap justify-center gap-1.5">{hwList.map(h => (<React.Fragment key={`d_att_${h.id}`}>{h.attachmentId && <FileDisplay id={h.attachmentId} name={h.attachmentName} schoolId={h.schoolId || user.schoolId} lang={lang as 'ru'|'en'} />}{(h.attachments || []).map(att => (<FileDisplay key={att.id} id={att.id} name={att.name} schoolId={h.schoolId || user.schoolId} lang={lang as 'ru'|'en'} />))}</React.Fragment>))}</div>)}</div>) : <span className="text-slate-300">-</span>}</td><td className="p-3.5 w-[15%] text-center align-middle">{grades.length > 0 ? (<div className="flex flex-col items-center gap-1">{grades.map(g => { const isExpiredNU = H.isGradeExpiredNU(g, state.settings.systemTimeOffset); const typeName = getTypeLabel(g.type); const effWeight = getEffectiveWeight(g); return (<div key={g.id} className="cursor-pointer group" onClick={() => { setSelectedGradeDetails({grade: g, subject}); playGradeSound(isExpiredNU ? minGrade : g.value); }}><div className={`text-xl font-bold ${isExpiredNU ? 'text-red-600' : H.getGradeColorClass(String(g.value), minGrade, maxGrade)}`} title={isExpiredNU ? `${t('deadline_expired_msg')} (${minGrade})` : undefined}>{isExpiredNU ? `${minGrade} (Н/У)` : g.value}</div>{typeName && (<div className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold dark:bg-slate-800">{typeName}{useWeights && effWeight > 1 ? ` ×${effWeight}` : ''}</div>)}</div>); })}</div>) : <span className="text-slate-200">-</span>}</td></tr>
                                ))}
                                {day.lessons.length === 0 && <tr><td colSpan={4} className="p-6 text-center text-slate-400 italic">{t('no_lessons_today')}</td></tr>}
-                               </tbody>
+                             </tbody>
                            </table>
                          </div>
                       </div>

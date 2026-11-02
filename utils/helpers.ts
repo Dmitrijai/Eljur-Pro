@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { Lesson, ScheduleSettings, Message, Announcement, AppState, User, School, GradingSystemSettings, GradeType, SubjectRequirement, Grade, FinalGradeEntry, ScheduleDay, TeacherAssignment, StudentGroup, Homework, COEFFICIENT_TYPES } from '../types';
 
@@ -2604,3 +2605,189 @@ export const getSchoolEducationalResourceUrl = (state: AppState, schoolId: strin
     }
     return '';
 };
+
+// ==========================================
+// --- CROSS-TAB SYNCHRONIZATION & STORAGE ---
+// ==========================================
+
+export interface CrossTabMessage {
+    type: 'KV_UPDATE' | 'SESSION_CHANGE' | 'STATE_UPDATE';
+    key?: string;
+    value?: any;
+    senderTabId: string;
+    timestamp: number;
+}
+
+const TAB_ID = typeof window !== 'undefined' ? `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : 'server';
+let broadcastChannel: BroadcastChannel | null = null;
+
+const getBroadcastChannel = (): BroadcastChannel | null => {
+    if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;
+    if (!broadcastChannel) {
+        try {
+            broadcastChannel = new BroadcastChannel('eljur_cross_tab_sync_v1');
+        } catch (e) {
+            broadcastChannel = null;
+        }
+    }
+    return broadcastChannel;
+};
+
+const crossTabListeners = new Set<(msg: CrossTabMessage) => void>();
+let isCrossTabInitialized = false;
+
+const initCrossTabListeners = () => {
+    if (isCrossTabInitialized || typeof window === 'undefined') return;
+    isCrossTabInitialized = true;
+
+    const ch = getBroadcastChannel();
+    if (ch) {
+        ch.addEventListener('message', (event) => {
+            const data = event.data as CrossTabMessage;
+            if (!data || data.senderTabId === TAB_ID) return;
+            crossTabListeners.forEach(listener => listener(data));
+        });
+    }
+
+    window.addEventListener('storage', (event) => {
+        if (!event.key) return;
+        if (event.key === 'eljur_cross_tab_envelope' && event.newValue) {
+            try {
+                const parsed = JSON.parse(event.newValue) as CrossTabMessage;
+                if (parsed && parsed.senderTabId !== TAB_ID) {
+                    crossTabListeners.forEach(listener => listener(parsed));
+                }
+            } catch (e) {}
+            return;
+        }
+        if (event.key === 'eljur_session') {
+            let userVal: any = null;
+            if (event.newValue) {
+                try { userVal = JSON.parse(event.newValue); } catch (e) {}
+            }
+            const msg: CrossTabMessage = {
+                type: 'SESSION_CHANGE',
+                key: 'eljur_session',
+                value: userVal,
+                senderTabId: 'storage_event',
+                timestamp: Date.now()
+            };
+            crossTabListeners.forEach(listener => listener(msg));
+            return;
+        }
+        if (event.key.startsWith('eljur_')) {
+            let parsedVal: any = event.newValue;
+            if (event.newValue !== null) {
+                try { parsedVal = JSON.parse(event.newValue); } catch (e) { parsedVal = event.newValue; }
+            }
+            const msg: CrossTabMessage = {
+                type: 'KV_UPDATE',
+                key: event.key,
+                value: parsedVal,
+                senderTabId: 'storage_event',
+                timestamp: Date.now()
+            };
+            crossTabListeners.forEach(listener => listener(msg));
+        }
+    });
+};
+
+export const emitCrossTabSync = (type: CrossTabMessage['type'], key?: string, value?: any) => {
+    if (typeof window === 'undefined') return;
+    initCrossTabListeners();
+    const msg: CrossTabMessage = {
+        type,
+        key,
+        value,
+        senderTabId: TAB_ID,
+        timestamp: Date.now()
+    };
+    const ch = getBroadcastChannel();
+    if (ch) {
+        try { ch.postMessage(msg); } catch (e) {}
+    }
+    try {
+        // For KV_UPDATE and SESSION_CHANGE, also trigger storage event fallback for tabs where BroadcastChannel might be throttled
+        if (type !== 'STATE_UPDATE') {
+            localStorage.setItem('eljur_cross_tab_envelope', JSON.stringify(msg));
+        }
+    } catch (e) {}
+};
+
+export const subscribeCrossTabSync = (listener: (msg: CrossTabMessage) => void): (() => void) => {
+    initCrossTabListeners();
+    crossTabListeners.add(listener);
+    return () => {
+        crossTabListeners.delete(listener);
+    };
+};
+
+const readStoredValue = <T,>(key: string, defaultVal: T | (() => T)): T => {
+    const resolveDefault = () => (typeof defaultVal === 'function' ? (defaultVal as () => T)() : defaultVal);
+    if (typeof window === 'undefined') return resolveDefault();
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined) return resolveDefault();
+        try {
+            return JSON.parse(raw) as T;
+        } catch {
+            return raw as unknown as T;
+        }
+    } catch {
+        return resolveDefault();
+    }
+};
+
+export function useSyncedState<T>(key: string, initialValue: T | (() => T)): [T, React.Dispatch<React.SetStateAction<T>>] {
+    const [state, setState] = useState<T>(() => readStoredValue(key, initialValue));
+    const keyRef = useRef(key);
+
+    useEffect(() => {
+        if (keyRef.current !== key) {
+            keyRef.current = key;
+            setState(readStoredValue(key, initialValue));
+        }
+    }, [key]);
+
+    const setSyncedState: React.Dispatch<React.SetStateAction<T>> = useCallback((updater) => {
+        setState(prev => {
+            const next = typeof updater === 'function' ? (updater as (p: T) => T)(prev) : updater;
+            try {
+                const serialized = typeof next === 'string' ? next : JSON.stringify(next);
+                localStorage.setItem(keyRef.current, serialized);
+                emitCrossTabSync('KV_UPDATE', keyRef.current, next);
+            } catch (e) {}
+            return next;
+        });
+    }, []);
+
+    useEffect(() => {
+        const unsub = subscribeCrossTabSync((msg) => {
+            if (msg.type === 'KV_UPDATE' && msg.key === keyRef.current && msg.value !== undefined) {
+                setState(prev => {
+                    if (JSON.stringify(prev) === JSON.stringify(msg.value)) return prev;
+                    return msg.value as T;
+                });
+            }
+        });
+
+        const syncOnFocus = () => {
+            const latest = readStoredValue(keyRef.current, initialValue);
+            setState(prev => {
+                if (JSON.stringify(prev) === JSON.stringify(latest)) return prev;
+                return latest;
+            });
+        };
+
+        window.addEventListener('focus', syncOnFocus);
+        document.addEventListener('visibilitychange', syncOnFocus);
+        return () => {
+            unsub();
+            window.removeEventListener('focus', syncOnFocus);
+            document.removeEventListener('visibilitychange', syncOnFocus);
+        };
+    }, [key]);
+
+    return [state, setSyncedState];
+}
+

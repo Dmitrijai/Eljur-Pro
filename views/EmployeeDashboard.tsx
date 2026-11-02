@@ -28,9 +28,7 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
   const effectiveAllowedTabs = allowedTabs.filter(t => t !== 'homeroom');
   if (hasHomeroom) effectiveAllowedTabs.push('homeroom');
 
-  const [view, setView] = useState<string>(() => {
-    return (localStorage.getItem(`eljur_tab_${user.id}`) as string) || effectiveAllowedTabs[0] || 'messages';
-  });
+  const [view, setView] = H.useSyncedState<string>(`eljur_tab_${user.id}`, () => effectiveAllowedTabs[0] || 'messages');
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 
@@ -42,10 +40,6 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
          setView(effectiveAllowedTabs[0] || '');
      }
   }, [effectiveAllowedTabs, view]);
-
-  useEffect(() => {
-    localStorage.setItem(`eljur_tab_${user.id}`, view);
-  }, [view, user.id]);
 
   if (effectiveAllowedTabs.length === 0) {
       return <div className="p-10 text-center text-slate-500">{t('no_available_tabs')}</div>;

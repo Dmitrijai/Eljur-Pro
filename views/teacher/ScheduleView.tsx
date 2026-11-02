@@ -5,15 +5,19 @@ import { Button, Select } from '../../components/ui';
 import { Printer, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 export const ScheduleView = ({ state, user, lang }: { state: AppState, user: User, lang: 'ru' | 'en' }) => {
-    const [highlightClass, setHighlightClass] = useState('');
+    const [highlightClass, setHighlightClass] = H.useSyncedState<string>(`eljur_tsched_cls_${user.id}`, '');
     const t = (k: string) => H.t(k, lang);
 
     const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
-    const [weekStart, setWeekStart] = useState<Date>(H.getStartOfWeek(systemNow));
-
-    useEffect(() => {
-        setWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
-    }, [state.settings.systemTimeOffset]);
+    const [weekStartIso, setWeekStartIso] = H.useSyncedState<string>(`eljur_tsched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
+    const weekStart = useMemo(() => {
+        const parsed = new Date(weekStartIso);
+        return isNaN(parsed.getTime()) ? H.getStartOfWeek(systemNow) : H.getStartOfWeek(parsed);
+    }, [weekStartIso]);
+    const setWeekStart = (val: Date | ((prev: Date) => Date)) => {
+        const nextDate = typeof val === 'function' ? val(weekStart) : val;
+        setWeekStartIso(H.dateToIso(H.getStartOfWeek(nextDate)));
+    };
 
     const goPrevWeek = () => setWeekStart(d => H.addDays(d, -7));
     const goNextWeek = () => setWeekStart(d => H.addDays(d, 7));
@@ -178,13 +182,19 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
                         </div>
                         {/* Desktop & Print Table */}
                         <div className="hidden md:block print:block p-0 bg-white/50 dark:bg-slate-900/50 overflow-x-auto">
-                            <table className="w-full text-sm table-fixed min-w-[500px]">
+                            <table className="w-full text-sm table-fixed min-w-[500px] print:min-w-0">
+                                <colgroup>
+                                    <col className="w-[18%]" />
+                                    <col className="w-[46%]" />
+                                    <col className="w-[18%]" />
+                                    <col className="w-[18%]" />
+                                </colgroup>
                                 <thead className="bg-white border-b border-slate-100 text-slate-500 dark:bg-slate-900 dark:border-slate-800">
                                     <tr>
-                                        <th className="p-3 text-center w-32 border-r border-slate-100 dark:border-slate-800">{t('time')}</th>
-                                        <th className="p-3 text-center">{t('subject')}</th>
-                                        <th className="p-3 text-center w-32 border-l border-slate-100 dark:border-slate-800">{t('class')}</th>
-                                        <th className="p-3 text-center w-24 border-l border-slate-100 dark:border-slate-800">{t('cabinet')}</th>
+                                        <th className="p-3 text-center w-[18%] border-r border-slate-100 dark:border-slate-800">{t('time')}</th>
+                                        <th className="p-3 text-center w-[46%]">{t('subject')}</th>
+                                        <th className="p-3 text-center w-[18%] border-l border-slate-100 dark:border-slate-800">{t('class')}</th>
+                                        <th className="p-3 text-center w-[18%] border-l border-slate-100 dark:border-slate-800">{t('cabinet')}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
@@ -192,15 +202,15 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
                                         const isHighlighted = !highlightClass || l.class === highlightClass; 
                                         return (
                                             <tr key={l.id} className={`transition-opacity duration-200 print:opacity-100 ${isHighlighted ? 'opacity-100 hover:bg-slate-50 dark:hover:bg-slate-800/50' : 'opacity-25'}`}>
-                                                <td className="p-3 font-mono text-xs text-slate-500 text-center border-r border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.time}</td>
-                                                <td className="p-3 font-semibold text-center text-slate-800 dark:text-slate-200">{l.subject}{l.teacherLabel && <div className="text-[10px] text-amber-600 font-bold">({l.teacherLabel})</div>}</td>
-                                                <td className="p-3 text-slate-600 text-center font-bold border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">
+                                                <td className="p-3 w-[18%] font-mono text-xs text-slate-500 text-center border-r border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.time}</td>
+                                                <td className="p-3 w-[46%] font-semibold text-center text-slate-800 dark:text-slate-200">{l.subject}{l.teacherLabel && <div className="text-[10px] text-amber-600 font-bold">({l.teacherLabel})</div>}</td>
+                                                <td className="p-3 w-[18%] text-slate-600 text-center font-bold border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">
                                                     <div className="flex flex-col items-center">
                                                         <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded dark:bg-blue-900/30 dark:text-blue-300">{l.class}</span>
                                                         {l.groupName && <span className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{l.groupName}</span>}
                                                     </div>
                                                 </td>
-                                                <td className="p-3 text-slate-600 text-center border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.room}</td>
+                                                <td className="p-3 w-[18%] text-slate-600 text-center border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.room}</td>
                                             </tr>
                                         ); 
                                     })}

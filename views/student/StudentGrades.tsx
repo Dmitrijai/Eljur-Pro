@@ -19,17 +19,12 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
     const classGrades = H.getSchoolClassGrades(state, user.schoolId, classKey);
     const classFinalGrades = H.getSchoolClassFinalGrades(state, user.schoolId, classKey);
     
-    const [currentQuarter, setCurrentQuarter] = useState<any>('Q1');
-    const [isFinalGradesOpen, setIsFinalGradesOpen] = useState(false);
-    const [selectedGradeDetails, setSelectedGradeDetails] = useState<{grade: Grade, subject: string} | null>(null);
-
-    useEffect(() => {
+    const defaultStudentQuarter = useMemo(() => {
         if (scheduleSettings.quarterDefinitions) {
             const nowIso = H.dateToIso(new Date(Date.now() + (state.settings.systemTimeOffset || 0)));
             for (const [key, def] of Object.entries(scheduleSettings.quarterDefinitions)) {
                if (def.start && def.end && nowIso >= def.start && nowIso <= def.end) { 
-                   setCurrentQuarter(key); 
-                   return; 
+                   return key; 
                }
             }
         }
@@ -45,17 +40,32 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
             if (scheduleSettings.quarterDefinitions) {
                 for (const [key, def] of Object.entries(scheduleSettings.quarterDefinitions)) {
                    if (def.start && def.end && maxDate >= def.start && maxDate <= def.end) { 
-                       setCurrentQuarter(key); 
-                       return; 
+                       return key; 
                    }
                 }
             }
-            setCurrentQuarter(H.getQuarterFromDate(maxDate)); 
-            return;
+            return H.getQuarterFromDate(maxDate); 
         }
         
-        setCurrentQuarter('Q1');
-    }, [user.id, user.schoolId, state.settings.systemTimeOffset]);
+        return 'Q1';
+    }, [user.id, user.schoolId, state.settings.systemTimeOffset, scheduleSettings.quarterDefinitions]);
+
+    const [currentQuarter, setCurrentQuarter] = H.useSyncedState<string>(`eljur_st_grades_q_${user.id}`, defaultStudentQuarter);
+    const [isFinalGradesOpen, setIsFinalGradesOpen] = H.useSyncedState<boolean>(`eljur_st_final_open_${user.id}`, false);
+    const [printSection, setPrintSection] = useState<'current' | 'final'>('current');
+    const [selectedGradeDetails, setSelectedGradeDetails] = useState<{grade: Grade, subject: string} | null>(null);
+
+    const handlePrintCurrent = () => {
+        setPrintSection('current');
+        setTimeout(() => window.print(), 30);
+    };
+
+    const handlePrintFinal = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsFinalGradesOpen(true);
+        setPrintSection('final');
+        setTimeout(() => window.print(), 40);
+    };
 
     const quarterDates = useMemo(() => {
         const def = scheduleSettings.quarterDefinitions?.[currentQuarter];
@@ -128,8 +138,14 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
         <div className="space-y-3 sm:space-y-6">
              <div className="hidden print:block p-3 mb-3 border-b-2 border-black text-center">
                 <div className="text-xs font-bold uppercase tracking-widest text-slate-600">{H.getSchool(state, user.schoolId)?.name || 'ЭлЖур'}</div>
-                <div className="text-xl font-bold text-black mt-0.5">{t('current_performance')} — {H.formatShortName(user.fio)} ({user.class}{user.letter})</div>
-                <div className="text-xs text-slate-600 mt-1">{currentQuarter.replace('Q', '')} {t('quarter')}{classHeadmaster ? ` • ${lang === 'ru' ? 'Классный руководитель' : 'Class Teacher'}: ${H.formatShortName(classHeadmaster.fio)}` : ''}</div>
+                <div className="text-xl font-bold text-black mt-0.5">
+                    {printSection === 'final' ? t('final_grades') : t('current_performance')} — {H.formatShortName(user.fio)} ({user.class}{user.letter})
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                    {printSection === 'final'
+                        ? (classHeadmaster ? `${lang === 'ru' ? 'Классный руководитель' : 'Class Teacher'}: ${H.formatShortName(classHeadmaster.fio)}` : '')
+                        : `${currentQuarter.replace('Q', '')} ${t('quarter')}${classHeadmaster ? ` • ${lang === 'ru' ? 'Классный руководитель' : 'Class Teacher'}: ${H.formatShortName(classHeadmaster.fio)}` : ''}`}
+                </div>
              </div>
              <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs no-print">
                 <div className="min-w-0">
@@ -151,7 +167,7 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                         <option value="Q3">3 {t('q_short')}</option>
                         <option value="Q4">4 {t('q_short')}</option>
                     </Select>
-                    <Button variant="secondary" size="sm" onClick={() => window.print()} className="w-auto px-2.5 py-1.5 text-xs">
+                    <Button variant="secondary" size="sm" onClick={handlePrintCurrent} className="w-auto px-2.5 py-1.5 text-xs">
                         <Printer size={14} className="sm:mr-1.5"/><span className="hidden sm:inline">{t('print')}</span>
                     </Button>
                 </div>
@@ -224,18 +240,18 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
              </div>
 
              {/* Desktop & Print Matrix Table */}
-             <div className="hidden md:block print:block">
-                <ScrollableTableWrapper lang={lang} maxHeightClass="md:max-h-none md:overflow-y-visible">
-                    <table className="w-full text-sm min-w-[800px]">
+             <div className={`hidden md:block ${printSection === 'current' ? 'print:block' : 'print:hidden'}`}>
+                <ScrollableTableWrapper lang={lang} maxHeightClass="max-h-none !overflow-y-visible">
+                    <table className="w-full text-sm min-w-[800px] print:min-w-0">
                         <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300">
                             <tr>
-                                <th className="p-3.5 text-left font-bold w-48 sticky top-0 left-0 bg-slate-50 z-30 border-r border-slate-200 dark:bg-slate-800 dark:border-slate-700">{t('subject')}</th>
+                                <th className="p-3.5 print:p-1 text-left font-bold w-48 print:w-auto sticky top-0 left-0 bg-slate-50 z-30 border-r border-slate-200 dark:bg-slate-800 dark:border-slate-700">{t('subject')}</th>
                                 {quarterDates.map(d => (
-                                    <th key={d} className="p-2 min-w-[54px] text-center sticky top-0 z-20 bg-slate-50 dark:bg-slate-800 border-r border-slate-100 dark:border-slate-700 font-normal text-xs text-slate-500">
+                                    <th key={d} className="p-2 print:p-0.5 min-w-[54px] print:min-w-0 print:w-auto text-center sticky top-0 z-20 bg-slate-50 dark:bg-slate-800 border-r border-slate-100 dark:border-slate-700 font-normal text-xs print:text-[7pt] text-slate-500 whitespace-nowrap">
                                         {H.formatDateDDMMYYYY(d).slice(0,5)}
                                     </th>
                                 ))}
-                                <th className="p-3.5 text-center font-bold sticky top-0 z-20 bg-blue-50 text-blue-800 min-w-[80px] dark:bg-blue-950 dark:text-blue-300">{t('avg_score')}</th>
+                                <th className="p-3.5 print:p-1 text-center font-bold sticky top-0 z-20 bg-blue-50 text-blue-800 min-w-[80px] print:min-w-0 print:w-auto dark:bg-blue-950 dark:text-blue-300">{t('avg_score')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -260,29 +276,29 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                 const avgColor = avg !== '-' ? H.getGradeColorClass(avg, minGrade, maxGrade) : 'text-slate-400';
                                 return (
                                     <tr key={subj} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                        <td className="p-3.5 text-left font-bold text-slate-700 sticky left-0 z-10 bg-white border-r border-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800">{subj}</td>
+                                        <td className="p-3.5 print:p-1 text-left font-bold text-slate-700 sticky left-0 z-10 bg-white border-r border-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800">{subj}</td>
                                         {quarterDates.map(d => { 
                                             const dayGrades = currentGrades.filter(gr => gr.date === d); 
                                             return (
-                                                <td key={d} className="p-2 text-center border-r border-slate-50 dark:border-slate-800">
+                                                <td key={d} className="p-2 print:p-0.5 text-center border-r border-slate-50 dark:border-slate-800">
                                                     {dayGrades.length > 0 ? (
-                                                        <div className="flex flex-wrap items-center justify-center gap-2">
+                                                        <div className="flex flex-wrap items-center justify-center gap-2 print:gap-0.5">
                                                             {dayGrades.map((g, gIdx) => {
                                                                 const isExpiredNU = H.isGradeExpiredNU(g, state.settings.systemTimeOffset);
                                                                 const effWeight = getEffectiveWeight(g);
                                                                 return (
                                                                 <div key={g.id || gIdx} className="inline-flex items-baseline gap-0.5 cursor-pointer group hover:scale-110 transition-transform" onClick={() => { setSelectedGradeDetails({grade: g, subject: subj}); playGradeSound(isExpiredNU ? minGrade : g.value); }}>
                                                                     <span className={`font-bold ${isExpiredNU ? 'text-red-600' : H.getGradeColorClass(String(g.value), minGrade, maxGrade)}`} title={isExpiredNU ? `${t('deadline_expired_msg')} (${minGrade})` : undefined}>{isExpiredNU ? `${minGrade} (Н/У)` : g.value}</span>
-                                                                    {useWeights && effWeight >= 1 && <span className="text-[10px] text-slate-400 font-medium leading-none">×{effWeight}</span>}
+                                                                    {useWeights && effWeight >= 1 && <span className="text-[10px] print:text-[6.5pt] text-slate-400 font-medium leading-none">×{effWeight}</span>}
                                                                 </div>
                                                                 );
                                                             })}
                                                         </div>
-                                                    ) : <span className="text-slate-200 dark:text-slate-700">-</span>}
+                                                    ) : <span className="text-slate-200 dark:text-slate-700 print:hidden">-</span>}
                                                 </td>
                                             );
                                         })}
-                                        <td className={`p-3.5 text-center font-bold bg-blue-50/30 ${avgColor} dark:bg-blue-900/10`}>{avg}</td>
+                                        <td className={`p-3.5 print:p-1 text-center font-bold bg-blue-50/30 ${avgColor} dark:bg-blue-900/10`}>{avg}</td>
                                     </tr>
                                 );
                             })}
@@ -299,13 +315,19 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
              </div>
 
              <div className="pt-2 sm:pt-4">
-                <div onClick={() => setIsFinalGradesOpen(!isFinalGradesOpen)} className="flex items-center gap-2 mb-3 cursor-pointer">
-                    {isFinalGradesOpen ? <ChevronUp size={18} className="text-slate-500"/> : <ChevronDown size={18} className="text-slate-500"/>}
-                    <h3 className="font-bold text-sm sm:text-xl text-slate-800 dark:text-white">{t('final_grades')}</h3>
+                <div className="flex items-center justify-between gap-2 mb-3 no-print">
+                    <div onClick={() => setIsFinalGradesOpen(!isFinalGradesOpen)} className="flex items-center gap-2 cursor-pointer">
+                        {isFinalGradesOpen ? <ChevronUp size={18} className="text-slate-500"/> : <ChevronDown size={18} className="text-slate-500"/>}
+                        <h3 className="font-bold text-sm sm:text-xl text-slate-800 dark:text-white">{t('final_grades')}</h3>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={handlePrintFinal} className="w-auto px-2.5 py-1.5 text-xs">
+                        <Printer size={14} className="sm:mr-1.5"/><span className="hidden sm:inline">{t('print')}</span>
+                    </Button>
                 </div>
-                {isFinalGradesOpen && (
+                {(isFinalGradesOpen || printSection === 'final') && (
                     <>
                         {/* Mobile Final Grades Cards */}
+                        {isFinalGradesOpen && (
                         <div className="md:hidden print:hidden space-y-2 animate-in slide-in-from-top-2">
                             {subjects.map(s => {
                                 const entry = classFinalGrades[s]?.find(e => e.studentId === user.id) || {} as FinalGradeEntry;
@@ -345,19 +367,20 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                 );
                             })}
                         </div>
+                        )}
                         {/* Desktop & Print Final Grades Table */}
-                        <div className="hidden md:block print:block bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden shadow-sm dark:bg-slate-900 dark:border-slate-800 animate-in slide-in-from-top-2">
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm text-center min-w-[600px]">
+                        <div className={`${isFinalGradesOpen ? 'hidden md:block' : 'hidden'} ${printSection === 'final' ? 'print:block' : 'print:hidden'} bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden print:overflow-visible shadow-sm dark:bg-slate-900 dark:border-slate-800 animate-in slide-in-from-top-2`}>
+                            <div className="overflow-x-auto print:overflow-visible">
+                                <table className="w-full text-sm text-center min-w-[600px] print:min-w-0">
                                     <thead className="bg-slate-100 text-slate-600 font-bold dark:bg-slate-800 dark:text-slate-300">
                                         <tr>
-                                            <th className="p-3.5 text-left">{t('subject')}</th>
-                                            <th className="p-3.5 text-slate-500 font-normal">1 {t('quarter')}</th>
-                                            <th className="p-3.5 text-slate-500 font-normal">2 {t('quarter')}</th>
-                                            <th className="p-3.5 text-slate-500 font-normal">3 {t('quarter')}</th>
-                                            <th className="p-3.5 text-slate-500 font-normal">4 {t('quarter')}</th>
-                                            <th className="p-3.5 bg-amber-50 text-amber-900 font-bold dark:bg-amber-900/20 dark:text-amber-400">{t('exam')}</th>
-                                            <th className="p-3.5 bg-green-50 text-green-800 font-bold dark:bg-green-900/20 dark:text-green-400">{t('year')}</th>
+                                            <th className="p-3.5 print:p-1.5 text-left">{t('subject')}</th>
+                                            <th className="p-3.5 print:p-1.5 text-slate-500 font-normal">1 {t('quarter')}</th>
+                                            <th className="p-3.5 print:p-1.5 text-slate-500 font-normal">2 {t('quarter')}</th>
+                                            <th className="p-3.5 print:p-1.5 text-slate-500 font-normal">3 {t('quarter')}</th>
+                                            <th className="p-3.5 print:p-1.5 text-slate-500 font-normal">4 {t('quarter')}</th>
+                                            <th className="p-3.5 print:p-1.5 bg-amber-50 text-amber-900 font-bold dark:bg-amber-900/20 dark:text-amber-400">{t('exam')}</th>
+                                            <th className="p-3.5 print:p-1.5 bg-green-50 text-green-800 font-bold dark:bg-green-900/20 dark:text-green-400">{t('year')}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-900">
@@ -371,13 +394,13 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                             const showYear = entry.isYearConfirmed ? entry.year : '—';
                                             return (
                                                 <tr key={s} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                                    <td className="p-3.5 text-left font-bold text-slate-700 dark:text-slate-200">{s}</td>
-                                                    <td className="p-3.5 font-medium text-slate-600 dark:text-slate-400">{showQ1 || '—'}</td>
-                                                    <td className="p-3.5 font-medium text-slate-600 dark:text-slate-400">{showQ2 || '—'}</td>
-                                                    <td className="p-3.5 font-medium text-slate-600 dark:text-slate-400">{showQ3 || '—'}</td>
-                                                    <td className="p-3.5 font-medium text-slate-600 dark:text-slate-400">{showQ4 || '—'}</td>
-                                                    <td className="p-3.5 font-bold bg-amber-50/30 text-amber-700 dark:bg-amber-900/10 dark:text-amber-400">{showExam || '—'}</td>
-                                                    <td className="p-3.5 font-bold bg-green-50/30 text-green-700 dark:bg-green-900/10 dark:text-green-400">{showYear || '—'}</td>
+                                                    <td className="p-3.5 print:p-1.5 text-left font-bold text-slate-700 dark:text-slate-200">{s}</td>
+                                                    <td className="p-3.5 print:p-1.5 font-medium text-slate-600 dark:text-slate-400">{showQ1 || '—'}</td>
+                                                    <td className="p-3.5 print:p-1.5 font-medium text-slate-600 dark:text-slate-400">{showQ2 || '—'}</td>
+                                                    <td className="p-3.5 print:p-1.5 font-medium text-slate-600 dark:text-slate-400">{showQ3 || '—'}</td>
+                                                    <td className="p-3.5 print:p-1.5 font-medium text-slate-600 dark:text-slate-400">{showQ4 || '—'}</td>
+                                                    <td className="p-3.5 print:p-1.5 font-bold bg-amber-50/30 text-amber-700 dark:bg-amber-900/10 dark:text-amber-400">{showExam || '—'}</td>
+                                                    <td className="p-3.5 print:p-1.5 font-bold bg-green-50/30 text-green-700 dark:bg-green-900/10 dark:text-green-400">{showYear || '—'}</td>
                                                 </tr>
                                             );
                                         })}

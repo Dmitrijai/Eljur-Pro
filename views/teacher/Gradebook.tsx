@@ -90,7 +90,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
         return schoolClasses.filter((c: any) => assignedClasses.has(`${c.class}_${c.letter}`));
    }, [schoolClasses, user.classes, localState, user.schoolId, user.id]);
 
-   const [cls, setCls] = useState(myClasses[0] ? `${myClasses[0].class}_${myClasses[0].letter}` : '');
+   const [cls, setCls] = H.useSyncedState<string>(`eljur_gb_cls_${user.id}`, myClasses[0] ? `${myClasses[0].class}_${myClasses[0].letter}` : '');
    useEffect(() => {
        if (myClasses.length > 0 && !myClasses.some((c: any) => `${c.class}_${c.letter}` === cls)) {
            setCls(`${myClasses[0].class}_${myClasses[0].letter}`);
@@ -117,30 +117,31 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
         return Array.from(new Set(assigned.filter(Boolean)));
    }, [cls, localState.teacherAssignments, user.id, user.subjects, localState, user.schoolId]);
 
-   const [subj, setSubj] = useState(''); 
+   const [subj, setSubj] = H.useSyncedState<string>(`eljur_gb_subj_${user.id}`, ''); 
    useEffect(() => { if (availableSubjects.length > 0 && !availableSubjects.includes(subj)) { setSubj(availableSubjects[0]); } }, [availableSubjects, subj]);
 
-   const [quarter, setQuarter] = useState('Q1');
-   useEffect(() => {
+   const defaultQuarter = useMemo(() => {
        if (scheduleSettings.quarterDefinitions) {
            const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0));
            const dateStr = H.dateToIso(systemNow);
            for (const qKey of ['Q1', 'Q2', 'Q3', 'Q4']) {
                const def = scheduleSettings.quarterDefinitions[qKey];
                if (def && def.start && def.end && dateStr >= def.start && dateStr <= def.end) {
-                   setQuarter(qKey);
-                   return;
+                   return qKey;
                }
            }
        }
-   }, [user.schoolId, localState.settings.systemTimeOffset]);
+       return 'Q1';
+   }, [user.schoolId, localState.settings.systemTimeOffset, scheduleSettings.quarterDefinitions]);
+
+   const [quarter, setQuarter] = H.useSyncedState<string>(`eljur_gb_quarter_${user.id}`, defaultQuarter);
 
    const [newDateToAdd, setNewDateToAdd] = useState('');
-   const [defaultGradeType, setDefaultGradeType] = useState(''); 
+   const [defaultGradeType, setDefaultGradeType] = H.useSyncedState<string>(`eljur_gb_deftype_${user.id}`, ''); 
    const [selectedGrade, setSelectedGrade] = useState<{grade: Grade, studentName: string} | null>(null);
    const [editComment, setEditComment] = useState('');
    const [editWeight, setEditWeight] = useState(1);
-   const [showFinalModal, setShowFinalModal] = useState(false);
+   const [showFinalModal, setShowFinalModal] = H.useSyncedState<boolean>(`eljur_gb_final_modal_${user.id}`, false);
    const [deadlineModal, setDeadlineModal] = useState<{isOpen: boolean, grade: Grade} | null>(null);
    const [deadlineDate, setDeadlineDate] = useState('');
    const [uiNotice, setUiNotice] = useState<string | null>(null);
@@ -474,8 +475,8 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
    const confirmFinalGrade = (studentId: string, field: 'q1' | 'q2' | 'q3' | 'q4' | 'year' | 'exam') => { const entry = getFinalData(studentId); if (field === 'q1') entry.isQ1Confirmed = true; if (field === 'q2') entry.isQ2Confirmed = true; if (field === 'q3') entry.isQ3Confirmed = true; if (field === 'q4') entry.isQ4Confirmed = true; if (field === 'exam') entry.isExamConfirmed = true; if (field === 'year') entry.isYearConfirmed = true; const newState = {...localState}; setLocalState(newState); setHasUnsavedGrades?.(false); commitGradebookChanges(newState); };
    const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0)); const todayIso = H.dateToIso(systemNow); systemNow.setHours(0,0,0,0);
 
-   const [mobileViewMode, setMobileViewMode] = useState<'by_date' | 'table'>('by_date');
-   const [selectedMobileDate, setSelectedMobileDate] = useState<string>('');
+   const [mobileViewMode, setMobileViewMode] = H.useSyncedState<'by_date' | 'table'>(`eljur_gb_mobmode_${user.id}`, 'by_date');
+   const [selectedMobileDate, setSelectedMobileDate] = H.useSyncedState<string>(`eljur_gb_mobdate_${user.id}`, '');
 
    useEffect(() => {
        if (visibleDates.length === 0) {
@@ -520,22 +521,31 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
        const typeDef = gradeTypes.find(t => (t.key === normTypeKey || t.id === normTypeKey || t.name === normTypeKey) && t.key !== 'default' && t.name !== '...');
        const isNU = typeDef?.isDynamicWeight;
        const isNoWeight = typeDef?.isNoWeight;
+       const hasGrade = Boolean(g && String(finalDisplayValue).trim() !== '');
        const effectiveWeight = g ? getEffectiveWeight(g) : 1;
-       const shouldShowWeight = useWeights && !isNoWeight && effectiveWeight > 0;
+       const shouldShowWeight = hasGrade && useWeights && !isNoWeight && effectiveWeight > 0;
        const selectedSelectVal = typeDef ? typeDef.key : 'default';
 
        return (
-           <div key={lIdx} className="flex flex-col items-center justify-center w-[70px] sm:w-[82px] max-w-full overflow-hidden border-r last:border-0 border-dashed border-slate-200 dark:border-slate-700 relative px-0.5">
-               {loops > 1 && <span className="text-[9px] text-slate-400 mb-0.5 leading-none">{lIdx + 1}</span>}
+           <div key={lIdx} className="flex flex-col items-center justify-center w-[70px] sm:w-[82px] print:w-auto print:min-w-0 max-w-full overflow-hidden border-r last:border-0 border-dashed border-slate-200 dark:border-slate-700 relative px-0.5 print:px-0">
+               {loops > 1 && <span className="text-[9px] text-slate-400 mb-0.5 leading-none print:hidden">{lIdx + 1}</span>}
                {errorMsg && (
-                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[8px] px-1 rounded z-50 pointer-events-none whitespace-nowrap shadow-sm animate-pulse" style={{ animationDuration: '0.5s' }}>
+                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[8px] px-1 rounded z-50 pointer-events-none whitespace-nowrap shadow-sm animate-pulse no-print" style={{ animationDuration: '0.5s' }}>
                        {errorMsg}
+                   </div>
+               )}
+               {hasGrade && (
+                   <div className="hidden print:inline-flex items-baseline justify-center gap-0.5 leading-none whitespace-nowrap">
+                       <span className="font-bold text-[8.5pt] text-black">{finalDisplayValue}</span>
+                       {useWeights && !isNoWeight && effectiveWeight >= 1 && (
+                           <span className="text-[6.5pt] font-medium text-slate-600">×{effectiveWeight}</span>
+                       )}
                    </div>
                )}
                <input
                    disabled={isDisabled}
                    placeholder="—"
-                   className={`w-full text-center font-bold text-sm sm:text-lg leading-tight border-none bg-transparent focus:bg-blue-50 focus:ring-0 p-0 cursor-pointer placeholder:text-slate-300 dark:placeholder:text-slate-700 ${isDisabled ? 'cursor-not-allowed text-slate-300' : ''} ${errorMsg ? 'text-red-500 line-through decoration-red-500/50' : H.getGradeColorClass(String(finalDisplayValue), minGrade, maxGrade)}`}
+                   className={`w-full text-center font-bold text-sm sm:text-lg leading-tight border-none bg-transparent focus:bg-blue-50 focus:ring-0 p-0 cursor-pointer placeholder:text-slate-300 dark:placeholder:text-slate-700 print:hidden ${isDisabled ? 'cursor-not-allowed text-slate-300' : ''} ${errorMsg ? 'text-red-500 line-through decoration-red-500/50' : H.getGradeColorClass(String(finalDisplayValue), minGrade, maxGrade)}`}
                    value={finalDisplayValue}
                    onChange={e => {
                        const rawVal = e.target.value;
@@ -585,7 +595,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                        }
                    }}
                />
-               <div className="flex items-center justify-center gap-0.5 w-full mt-0.5 overflow-hidden">
+               <div className="flex items-center justify-center gap-0.5 w-full mt-0.5 overflow-hidden print:hidden">
                    <select
                        disabled={isDisabled}
                        className="flex-1 min-w-0 max-w-full truncate text-[9px] sm:text-[10px] leading-tight h-4 sm:h-4.5 bg-white border border-slate-200 px-0.5 py-0 text-center text-slate-900 focus:text-slate-900 no-print cursor-pointer hover:bg-slate-100 rounded dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -802,24 +812,24 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
          )}
        </div>
 
-       <div className={`${mobileViewMode === 'by_date' ? 'hidden md:block print:block' : 'block'} border border-slate-200 rounded-2xl bg-white shadow-soft dark:bg-slate-900 dark:border-slate-800 overflow-hidden`}>
-         <ScrollableTableWrapper lang={lang}>
-           <table className="w-full text-center text-sm border-collapse min-w-[680px]">
+       <div className={`${mobileViewMode === 'by_date' ? 'hidden md:block print:block' : 'block'} border border-slate-200 rounded-2xl bg-white shadow-soft dark:bg-slate-900 dark:border-slate-800 overflow-hidden print:overflow-visible print:border-none`}>
+         <ScrollableTableWrapper lang={lang} maxHeightClass="max-h-none !overflow-y-visible">
+           <table className="w-full text-center text-sm border-collapse min-w-[680px] print:min-w-0">
              <thead>
                <tr>
-                 <th className="p-2 sm:p-3.5 border-b border-r bg-slate-100 text-left min-w-[115px] sm:min-w-[175px] text-slate-600 font-bold sticky top-0 left-0 z-40 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 text-xs sm:text-sm">{t('student')}</th>
+                 <th className="p-2 sm:p-3.5 print:p-1 border-b border-r bg-slate-100 text-left min-w-[115px] sm:min-w-[175px] print:min-w-0 print:w-auto text-slate-600 font-bold sticky top-0 left-0 z-40 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 text-xs sm:text-sm print:text-[7.5pt] whitespace-nowrap">{t('student')}</th>
                  {visibleDates.map(d => (
-                   <th key={d} className="p-1.5 sm:p-2 border-b border-r bg-slate-50 min-w-[96px] sm:min-w-[115px] sticky top-0 z-30 group dark:bg-slate-800 dark:border-slate-700">
+                   <th key={d} className="p-1.5 sm:p-2 print:p-0.5 border-b border-r bg-slate-50 min-w-[96px] sm:min-w-[115px] print:min-w-0 print:w-auto sticky top-0 z-30 group dark:bg-slate-800 dark:border-slate-700">
                      <div className="flex flex-col items-center justify-center gap-0.5">
-                       <div className="text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500">{H.getDayOfWeek(d, lang as 'ru' | 'en')}</div>
+                       <div className="text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500 print:hidden">{H.getDayOfWeek(d, lang as 'ru' | 'en')}</div>
                        <div className="flex items-center gap-1">
-                         <div className="text-[11px] sm:text-xs font-semibold text-slate-700 dark:text-slate-300">{H.formatDateDDMMYYYY(d)}</div>
+                         <div className="text-[11px] sm:text-xs print:text-[7pt] font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">{H.formatDateDDMMYYYY(d)}</div>
                          <button onClick={() => deleteDate(d)} className="text-slate-300 hover:text-red-500 transition no-print"><X size={12}/></button>
                        </div>
                      </div>
                    </th>
                  ))}
-                 <th className="p-2 sm:p-3.5 border-b bg-blue-50 text-blue-800 font-bold min-w-[68px] sm:min-w-[80px] sticky top-0 z-30 dark:bg-blue-950 dark:text-blue-300 dark:border-slate-700 text-center text-xs sm:text-sm">{t('average')}</th>
+                 <th className="p-2 sm:p-3.5 print:p-1 border-b bg-blue-50 text-blue-800 font-bold min-w-[68px] sm:min-w-[80px] print:min-w-0 print:w-auto sticky top-0 z-30 dark:bg-blue-950 dark:text-blue-300 dark:border-slate-700 text-center text-xs sm:text-sm print:text-[7.5pt]">{t('average')}</th>
                </tr>
              </thead>
              <tbody>
@@ -828,7 +838,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                  let wSum = 0, wCount = 0;
                  return (
                    <tr key={s.id} className="group hover:bg-slate-50 transition-colors dark:hover:bg-slate-800/50">
-                     <td className="p-2 sm:p-3.5 border-b border-r text-left font-semibold text-xs sm:text-sm text-slate-800 sticky left-0 z-20 bg-white group-hover:bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] dark:bg-slate-900 dark:group-hover:bg-slate-800 dark:text-slate-200 dark:border-slate-700 whitespace-nowrap">{H.formatShortName(s.fio)}</td>
+                     <td className="p-2 sm:p-3.5 print:p-1 border-b border-r text-left font-semibold text-xs sm:text-sm print:text-[8pt] text-slate-800 sticky left-0 z-20 bg-white group-hover:bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] dark:bg-slate-900 dark:group-hover:bg-slate-800 dark:text-slate-200 dark:border-slate-700 whitespace-nowrap">{H.formatShortName(s.fio)}</td>
                      {visibleDates.map(d => {
                        const lessonsCount = getLessonCount(d);
                        const loops = lessonsCount > 1 ? lessonsCount : 1;
@@ -847,14 +857,14 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                          }
                        });
                        return (
-                         <td key={d} className={`p-1 border-b border-r h-16 sm:h-20 relative z-0 dark:border-slate-700 ${isDisabled ? 'bg-slate-100 dark:bg-slate-950 opacity-60' : ''}`}>
-                           <div className="flex gap-1 justify-center h-full">
+                         <td key={d} className={`p-1 print:p-0.5 border-b border-r h-16 sm:h-20 print:h-auto relative z-0 dark:border-slate-700 ${isDisabled ? 'bg-slate-100 dark:bg-slate-950 opacity-60 print:opacity-100 print:bg-transparent' : ''}`}>
+                           <div className="flex gap-1 print:gap-0.5 justify-center items-center h-full">
                              {Array.from({length: loops}).map((_, lIdx) => renderGradeCellInput(s, d, lIdx, loops, isDisabled, isFuture, sGrades))}
                            </div>
                          </td>
                        );
                      })}
-                     <td className="p-2 sm:p-3.5 border-b bg-blue-50/50 font-bold text-xs sm:text-sm text-blue-700 dark:bg-blue-900/10 dark:text-blue-300 dark:border-slate-700 text-center">{wCount ? (wSum / wCount).toFixed(2) : '-'}</td>
+                     <td className="p-2 sm:p-3.5 print:p-1 border-b bg-blue-50/50 font-bold text-xs sm:text-sm print:text-[8pt] text-blue-700 dark:bg-blue-900/10 dark:text-blue-300 dark:border-slate-700 text-center">{wCount ? (wSum / wCount).toFixed(2) : '-'}</td>
                    </tr>
                  );
                })}
@@ -989,7 +999,99 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
            </div>
        </Modal>
        <Modal isOpen={!!deadlineModal} onClose={() => setDeadlineModal(null)} title={t('nu_deadline')}><div className="space-y-6"><div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-900 flex items-start gap-3"><AlertCircle className="flex-shrink-0" size={18}/><p>{t('deadline_info')}</p></div><div><label className="block text-sm font-bold text-slate-700 mb-2">{t('select_date')}</label><Input type="date" value={deadlineDate} onChange={e => setDeadlineDate(e.target.value)} /></div><div className="flex justify-end gap-2"><Button onClick={() => setDeadlineModal(null)} variant="ghost">{t('cancel')}</Button><Button onClick={saveDeadline} variant="primary">{t('save')}</Button></div></div></Modal>
-       <Modal isOpen={showFinalModal} onClose={() => setShowFinalModal(false)} title={t('final_attestation')} maxWidth="max-w-5xl"><div className="overflow-x-auto"><table className="w-full text-xs sm:text-sm text-center min-w-[540px] border-collapse"><thead className="bg-slate-50 text-slate-600 font-bold dark:bg-slate-800 dark:text-slate-300"><tr><th className="p-2 sm:p-3 text-left sticky left-0 z-30 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)]">{t('student')}</th>{['Q1', 'Q2', 'Q3', 'Q4'].map(q => <th key={q} className="p-2 sm:p-3">{quarterLabels[q]} {t('q_short')}</th>)}<th className="p-2 sm:p-3">{t('exam')}</th><th className="p-2 sm:p-3">{t('year')}</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{students.map(s => { const entry = getFinalData(s.id); const yearAvg = calculateYearAverage(s.id); const renderCell = (field: 'q1'|'q2'|'q3'|'q4'|'exam'|'year', label: string, isConfirmed?: boolean, status?: { val: string | null, isNA: boolean }) => { const storedVal = (entry as any)[field]; const autoVal = status ? status.val : null; const isNA = status ? status.isNA : false; const isPlaceholder = !storedVal && !!autoVal; const canConfirmYear = field === 'year' ? (entry.q1 && entry.q2 && entry.q3 && entry.q4) : true; return (<td className="p-1.5 sm:p-2 relative z-0"><div className="flex flex-col items-center gap-1"><div className="relative group/cell"><input className={`w-10 sm:w-12 text-center border rounded p-1 text-xs sm:text-sm font-bold transition-all ${isConfirmed ? 'bg-white border-slate-200 text-slate-800 dark:bg-slate-900 dark:text-white dark:border-slate-700' : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800'} ${isPlaceholder ? 'opacity-50' : ''}`} value={storedVal || ''} placeholder={isPlaceholder ? autoVal! : ''} onChange={e => updateFinalGrade(s.id, field, e.target.value)} />{(!isConfirmed && (storedVal || autoVal)) && canConfirmYear && (<button onClick={() => { if (!storedVal && autoVal) { const parsedAuto = parseFloat(autoVal); const finalAuto = !isNaN(parsedAuto) ? String(Math.max(minGrade, Math.min(maxGrade, Math.round(parsedAuto)))) : autoVal; updateFinalGrade(s.id, field, finalAuto); } confirmFinalGrade(s.id, field); }} title={t('confirm_grade')} className="absolute -right-5 top-1/2 -translate-y-1/2 text-green-500 hover:text-green-600 bg-white dark:bg-slate-800 rounded-full shadow-sm p-0.5"><Check size={13} strokeWidth={3}/></button>)}</div>{!storedVal && isNA && (<span className="text-[10px] text-red-500 font-bold leading-none">Н/А</span>)}{autoVal && !storedVal && !isNA && <span className="text-[9px] text-slate-400" title={t('calc_grade')}>~{autoVal}</span>}</div></td>); }; return (<tr key={s.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50"><td className="p-2 sm:p-3 text-left font-semibold text-slate-700 dark:text-slate-200 sticky left-0 z-20 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] whitespace-nowrap">{H.formatShortName(s.fio)}</td>{['q1', 'q2', 'q3', 'q4'].map(qKey => { const status = calculateQuarterStatus(s.id, qKey.toUpperCase()); const isConf = (entry as any)[`is${qKey.charAt(0).toUpperCase() + qKey.slice(1)}Confirmed`]; return (<React.Fragment key={qKey}>{renderCell(qKey as any, qKey.toUpperCase(), isConf, status)}</React.Fragment>)})}{renderCell('exam', t('exam'), entry.isExamConfirmed, undefined)}{renderCell('year', t('year'), entry.isYearConfirmed, { val: yearAvg, isNA: false })}</tr>)})}</tbody></table></div><div className="mt-4 sm:mt-6 flex justify-end"><Button onClick={() => setShowFinalModal(false)} variant="secondary">{t('close')}</Button></div></Modal>
+       <Modal isOpen={showFinalModal} onClose={() => setShowFinalModal(false)} title={`${t('final_attestation')}: ${cls.replace('_', '')} — ${subj}`} maxWidth="max-w-5xl">
+           <div className="hidden print:block pb-2 mb-3 border-b border-slate-300 text-center">
+               <div className="text-xs font-bold uppercase tracking-widest text-slate-600">{H.getSchool(localState, user.schoolId)?.name || 'ЭлЖур'}</div>
+               <div className="text-xs text-slate-600 mt-0.5">{t('teacher')}: {H.formatShortName(user.fio)}</div>
+           </div>
+           <div className="flex items-center justify-between gap-2 mb-3 no-print">
+               <div className="text-xs text-slate-500 dark:text-slate-400">
+                   {lang === 'ru' ? `Класс: ${cls.replace('_', '')} • Предмет: ${subj}` : `Class: ${cls.replace('_', '')} • Subject: ${subj}`}
+               </div>
+               <Button variant="secondary" size="sm" onClick={() => window.print()} className="px-2.5 py-1.5 text-xs">
+                   <Printer size={14} className="mr-1.5"/> {t('print')}
+               </Button>
+           </div>
+           <div className="overflow-x-auto print:overflow-visible">
+               <table className="w-full text-xs sm:text-sm text-center min-w-[540px] print:min-w-0 border-collapse">
+                   <thead className="bg-slate-50 text-slate-600 font-bold dark:bg-slate-800 dark:text-slate-300">
+                       <tr>
+                           <th className="p-2 sm:p-3 text-left sticky left-0 z-30 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)]">{t('student')}</th>
+                           {['Q1', 'Q2', 'Q3', 'Q4'].map(q => <th key={q} className="p-2 sm:p-3">{quarterLabels[q]} {t('q_short')}</th>)}
+                           <th className="p-2 sm:p-3">{t('exam')}</th>
+                           <th className="p-2 sm:p-3">{t('year')}</th>
+                       </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                       {students.map(s => {
+                           const entry = getFinalData(s.id);
+                           const yearAvg = calculateYearAverage(s.id);
+                           const renderCell = (field: 'q1'|'q2'|'q3'|'q4'|'exam'|'year', label: string, isConfirmed?: boolean, status?: { val: string | null, isNA: boolean }) => {
+                               const storedVal = (entry as any)[field];
+                               const autoVal = status ? status.val : null;
+                               const isNA = status ? status.isNA : false;
+                               const isPlaceholder = !storedVal && !!autoVal;
+                               const canConfirmYear = field === 'year' ? (entry.q1 && entry.q2 && entry.q3 && entry.q4) : true;
+                               const printDisplay = storedVal || (isNA ? 'Н/А' : '—');
+                               return (
+                                   <td className="p-1.5 sm:p-2 relative z-0">
+                                       <span className="hidden print:inline font-bold text-black">{printDisplay}</span>
+                                       <div className="flex flex-col items-center gap-1 print:hidden">
+                                           <div className="relative group/cell">
+                                               <input
+                                                   className={`w-10 sm:w-12 text-center border rounded p-1 text-xs sm:text-sm font-bold transition-all ${isConfirmed ? 'bg-white border-slate-200 text-slate-800 dark:bg-slate-900 dark:text-white dark:border-slate-700' : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800'} ${isPlaceholder ? 'opacity-50' : ''}`}
+                                                   value={storedVal || ''}
+                                                   placeholder={isPlaceholder ? autoVal! : ''}
+                                                   onChange={e => updateFinalGrade(s.id, field, e.target.value)}
+                                               />
+                                               {(!isConfirmed && (storedVal || autoVal)) && canConfirmYear && (
+                                                   <button
+                                                       onClick={() => {
+                                                           if (!storedVal && autoVal) {
+                                                               const parsedAuto = parseFloat(autoVal);
+                                                               const finalAuto = !isNaN(parsedAuto) ? String(Math.max(minGrade, Math.min(maxGrade, Math.round(parsedAuto)))) : autoVal;
+                                                               updateFinalGrade(s.id, field, finalAuto);
+                                                           }
+                                                           confirmFinalGrade(s.id, field);
+                                                       }}
+                                                       title={t('confirm_grade')}
+                                                       className="absolute -right-5 top-1/2 -translate-y-1/2 text-green-500 hover:text-green-600 bg-white dark:bg-slate-800 rounded-full shadow-sm p-0.5 no-print"
+                                                   >
+                                                       <Check size={13} strokeWidth={3}/>
+                                                   </button>
+                                               )}
+                                           </div>
+                                           {!storedVal && isNA && (
+                                               <span className="text-[10px] text-red-500 font-bold leading-none">Н/А</span>
+                                           )}
+                                           {autoVal && !storedVal && !isNA && <span className="text-[9px] text-slate-400" title={t('calc_grade')}>~{autoVal}</span>}
+                                       </div>
+                                   </td>
+                               );
+                           };
+                           return (
+                               <tr key={s.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                   <td className="p-2 sm:p-3 text-left font-semibold text-slate-700 dark:text-slate-200 sticky left-0 z-20 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] whitespace-nowrap">{H.formatShortName(s.fio)}</td>
+                                   {['q1', 'q2', 'q3', 'q4'].map(qKey => {
+                                       const status = calculateQuarterStatus(s.id, qKey.toUpperCase());
+                                       const isConf = (entry as any)[`is${qKey.charAt(0).toUpperCase() + qKey.slice(1)}Confirmed`];
+                                       return (<React.Fragment key={qKey}>{renderCell(qKey as any, qKey.toUpperCase(), isConf, status)}</React.Fragment>);
+                                   })}
+                                   {renderCell('exam', t('exam'), entry.isExamConfirmed, undefined)}
+                                   {renderCell('year', t('year'), entry.isYearConfirmed, { val: yearAvg, isNA: false })}
+                               </tr>
+                           );
+                       })}
+                   </tbody>
+               </table>
+           </div>
+           <div className="mt-4 sm:mt-6 flex justify-end gap-2 no-print">
+               <Button onClick={() => window.print()} variant="secondary">
+                   <Printer size={14} className="mr-1.5"/> {t('print')}
+               </Button>
+               <Button onClick={() => setShowFinalModal(false)} variant="secondary">{t('close')}</Button>
+           </div>
+       </Modal>
      </div>
    );
 }

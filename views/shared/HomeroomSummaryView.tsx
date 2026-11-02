@@ -33,11 +33,13 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
   const isDirector = user.role === 'director' || (user.role as string) === 'creator';
   const availableClasses = isDirector && leadingClasses.length === 0 ? schoolClasses : (leadingClasses.length > 0 ? leadingClasses : schoolClasses);
 
-  const [selectedClassKey, setSelectedClassKey] = useState<string>(() => {
+  const defaultHomeroomClassKey = useMemo(() => {
     if (leadingClasses.length > 0) return `${leadingClasses[0].class}_${leadingClasses[0].letter}`;
     if (schoolClasses.length > 0) return `${schoolClasses[0].class}_${schoolClasses[0].letter}`;
     return '';
-  });
+  }, [leadingClasses, schoolClasses]);
+
+  const [selectedClassKey, setSelectedClassKey] = H.useSyncedState<string>(`eljur_hr_cls_${user.id}`, defaultHomeroomClassKey);
 
   React.useEffect(() => {
     if (availableClasses.length > 0 && !availableClasses.some(c => `${c.class}_${c.letter}` === selectedClassKey)) {
@@ -45,8 +47,8 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
     }
   }, [availableClasses, selectedClassKey]);
 
-  const [selectedQuarter, setSelectedQuarter] = useState<'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedQuarter, setSelectedQuarter] = H.useSyncedState<'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>(`eljur_hr_q_${user.id}`, 'all');
+  const [searchQuery, setSearchQuery] = H.useSyncedState<string>(`eljur_hr_search_${user.id}`, '');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   const [selectedClassNum, selectedClassLetter] = selectedClassKey ? selectedClassKey.split('_') : ['', ''];
@@ -371,16 +373,16 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
 
       {/* Desktop & Print Matrix Table */}
       <Card className="hidden md:block print:block p-0 border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm print:border-none print:shadow-none print:m-0 print:p-0 print:overflow-visible">
-        <ScrollableTableWrapper lang={lang}>
-          <table className="w-full text-sm min-w-[800px] border-collapse print:text-[10px] print:min-w-0">
+        <ScrollableTableWrapper lang={lang} maxHeightClass="max-h-none !overflow-y-visible">
+          <table className="w-full text-sm min-w-[800px] border-collapse print:text-[8.5pt] print:min-w-0">
             <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 print:bg-white print:border-b-2 print:border-black">
               <tr>
-                <th className="p-3.5 text-center w-12 font-bold sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 print:p-2">№</th>
-                <th className="p-3.5 text-left font-bold border-r border-slate-200 dark:border-slate-800 print:border-slate-300 print:p-2 sticky top-0 left-0 bg-slate-50 dark:bg-slate-900 z-30 print:static">{t('fio')}</th>
-                <th className="p-3.5 text-center font-black text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-800 sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 print:border-slate-300 print:p-2">GPA</th>
+                <th className="p-3.5 text-center w-12 print:w-6 font-bold sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 print:p-1">№</th>
+                <th className="p-3.5 text-left font-bold border-r border-slate-200 dark:border-slate-800 print:border-slate-300 print:p-1 sticky top-0 left-0 bg-slate-50 dark:bg-slate-900 z-30 print:static whitespace-nowrap">{t('fio')}</th>
+                <th className="p-3.5 text-center font-black text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-800 sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 print:border-slate-300 print:p-1">GPA</th>
                 {subjects.map(s => (
-                  <th key={s} className="p-3 text-center min-w-[80px] font-semibold border-r border-slate-200 dark:border-slate-800 sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 print:border-slate-300 print:p-1 print:min-w-0" title={s}>
-                    <div className="mx-auto truncate max-w-[80px] print:max-w-none print:whitespace-normal print:overflow-visible print:text-[9px] print:leading-tight">{s}</div>
+                  <th key={s} className="p-3 text-center min-w-[80px] font-semibold border-r border-slate-200 dark:border-slate-800 sticky top-0 z-20 bg-slate-50 dark:bg-slate-900 print:border-slate-300 print:p-0.5 print:min-w-0" title={s}>
+                    <div className="mx-auto truncate max-w-[80px] print:max-w-none print:whitespace-normal print:overflow-visible print:text-[7.5pt] print:leading-tight">{s}</div>
                   </th>
                 ))}
               </tr>
@@ -392,35 +394,35 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
                 
                 return (
                   <tr key={student.id} className={`${rowBg} cursor-pointer print:break-inside-avoid`} onClick={() => setSelectedStudentId(student.id)}>
-                    <td className="p-3.5 text-center text-slate-400 font-mono print:p-2">{idx + 1}</td>
-                    <td className="p-3.5 text-left font-bold text-slate-800 dark:text-slate-200 border-r border-slate-100 dark:border-slate-800 print:border-slate-300 sticky left-0 bg-inherit z-10 print:static print:p-2">
-                      <span className="truncate block w-44 print:w-auto">{H.formatShortName(student.fio)}</span>
+                    <td className="p-3.5 text-center text-slate-400 font-mono print:p-1">{idx + 1}</td>
+                    <td className="p-3.5 text-left font-bold text-slate-800 dark:text-slate-200 border-r border-slate-100 dark:border-slate-800 print:border-slate-300 sticky left-0 bg-inherit z-10 print:static print:p-1">
+                      <span className="truncate block w-44 print:w-auto whitespace-nowrap">{H.formatShortName(student.fio)}</span>
                     </td>
-                    <td className="p-3.5 text-center font-bold text-slate-900 dark:text-white border-r border-slate-100 dark:border-slate-800 print:border-slate-300 bg-slate-50/50 dark:bg-slate-900/50 print:bg-white print:p-2">
+                    <td className="p-3.5 text-center font-bold text-slate-900 dark:text-white border-r border-slate-100 dark:border-slate-800 print:border-slate-300 bg-slate-50/50 dark:bg-slate-900/50 print:bg-white print:p-1">
                       {summary?.overallGpa || '-'}
                     </td>
 
                     {subjects.map(subj => {
                       const sData = summary?.subjects[subj];
-                      if (!sData) return <td key={subj} className="p-3.5 text-center text-slate-300 border-r border-slate-100 dark:border-slate-800 print:border-slate-300 print:p-2">-</td>;
+                      if (!sData) return <td key={subj} className="p-3.5 text-center text-slate-300 border-r border-slate-100 dark:border-slate-800 print:border-slate-300 print:p-1">-</td>;
 
                       if (selectedQuarter === 'all') {
                         return (
-                          <td key={subj} className="p-2 text-center border-r border-slate-100 dark:border-slate-800 print:border-slate-300 print:p-1.5 align-middle">
-                            <div className="flex flex-col items-center justify-center gap-1">
-                              <div className="flex gap-0.5 w-full justify-center">
+                          <td key={subj} className="p-2 text-center border-r border-slate-100 dark:border-slate-800 print:border-slate-300 print:p-0.5 align-middle">
+                            <div className="flex flex-col items-center justify-center gap-1 print:gap-0.5">
+                              <div className="flex gap-0.5 print:gap-0 w-full justify-center">
                                 {(['q1', 'q2', 'q3', 'q4'] as const).map(qKey => {
                                   const gradeVal = sData[`${qKey}Grade` as keyof typeof sData];
                                   const avgVal = sData[`${qKey}Avg` as keyof typeof sData];
                                   return (
-                                    <div key={qKey} title={`${qKey.toUpperCase()}: ${gradeVal || avgVal || '-'}`} className="w-5 h-5 flex items-center justify-center text-[10px] font-bold rounded-sm bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 print:border print:border-slate-200">
+                                    <div key={qKey} title={`${qKey.toUpperCase()}: ${gradeVal || avgVal || '-'}`} className="w-5 h-5 print:w-3.5 print:h-3.5 flex items-center justify-center text-[10px] print:text-[6.5pt] font-bold rounded-sm bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 print:border print:border-slate-200">
                                       {gradeVal || (avgVal && avgVal !== '-' ? Math.round(parseFloat(avgVal)) : '·')}
                                     </div>
                                   );
                                 })}
                               </div>
                               {sData.yearGrade || sData.yearAvg !== '-' ? (
-                                <div className={`px-2 py-0.5 text-[11px] font-black rounded ${sData.yearGrade ? H.getGradeColorClass(sData.yearGrade, minGrade, maxGrade) : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'} print:border print:border-black print:bg-white print:text-black`}>
+                                <div className={`px-2 print:px-1 py-0.5 print:py-0 text-[11px] print:text-[7.5pt] font-black rounded ${sData.yearGrade ? H.getGradeColorClass(sData.yearGrade, minGrade, maxGrade) : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'} print:border print:border-black print:bg-white print:text-black`}>
                                   {sData.yearGrade || sData.yearAvg}
                                 </div>
                               ) : null}
@@ -433,17 +435,17 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
                         const avgVal = sData[`${qKey}Avg` as keyof typeof sData];
                         
                         return (
-                          <td key={subj} className="p-2.5 text-center border-r border-slate-100 dark:border-slate-800 print:border-slate-300 align-middle">
-                            <div className="flex flex-col items-center gap-1">
+                          <td key={subj} className="p-2.5 print:p-1 text-center border-r border-slate-100 dark:border-slate-800 print:border-slate-300 align-middle">
+                            <div className="flex flex-col items-center gap-1 print:gap-0.5">
                               {gradeVal ? (
-                                <div className={`w-7 h-7 flex items-center justify-center rounded-lg font-black text-xs ${H.getGradeColorClass(gradeVal, minGrade, maxGrade)} print:border print:border-black print:bg-white print:text-black`}>
+                                <div className={`w-7 h-7 print:w-5 print:h-5 flex items-center justify-center rounded-lg font-black text-xs print:text-[8pt] ${H.getGradeColorClass(gradeVal, minGrade, maxGrade)} print:border print:border-black print:bg-white print:text-black`}>
                                   {gradeVal}
                                 </div>
                               ) : (
-                                <div className="w-7 h-7 flex items-center justify-center text-slate-300">—</div>
+                                <div className="w-7 h-7 print:w-5 print:h-5 flex items-center justify-center text-slate-300">—</div>
                               )}
                               {avgVal && avgVal !== '-' && (
-                                <div className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                <div className="text-[10px] print:text-[6.5pt] font-medium text-slate-500 dark:text-slate-400">
                                   ср. {avgVal}
                                 </div>
                               )}

@@ -12,15 +12,13 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
     const lang = state.settings.language || 'ru';
     const t = (k: string) => H.t(k, lang);
     const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
-    const [scheduleWeekStart, setScheduleWeekStart] = useState<Date>(H.getStartOfWeek(systemNow));
+    const defaultWeekIso = H.dateToIso(H.getStartOfWeek(systemNow));
+    const [scheduleWeekIso, setScheduleWeekIso] = H.useSyncedState<string>(`eljur_st_sched_week_${user.id}`, defaultWeekIso);
+    const scheduleWeekStart = new Date(scheduleWeekIso || defaultWeekIso);
 
-    useEffect(() => {
-        setScheduleWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
-    }, [state.settings.systemTimeOffset]);
-
-    const goPrevWeek = () => setScheduleWeekStart(d => H.addDays(d, -7));
-    const goNextWeek = () => setScheduleWeekStart(d => H.addDays(d, 7));
-    const goCurrentWeek = () => setScheduleWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
+    const goPrevWeek = () => setScheduleWeekIso(H.dateToIso(H.addDays(scheduleWeekStart, -7)));
+    const goNextWeek = () => setScheduleWeekIso(H.dateToIso(H.addDays(scheduleWeekStart, 7)));
+    const goCurrentWeek = () => setScheduleWeekIso(H.dateToIso(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)))));
 
     const scheduleDays = Object.values(schedule).filter(d => H.isDateInWeek(d.date, scheduleWeekStart)).sort((a,b) => a.date.localeCompare(b.date));
     const scheduleDates = scheduleDays.map(d => d.date);
@@ -124,8 +122,22 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
                     )}
                   </div>
                   {/* Desktop & Print Table */}
-                  <div className="hidden md:block print:block p-0 bg-white/50 dark:bg-slate-900/50 overflow-x-auto">
-                    <table className="w-full text-sm min-w-[500px]"><thead className="bg-white border-b border-slate-100 text-slate-500 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"><tr><th className="p-3 w-32 text-center border-r border-slate-100 dark:border-slate-800">{t('time')}</th><th className="p-3 text-center">{t('subject')}</th><th className="p-3 w-32 text-center border-l border-slate-100 dark:border-slate-800">{t('cabinet')}</th><th className="p-3 text-center border-l border-slate-100 dark:border-slate-800">{t('teacher')}</th></tr></thead>
+                  <div className="hidden md:block print:block p-0 bg-white/50 dark:bg-slate-900/50 overflow-x-auto print:overflow-visible">
+                    <table className="w-full text-sm table-fixed min-w-[500px] print:min-w-0">
+                      <colgroup>
+                        <col className="w-[18%]" />
+                        <col className="w-[42%]" />
+                        <col className="w-[15%]" />
+                        <col className="w-[25%]" />
+                      </colgroup>
+                      <thead className="bg-white border-b border-slate-100 text-slate-500 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400">
+                        <tr>
+                          <th className="p-3 w-[18%] text-center border-r border-slate-100 dark:border-slate-800">{t('time')}</th>
+                          <th className="p-3 w-[42%] text-center">{t('subject')}</th>
+                          <th className="p-3 w-[15%] text-center border-l border-slate-100 dark:border-slate-800">{t('cabinet')}</th>
+                          <th className="p-3 w-[25%] text-center border-l border-slate-100 dark:border-slate-800">{t('teacher')}</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                         {day.lessons.map(l => {
                             let displaySubject = l.lesson;
@@ -158,8 +170,8 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
                             const displayTeacherName = teacher ? H.formatShortName(teacher.fio) : (teacherId ? t('unknown') : (isUnassigned ? '—' : '-'));
                             return (
                                 <tr key={l.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                                    <td className="p-3 text-center font-mono text-xs text-slate-500 border-r border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.timeRange}</td>
-                                    <td className="p-3 text-center font-semibold text-slate-800 dark:text-slate-200">
+                                    <td className="p-3 w-[18%] text-center font-mono text-xs text-slate-500 border-r border-slate-50 dark:text-slate-400 dark:border-slate-800">{l.timeRange}</td>
+                                    <td className="p-3 w-[42%] text-center font-semibold text-slate-800 dark:text-slate-200">
                                         {displaySubject}
                                         {displayTeacherLabel && (
                                             <div className={`text-[10px] font-bold mt-0.5 ${isUnassigned ? 'text-amber-500' : 'text-amber-600'}`}>
@@ -167,8 +179,8 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
                                             </div>
                                         )}
                                     </td>
-                                    <td className="p-3 text-center text-slate-600 border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">{displayRoom}</td>
-                                    <td className="p-3 text-center text-slate-600 border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">{displayTeacherName}</td>
+                                    <td className="p-3 w-[15%] text-center text-slate-600 border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">{displayRoom}</td>
+                                    <td className="p-3 w-[25%] text-center text-slate-600 border-l border-slate-50 dark:text-slate-400 dark:border-slate-800">{displayTeacherName}</td>
                                 </tr>
                             );
                         })}

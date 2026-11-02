@@ -9,10 +9,10 @@ import * as DB from '../../services/db';
 
 export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false }: { state: AppState, onUpdate: (s: AppState) => void, currentUser: User, isGlobal?: boolean }) => {
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-    const [sortField, setSortField] = useState<keyof User | 'class' | 'default'>('fio');
-    const [filterClass, setFilterClass] = useState('');
-    const [filterRole, setFilterRole] = useState('');
-    const [filterSchool, setFilterSchool] = useState('');
+    const [sortField, setSortField] = H.useSyncedState<keyof User | 'class' | 'default'>(`eljur_um_sort_${currentUser.id}`, 'fio');
+    const [filterClass, setFilterClass] = H.useSyncedState<string>(`eljur_um_cls_${currentUser.id}`, '');
+    const [filterRole, setFilterRole] = H.useSyncedState<string>(`eljur_um_role_${currentUser.id}`, '');
+    const [filterSchool, setFilterSchool] = H.useSyncedState<string>(`eljur_um_sch_${currentUser.id}`, '');
     const [highlightId, setHighlightId] = useState<string | null>(null);
     const [blockingUserId, setBlockingUserId] = useState<string | null>(null);
     const [roleInputOpen, setRoleInputOpen] = useState<Record<string, boolean>>({});

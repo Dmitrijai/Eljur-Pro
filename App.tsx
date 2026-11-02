@@ -633,13 +633,91 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>(defaultState);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'dashboard' | 'settings'>('dashboard');
+  const [viewMode, setViewMode] = H.useSyncedState<'dashboard' | 'settings'>(
+    currentUser ? `eljur_view_mode_${currentUser.id}` : 'eljur_view_mode_guest',
+    'dashboard'
+  );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showEljurInfo, setShowEljurInfo] = useState(false);
   const [showEmptyEduResourceModal, setShowEmptyEduResourceModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [customFonts, setCustomFonts] = useState<{name: string, displayName: string}[]>([]);
   const [dbError, setDbError] = useState<string | null>(null);
+
+  const currentUserRef = useRef<User | null>(null);
+  currentUserRef.current = currentUser;
+  const appStateRef = useRef<AppState>(appState);
+  appStateRef.current = appState;
+
+  // Cross-tab synchronization for login/logout and state updates
+  useEffect(() => {
+    const syncSessionFromStorage = () => {
+      const sessionStr = localStorage.getItem('eljur_session');
+      if (!sessionStr) {
+        if (currentUserRef.current !== null) {
+          DB.setCurrentSessionUser(null);
+          setCurrentUser(null);
+          setShowLogoutConfirm(false);
+        }
+        return;
+      }
+      try {
+        const session = JSON.parse(sessionStr);
+        if (!session || (session.expires && session.expires <= Date.now())) {
+          if (currentUserRef.current !== null) {
+            DB.setCurrentSessionUser(null);
+            setCurrentUser(null);
+            setShowLogoutConfirm(false);
+          }
+          return;
+        }
+        const targetId = session.userId || session.user?.id;
+        if (targetId && currentUserRef.current?.id !== targetId) {
+          const foundUser =
+            (appStateRef.current?.users || []).find((u: any) => u.id === targetId) ||
+            session.user ||
+            defaultState.users.find((u: any) => u.id === targetId);
+          if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= new Date())) {
+            DB.setCurrentSessionUser(foundUser);
+            setCurrentUser(foundUser);
+            setShowLogoutConfirm(false);
+          }
+        }
+      } catch (e) {}
+    };
+
+    const unsubCrossTab = H.subscribeCrossTabSync((msg) => {
+      if (msg.type === 'SESSION_CHANGE') {
+        if (!msg.value) {
+          DB.setCurrentSessionUser(null);
+          setCurrentUser(null);
+          setShowLogoutConfirm(false);
+        } else {
+          const targetId = msg.value.userId || msg.value.user?.id || msg.value.id;
+          const foundUser =
+            (appStateRef.current?.users || []).find((u: any) => u.id === targetId) ||
+            msg.value.user ||
+            (msg.value.role ? msg.value : null) ||
+            defaultState.users.find((u: any) => u.id === targetId);
+          if (foundUser) {
+            DB.setCurrentSessionUser(foundUser);
+            setCurrentUser(foundUser);
+            setShowLogoutConfirm(false);
+          }
+        }
+      } else if (msg.type === 'STATE_UPDATE' && msg.value) {
+        setAppState(msg.value as AppState);
+      }
+    });
+
+    window.addEventListener('focus', syncSessionFromStorage);
+    document.addEventListener('visibilitychange', syncSessionFromStorage);
+    return () => {
+      unsubCrossTab();
+      window.removeEventListener('focus', syncSessionFromStorage);
+      document.removeEventListener('visibilitychange', syncSessionFromStorage);
+    };
+  }, []);
 
   // Subscribe to database error notifications
   useEffect(() => {
@@ -1111,6 +1189,7 @@ export default function App() {
     };
     setAppState(clonedState);
     pendingStateRef.current = clonedState;
+    H.emitCrossTabSync('STATE_UPDATE', 'appState', clonedState);
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -1148,7 +1227,9 @@ export default function App() {
     const safeSessionUser = { ...u };
     delete (safeSessionUser as any).password;
     const expires = Date.now() + 60 * 60 * 1000;
-    localStorage.setItem('eljur_session', JSON.stringify({ userId: u.id, user: safeSessionUser, expires, viewMode: 'dashboard' }));
+    const sessionPayload = { userId: u.id, user: safeSessionUser, expires, viewMode: 'dashboard' };
+    localStorage.setItem('eljur_session', JSON.stringify(sessionPayload));
+    H.emitCrossTabSync('SESSION_CHANGE', 'eljur_session', sessionPayload);
     
     const school = appState?.schools.find(s => s.id === u.schoolId);
     if (school) {
@@ -1160,6 +1241,7 @@ export default function App() {
     setCurrentUser(null);
     setViewMode('dashboard');
     localStorage.removeItem('eljur_session');
+    H.emitCrossTabSync('SESSION_CHANGE', 'eljur_session', null);
   };
 
   const currentSchool = appState?.schools.find(s => s.id === currentUser?.schoolId);

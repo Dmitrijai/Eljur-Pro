@@ -6,8 +6,8 @@ import { Layers, ArrowLeft, ArrowRight, UserPlus } from 'lucide-react';
 
 export const GroupManager = ({ state, onUpdate, user }: { state: AppState, onUpdate: (s: AppState) => void, user: import("../../types").User }) => {
     const schoolClasses = H.getSchoolClasses(state, user.schoolId);
-    const [selectedClass, setSelectedClass] = useState(schoolClasses[0] ? `${schoolClasses[0].class}_${schoolClasses[0].letter}` : '');
-    const [groupCount, setGroupCount] = useState(2);
+    const [selectedClass, setSelectedClass] = H.useSyncedState<string>(`eljur_gm_cls_${user.id}`, schoolClasses[0] ? `${schoolClasses[0].class}_${schoolClasses[0].letter}` : '');
+    const [groupCount, setGroupCount] = H.useSyncedState<number>(`eljur_gm_cnt_${user.id}`, 2);
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const lang = state.settings.language || 'ru';
     const t = (k: string) => H.t(k, lang);

@@ -29,7 +29,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
         return schoolClasses.filter((c: any) => assignedClasses.has(`${c.class}_${c.letter}`));
    }, [schoolClasses, user.classes, state, user.id, user.schoolId]);
 
-   const [cls, setCls] = useState(myClasses[0] ? `${myClasses[0].class}_${myClasses[0].letter}` : '');
+   const [cls, setCls] = H.useSyncedState<string>(`eljur_hw_cls_${user.id}`, myClasses[0] ? `${myClasses[0].class}_${myClasses[0].letter}` : '');
    useEffect(() => {
        if (myClasses.length > 0 && !myClasses.some((c: any) => `${c.class}_${c.letter}` === cls)) {
            setCls(`${myClasses[0].class}_${myClasses[0].letter}`);
@@ -53,15 +53,15 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
         return Array.from(new Set(assigned.filter(Boolean)));
    }, [cls, state.teacherAssignments, user.id, user.subjects, state, user.schoolId]);
 
-   const [subj, setSubj] = useState('');
+   const [subj, setSubj] = H.useSyncedState<string>(`eljur_hw_subj_${user.id}`, '');
    useEffect(() => { if (availableSubjects.length > 0 && !availableSubjects.includes(subj)) { setSubj(availableSubjects[0]); } }, [availableSubjects, subj]);
 
-   const [date, setDate] = useState('');
+   const [date, setDate] = H.useSyncedState<string>(`eljur_hw_date_${user.id}`, '');
    const [text, setText] = useState('');
    const [files, setFiles] = useState<File[]>([]);
    const [existingAttachments, setExistingAttachments] = useState<Attachment[]>([]);
-   const [lessonIndex, setLessonIndex] = useState<number>(0);
-   const [historyClassFilter, setHistoryClassFilter] = useState('');
+   const [lessonIndex, setLessonIndex] = H.useSyncedState<number>(`eljur_hw_lidx_${user.id}`, 0);
+   const [historyClassFilter, setHistoryClassFilter] = H.useSyncedState<string>(`eljur_hw_hist_cls_${user.id}`, '');
    const [editId, setEditId] = useState<string | null>(null);
    const t = (k: string) => H.t(k, lang);
 
@@ -151,10 +151,10 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
       onUpdate({ ...state });
    };
 
-   const filteredHistory = (state.homework || [])
+   const filteredHistory = [...(state.homework || [])]
      .filter((h: any) => h.fromId === user.id && (!h.schoolId || !user.schoolId || h.schoolId === user.schoolId))
      .filter((h: any) => historyClassFilter ? `${h.class}_${h.letter}` === historyClassFilter : true)
-     .reverse();
+     .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
 
    return (
      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">

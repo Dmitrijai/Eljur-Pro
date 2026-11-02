@@ -14,15 +14,9 @@ export default function TeacherDashboard({ state, onUpdate, user, mobileMenuOpen
   const leadingClasses = H.getUserLeadingClasses(state, user.schoolId, user.id);
   const hasHomeroom = leadingClasses.length > 0;
 
-  const [view, setView] = useState<'schedule' | 'homework' | 'grades' | 'rating' | 'homeroom' | 'messages' | 'announcements'>(() => {
-    return (localStorage.getItem(`eljur_tab_${user.id}`) as any) || 'schedule';
-  });
+  const [view, setView] = H.useSyncedState<'schedule' | 'homework' | 'grades' | 'rating' | 'homeroom' | 'messages' | 'announcements'>(`eljur_tab_${user.id}`, 'schedule');
   const [hasUnsavedGrades, setHasUnsavedGrades] = useState(false);
   const [pendingView, setPendingView] = useState<any>(null);
-
-  React.useEffect(() => {
-    localStorage.setItem(`eljur_tab_${user.id}`, view);
-  }, [view, user.id]);
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 

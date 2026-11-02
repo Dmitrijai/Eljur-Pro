@@ -19,16 +19,10 @@ interface Props {
 }
 
 export default function CreatorDashboard({ state, onUpdate, user, mobileMenuOpen, setMobileMenuOpen }: Props) {
-  const [view, setView] = useState<'analytics' | 'schools' | 'users' | 'rating' | 'messages' | 'eljurInfo'>(() => {
-    return (localStorage.getItem(`eljur_tab_${user.id}`) as any) || 'analytics';
-  });
+  const [view, setView] = H.useSyncedState<'analytics' | 'schools' | 'users' | 'rating' | 'messages' | 'eljurInfo'>(`eljur_tab_${user.id}`, 'analytics');
   const [pendingView, setPendingView] = useState<typeof view | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
-  
-  React.useEffect(() => {
-    localStorage.setItem(`eljur_tab_${user.id}`, view);
-  }, [view, user.id]);
   
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);

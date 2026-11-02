@@ -912,7 +912,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
 };
 
 export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUser, type }) => {
-  const [activeTab, setActiveTab] = useState<'inbox' | 'sent' | 'compose'>('inbox');
+  const [activeTab, setActiveTab] = H.useSyncedState<'inbox' | 'sent' | 'compose'>(`eljur_msg_tab_${currentUser.id}_${type}`, 'inbox');
   const [composeTitle, setComposeTitle] = useState('');
   const [composeBody, setComposeBody] = useState('');
   
@@ -1215,10 +1215,19 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      onUpdate({ ...state });
   };
 
+  const sortNewestFirst = (arr: Message[]) => {
+    return [...arr].sort((a, b) => {
+      const timeA = Date.parse(a.date || '') || 0;
+      const timeB = Date.parse(b.date || '') || 0;
+      if (timeB !== timeA) return timeB - timeA;
+      return (b.id || '').localeCompare(a.id || '');
+    });
+  };
+
   const getFilteredItems = () => {
     const list = isAnnounce ? state.announcements : state.messages;
     if (activeTab === 'sent') {
-      return list.filter(m => {
+      return sortNewestFirst(list.filter(m => {
           // I see messages I sent as myself
           if (m.fromId === currentUser.id) return true;
           // I see messages I sent or edited on behalf of director
@@ -1226,11 +1235,11 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
           // Employee with canSendAsDirector can also see and edit messages sent by the school's director
           if (isEmployee && currentUser.employeePermissions?.canSendAsDirector && director && m.fromId === director.id) return true;
           return false;
-      }).reverse();
+      }));
     } else {
       // Inbox
       if (isAnnounce) {
-        return list.filter(m => {
+        return sortNewestFirst(list.filter(m => {
             if (m.schoolId && m.schoolId === currentUser.schoolId) return true;
             const sender = state.users.find(u => u.id === m.fromId);
             if (!sender) return !!(m.schoolId && m.schoolId === currentUser.schoolId);
@@ -1238,10 +1247,10 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             if ((sender.role as string) === 'creator') return true; // Global announcement
             if (sender.schoolId === currentUser.schoolId) return true; // My school
             return false;
-        }).reverse();
+        }));
       } else {
         // Direct messages to me
-        return list.filter(m => (m.toIds || []).includes(currentUser.id)).reverse();
+        return sortNewestFirst(list.filter(m => (m.toIds || []).includes(currentUser.id)));
       }
     }
   };
@@ -1439,6 +1448,12 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   // Check if we should show full control buttons (Sent, Compose)
   // Employee gets full controls if they are allowed in this tab (which they are if they are here)
   const showControls = isDirector || isCreator || isEmployee || !isAnnounce;
+
+  useEffect(() => {
+    if (!showControls && activeTab !== 'inbox') {
+      setActiveTab('inbox');
+    }
+  }, [showControls, activeTab, setActiveTab]);
 
   return (
     <div className="space-y-3.5 sm:space-y-6">

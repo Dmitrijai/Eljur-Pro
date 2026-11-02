@@ -10,13 +10,7 @@ import { StudentRating } from './shared/StudentRating';
 import { SideNavDrawer } from '../components/ui';
 
 export default function StudentDashboard({ state, user, onUpdate, mobileMenuOpen, setMobileMenuOpen }: { state: AppState, user: User, onUpdate: any, mobileMenuOpen?: boolean, setMobileMenuOpen?: (v: boolean) => void }) {
-  const [view, setView] = useState<'schedule' | 'journal' | 'grades' | 'rating' | 'messages' | 'announcements'>(() => {
-    return (localStorage.getItem(`eljur_tab_${user.id}`) as any) || 'journal';
-  });
-  
-  React.useEffect(() => {
-    localStorage.setItem(`eljur_tab_${user.id}`, view);
-  }, [view, user.id]);
+  const [view, setView] = H.useSyncedState<'schedule' | 'journal' | 'grades' | 'rating' | 'messages' | 'announcements'>(`eljur_tab_${user.id}`, 'journal');
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 
