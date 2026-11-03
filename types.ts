@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 
 export type Role = 'director' | 'teacher' | 'student' | 'creator' | 'employee';
 

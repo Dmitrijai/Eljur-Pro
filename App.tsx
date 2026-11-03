@@ -756,7 +756,7 @@ export default function App() {
         };
         setAppState(prev => {
           const baseSchools = (Array.isArray(cached.schools) && cached.schools.length > 0) ? cached.schools : defaultState.schools;
-          const prevSchoolMap = new Map((prev?.schools || []).map(s => [s.id, s]));
+          const prevSchoolMap = new Map<string, any>((prev?.schools || []).map(s => [s.id, s]));
           const hydratedSchools = baseSchools.map((s: any) => {
             const pS = prevSchoolMap.get(s.id);
             let fallbackEdu = '';
