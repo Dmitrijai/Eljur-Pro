@@ -28,15 +28,14 @@ export default defineConfig(({ mode }) => {
             navigateFallbackDenylist: [/^\/api\//, /^\/__\//],
           },
           manifest: {
-            id: '/',
             name: 'E-Journal Pro',
             short_name: 'E-Journal',
             description: 'Электронный журнал и дневник образовательного учреждения',
             theme_color: '#4f46e5',
             background_color: '#f8fafc',
             display: 'standalone',
-            start_url: '/',
-            scope: '/',
+            start_url: './',
+            scope: './',
             orientation: 'any',
             icons: [
               {
