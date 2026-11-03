@@ -49,6 +49,8 @@ export interface User {
   theme?: 'light' | 'dark';
   language?: 'ru' | 'en';
   showSeasonalAnimations?: boolean;
+  bodyFontId?: string;
+  headingFontId?: string;
 }
 
 export interface SubgroupLesson {

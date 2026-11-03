@@ -239,44 +239,44 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
                     {t('date')}: {H.formatDateDDMMYYYY(new Date().toISOString().split('T')[0])}
                 </div>
             </div>
-            <div className="flex flex-wrap justify-between items-center gap-2 mb-3 sm:mb-5">
-                <div className="min-w-0">
-                    <h3 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white font-heading leading-tight">{t('student_rating_title')}</h3>
-                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {isGlobal
-                            ? (lang === 'ru'
-                                ? 'Единая процентная шкала (0–100%) для объективного сравнения школ с любыми системами оценивания'
-                                : 'Unified percentage scale (0–100%) to compare schools across any grading system')
-                            : currentSchoolScale
-                            ? (lang === 'ru'
-                                ? `Шкала оценивания школы: от ${currentSchoolScale.minGrade} до ${currentSchoolScale.maxGrade} баллов`
-                                : `School grading scale: ${currentSchoolScale.minGrade} to ${currentSchoolScale.maxGrade}`)
-                            : null}
-                    </p>
-                </div>
-                <div className="flex items-center gap-1.5 no-print shrink-0">
-                    {hasActiveFilters && (
-                        <Button
-                            onClick={() => {
-                                setSelectedProfile('');
-                                setSelectedSubjects([]);
-                                setFilterClass('');
-                                setSearchFio('');
-                                if (isGlobal) setFilterSchool('');
-                            }}
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs text-slate-600 dark:text-slate-300 px-2 py-1"
-                        >
-                            <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                            {lang === 'ru' ? 'Сброс' : 'Reset'}
+            <div className="mb-3 sm:mb-5">
+                <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white font-heading leading-tight truncate">{t('student_rating_title')}</h3>
+                    <div className="flex items-center gap-1.5 no-print shrink-0">
+                        {hasActiveFilters && (
+                            <Button
+                                onClick={() => {
+                                    setSelectedProfile('');
+                                    setSelectedSubjects([]);
+                                    setFilterClass('');
+                                    setSearchFio('');
+                                    if (isGlobal) setFilterSchool('');
+                                }}
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-slate-600 dark:text-slate-300 px-2 py-1"
+                            >
+                                <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                {lang === 'ru' ? 'Сброс' : 'Reset'}
+                            </Button>
+                        )}
+                        <Button onClick={() => window.print()} variant="secondary" size="sm" className="w-auto px-2.5 py-1.5 text-xs">
+                            <Printer className="w-3.5 h-3.5 sm:mr-1.5"/>
+                            <span className="hidden sm:inline">{t('print')}</span>
                         </Button>
-                    )}
-                    <Button onClick={() => window.print()} variant="secondary" size="sm" className="w-auto px-2.5 py-1.5 text-xs">
-                        <Printer className="w-3.5 h-3.5 sm:mr-1.5"/>
-                        <span className="hidden sm:inline">{t('print')}</span>
-                    </Button>
+                    </div>
                 </div>
+                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    {isGlobal
+                        ? (lang === 'ru'
+                            ? 'Единая процентная шкала (0–100%) для объективного сравнения школ с любыми системами оценивания'
+                            : 'Unified percentage scale (0–100%) to compare schools across any grading system')
+                        : currentSchoolScale
+                        ? (lang === 'ru'
+                            ? `Шкала оценивания школы: от ${currentSchoolScale.minGrade} до ${currentSchoolScale.maxGrade} баллов`
+                            : `School grading scale: ${currentSchoolScale.minGrade} to ${currentSchoolScale.maxGrade}`)
+                        : null}
+                </p>
             </div>
 
             <div className="flex flex-col gap-2 sm:gap-3 mb-3 sm:mb-5 no-print">

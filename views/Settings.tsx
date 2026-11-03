@@ -50,9 +50,38 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
     }
   }, [currentSchool?.id, currentSchool?.name, currentSchool?.educationalResourceUrl]);
 
+  const userFontPrefix = `font_${user.id}_`;
+
+  const syncSessionUserFields = (patch: Partial<User>) => {
+    try {
+      const rawSession = localStorage.getItem('eljur_session');
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        if (parsed && parsed.user && parsed.user.id === user.id) {
+          parsed.user = { ...parsed.user, ...patch };
+          localStorage.setItem('eljur_session', JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+  };
+
   const refreshFonts = async () => {
-    const assets = await DB.getAllAssets();
-    setFontList(assets.filter(a => a.name.toLowerCase().endsWith('.ttf') || a.name.toLowerCase().endsWith('.woff') || a.name.toLowerCase().endsWith('.woff2')));
+    const assets = await DB.getAllAssets(user.schoolId || 'global');
+    const activePrefs = H.getUserPreferences(user.id, user);
+    setFontList(
+      assets.filter(a => {
+        const isFontFile =
+          a.name.toLowerCase().endsWith('.ttf') ||
+          a.name.toLowerCase().endsWith('.woff') ||
+          a.name.toLowerCase().endsWith('.woff2');
+        if (!isFontFile) return false;
+        return (
+          a.id.startsWith(userFontPrefix) ||
+          a.id === activePrefs.bodyFontId ||
+          a.id === activePrefs.headingFontId
+        );
+      })
+    );
   };
 
   React.useEffect(() => {
@@ -408,11 +437,15 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   };
 
   const handleFontUpload = async (file: File) => {
-    const id = H.uid('font');
+    const id = H.uid(`font_${user.id}`);
     await DB.saveAsset(id, file.name, file.type, file, user.schoolId || 'global');
     notify(t('font_loaded'), 'success');
     refreshFonts();
   };
+
+  const currentUserFontPrefs = H.getUserPreferences(user.id, user);
+  const activeBodyFontId = user.bodyFontId !== undefined ? user.bodyFontId : currentUserFontPrefs.bodyFontId;
+  const activeHeadingFontId = user.headingFontId !== undefined ? user.headingFontId : currentUserFontPrefs.headingFontId;
 
   const deleteFont = (id: string) => {
     setConfirmModal({
@@ -420,8 +453,19 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       message: t('delete_font_confirm'),
       onConfirm: async () => {
         setConfirmModal(null);
-        if (state.settings.bodyFontId === id) state.settings.bodyFontId = undefined;
-        if (state.settings.headingFontId === id) state.settings.headingFontId = undefined;
+        const u = state.users.find(usr => usr.id === user.id);
+        const nextBody = activeBodyFontId === id ? undefined : activeBodyFontId;
+        const nextHeading = activeHeadingFontId === id ? undefined : activeHeadingFontId;
+        if (u) {
+          u.bodyFontId = nextBody;
+          u.headingFontId = nextHeading;
+        }
+        user.bodyFontId = nextBody;
+        user.headingFontId = nextHeading;
+        H.saveUserPreferences(user.id, { bodyFontId: nextBody, headingFontId: nextHeading });
+        syncSessionUserFields({ bodyFontId: nextBody, headingFontId: nextHeading });
+        state.settings.bodyFontId = nextBody;
+        state.settings.headingFontId = nextHeading;
         await DB.deleteAsset(id, user.schoolId || 'global');
         onUpdate({ ...state });
         refreshFonts();
@@ -430,13 +474,23 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   };
 
   const setBodyFont = (id?: string) => {
+      const u = state.users.find(usr => usr.id === user.id);
+      if (u) u.bodyFontId = id;
+      user.bodyFontId = id;
+      H.saveUserPreferences(user.id, { bodyFontId: id });
+      syncSessionUserFields({ bodyFontId: id });
       state.settings.bodyFontId = id;
-      onUpdate(state);
+      onUpdate({ ...state });
   };
 
   const setHeadingFont = (id?: string) => {
+      const u = state.users.find(usr => usr.id === user.id);
+      if (u) u.headingFontId = id;
+      user.headingFontId = id;
+      H.saveUserPreferences(user.id, { headingFontId: id });
+      syncSessionUserFields({ headingFontId: id });
       state.settings.headingFontId = id;
-      onUpdate(state);
+      onUpdate({ ...state });
   };
 
   const applyTimeTravel = () => {
@@ -916,17 +970,17 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            <td className="p-2 sm:p-3 text-center">
                                <button 
                                  onClick={() => setBodyFont(undefined)} 
-                                 className={`p-1 sm:p-1.5 rounded transition ${!state.settings.bodyFontId ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
+                                 className={`p-1 sm:p-1.5 rounded transition ${!activeBodyFontId ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
                                >
-                                  {!state.settings.bodyFontId ? <Check size={14}/> : t('select')}
+                                  {!activeBodyFontId ? <Check size={14}/> : t('select')}
                                </button>
                            </td>
                            <td className="p-2 sm:p-3 text-center">
                                <button 
                                  onClick={() => setHeadingFont(undefined)} 
-                                 className={`p-1 sm:p-1.5 rounded transition ${!state.settings.headingFontId ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
+                                 className={`p-1 sm:p-1.5 rounded transition ${!activeHeadingFontId ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
                                >
-                                  {!state.settings.headingFontId ? <Check size={14}/> : t('select')}
+                                  {!activeHeadingFontId ? <Check size={14}/> : t('select')}
                                </button>
                            </td>
                            <td className="p-2 sm:p-3 text-right text-[11px] sm:text-xs text-slate-400 italic">{t('system_font')}</td>
@@ -937,17 +991,17 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                                <td className="p-2 sm:p-3 text-center">
                                    <button 
                                      onClick={() => setBodyFont(f.id)} 
-                                     className={`p-1 sm:p-1.5 rounded transition ${state.settings.bodyFontId === f.id ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
+                                     className={`p-1 sm:p-1.5 rounded transition ${activeBodyFontId === f.id ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
                                    >
-                                      {state.settings.bodyFontId === f.id ? <Check size={14}/> : t('select')}
+                                      {activeBodyFontId === f.id ? <Check size={14}/> : t('select')}
                                    </button>
                                </td>
                                <td className="p-2 sm:p-3 text-center">
                                    <button 
                                      onClick={() => setHeadingFont(f.id)} 
-                                     className={`p-1 sm:p-1.5 rounded transition ${state.settings.headingFontId === f.id ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
+                                     className={`p-1 sm:p-1.5 rounded transition ${activeHeadingFontId === f.id ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-400 hover:bg-slate-100'}`}
                                    >
-                                      {state.settings.headingFontId === f.id ? <Check size={14}/> : t('select')}
+                                      {activeHeadingFontId === f.id ? <Check size={14}/> : t('select')}
                                    </button>
                                </td>
                                <td className="p-2 sm:p-3 text-right">
@@ -961,33 +1015,35 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
         </div>
       </Card>
 
-      <Card className="p-3.5 sm:p-8">
-        <h3 className="font-bold text-sm sm:text-lg mb-2.5 sm:mb-3 text-slate-800 dark:text-white font-heading">{t('backup')}</h3>
-        <div className="mb-3.5 sm:mb-5 p-2.5 sm:p-3.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/60 text-[11px] sm:text-xs text-slate-700 dark:text-slate-300 space-y-1">
-          <div className="font-bold text-blue-800 dark:text-blue-300">
-            {lang === 'ru' ? 'Облачное хранение + Резервные копии (JSON)' : 'Cloud Storage + JSON Backups'}
+      {(isDirector || isCreator) && (
+        <Card className="p-3.5 sm:p-8">
+          <h3 className="font-bold text-sm sm:text-lg mb-2.5 sm:mb-3 text-slate-800 dark:text-white font-heading">{t('backup')}</h3>
+          <div className="mb-3.5 sm:mb-5 p-2.5 sm:p-3.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/60 text-[11px] sm:text-xs text-slate-700 dark:text-slate-300 space-y-1">
+            <div className="font-bold text-blue-800 dark:text-blue-300">
+              {lang === 'ru' ? 'Облачное хранение + Резервные копии (JSON)' : 'Cloud Storage + JSON Backups'}
+            </div>
+            <p>
+              {lang === 'ru'
+                ? isCreator
+                  ? 'Все данные автоматически синхронизируются с облачной базой Firestore в реальном времени. Экспорт сохраняет полный слепок всех школ, пользователей, оценок, расписаний, сообщений и вложенных файлов в один JSON-файл. При импорте данные автоматически записываются и в локальный кэш, и на облачный сервер.'
+                  : 'Все данные вашей школы автоматически сохраняются в облаке Firestore. Вы можете скачать полную резервную копию своей школы (включая расписание, оценки, сообщения и файлы) в JSON-файл или восстановить данные школы из файла с автоматической синхронизацией в облако.'
+                : 'All data is synced in real time with Cloud Firestore. Exporting downloads a complete JSON snapshot (including files), and importing restores both local cache and cloud database.'}
+            </p>
           </div>
-          <p>
-            {lang === 'ru'
-              ? isCreator
-                ? 'Все данные автоматически синхронизируются с облачной базой Firestore в реальном времени. Экспорт сохраняет полный слепок всех школ, пользователей, оценок, расписаний, сообщений и вложенных файлов в один JSON-файл. При импорте данные автоматически записываются и в локальный кэш, и на облачный сервер.'
-                : 'Все данные вашей школы автоматически сохраняются в облаке Firestore. Вы можете скачать полную резервную копию своей школы (включая расписание, оценки, сообщения и файлы) в JSON-файл или восстановить данные школы из файла с автоматической синхронизацией в облако.'
-              : 'All data is synced in real time with Cloud Firestore. Exporting downloads a complete JSON snapshot (including files), and importing restores both local cache and cloud database.'}
-          </p>
-        </div>
-        <div className="space-y-3.5 sm:space-y-6">
-          <div className="flex flex-col gap-2 sm:gap-3">
-            <label className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">{t('export')}</label>
-            <Button onClick={handleExport} variant="secondary" size="sm" className="justify-start w-fit">{t('download_backup')}</Button>
-            <p className="text-[11px] sm:text-xs text-slate-400">{t('backup_desc')}</p>
+          <div className="space-y-3.5 sm:space-y-6">
+            <div className="flex flex-col gap-2 sm:gap-3">
+              <label className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">{t('export')}</label>
+              <Button onClick={handleExport} variant="secondary" size="sm" className="justify-start w-fit">{t('download_backup')}</Button>
+              <p className="text-[11px] sm:text-xs text-slate-400">{t('backup_desc')}</p>
+            </div>
+            <hr className="border-slate-100 dark:border-slate-800" />
+            <div className="flex flex-col gap-2 sm:gap-3">
+               <label className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">{t('import')}</label>
+               <FileUploader onFileSelect={handleImport} lang={lang as 'ru'|'en'} />
+            </div>
           </div>
-          <hr className="border-slate-100 dark:border-slate-800" />
-          <div className="flex flex-col gap-2 sm:gap-3">
-             <label className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">{t('import')}</label>
-             <FileUploader onFileSelect={handleImport} lang={lang as 'ru'|'en'} />
-          </div>
-        </div>
-      </Card>
+        </Card>
+      )}
 
       <Modal isOpen={!!confirmModal} onClose={() => setConfirmModal(null)} title={confirmModal?.title || t('settings')}>
         <div className="space-y-4">

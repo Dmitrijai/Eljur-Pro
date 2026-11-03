@@ -848,9 +848,7 @@ export default function App() {
               adminPassword: gate.adminPassword || cur.settings.adminPassword || 'admin123',
               adminPasswordHash: gate.adminPasswordHash || cur.settings.adminPasswordHash,
               adminPasswordSalt: gate.adminPasswordSalt || cur.settings.adminPasswordSalt,
-              eljurInfo: gate.eljurInfo !== undefined ? gate.eljurInfo : cur.settings.eljurInfo,
-              bodyFontId: gate.bodyFontId !== undefined ? gate.bodyFontId : cur.settings.bodyFontId,
-              headingFontId: gate.headingFontId !== undefined ? gate.headingFontId : cur.settings.headingFontId
+              eljurInfo: gate.eljurInfo !== undefined ? gate.eljurInfo : cur.settings.eljurInfo
             }
           };
         });
@@ -944,7 +942,7 @@ export default function App() {
           : null;
         const userPrefs = activeSelfUser
           ? H.getUserPreferences(activeSelfUser.id, activeSelfUser)
-          : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true };
+          : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true, bodyFontId: undefined, headingFontId: undefined };
         if (activeSelfUser) {
           H.saveUserPreferences(activeSelfUser.id, userPrefs);
         }
@@ -973,7 +971,9 @@ export default function App() {
             ...baseSettings,
             theme: userPrefs.theme || 'light',
             language: userPrefs.language || 'ru',
-            showSeasonalAnimations: userPrefs.showSeasonalAnimations !== false
+            showSeasonalAnimations: userPrefs.showSeasonalAnimations !== false,
+            bodyFontId: userPrefs.bodyFontId,
+            headingFontId: userPrefs.headingFontId
           },
           gradingSystem: isPrimarySchool ? (schoolUpdate.gradingSystem || cur.gradingSystem) : cur.gradingSystem,
           gradeTypes: isPrimarySchool ? (schoolUpdate.gradeTypes || cur.gradeTypes) : cur.gradeTypes,
@@ -1069,7 +1069,7 @@ export default function App() {
     };
   }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
 
-  // Synchronize active user's personal preferences (theme, language, seasonal animations) with appState.settings
+  // Synchronize active user's personal preferences (theme, language, seasonal animations, fonts) with appState.settings
   useEffect(() => {
     setAppState(prev => {
       if (!prev) return prev;
@@ -1077,7 +1077,9 @@ export default function App() {
         if (
           prev.settings.theme === 'light' &&
           prev.settings.language === 'ru' &&
-          prev.settings.showSeasonalAnimations !== false
+          prev.settings.showSeasonalAnimations !== false &&
+          prev.settings.bodyFontId === undefined &&
+          prev.settings.headingFontId === undefined
         ) {
           return prev;
         }
@@ -1087,7 +1089,9 @@ export default function App() {
             ...prev.settings,
             theme: 'light',
             language: 'ru',
-            showSeasonalAnimations: true
+            showSeasonalAnimations: true,
+            bodyFontId: undefined,
+            headingFontId: undefined
           }
         };
       }
@@ -1096,10 +1100,14 @@ export default function App() {
       const nextTheme = prefs.theme || 'light';
       const nextLang = prefs.language || 'ru';
       const nextSeasonal = prefs.showSeasonalAnimations !== false;
+      const nextBodyFont = prefs.bodyFontId;
+      const nextHeadingFont = prefs.headingFontId;
       if (
         prev.settings.theme === nextTheme &&
         prev.settings.language === nextLang &&
-        prev.settings.showSeasonalAnimations === nextSeasonal
+        prev.settings.showSeasonalAnimations === nextSeasonal &&
+        prev.settings.bodyFontId === nextBodyFont &&
+        prev.settings.headingFontId === nextHeadingFont
       ) {
         return prev;
       }
@@ -1109,7 +1117,9 @@ export default function App() {
           ...prev.settings,
           theme: nextTheme,
           language: nextLang,
-          showSeasonalAnimations: nextSeasonal
+          showSeasonalAnimations: nextSeasonal,
+          bodyFontId: nextBodyFont,
+          headingFontId: nextHeadingFont
         }
       };
     });
@@ -1135,7 +1145,7 @@ export default function App() {
     document.documentElement.lang = activeLang;
   }, [appState?.settings?.language, currentUser?.id]);
 
-  // Effect to Apply Fonts
+  // Effect to Apply Fonts strictly for the current logged-in user
   useEffect(() => {
     const readBlobAsDataURL = (blob: Blob): Promise<string> => {
         return new Promise((resolve, reject) => {
@@ -1147,23 +1157,24 @@ export default function App() {
     };
 
     const applyFonts = async () => {
-        if (!appState?.settings) return;
-        const { bodyFontId, headingFontId } = appState.settings;
         const root = document.documentElement;
-
-        // Reset to default first
         root.style.setProperty('--font-body', 'Inter');
         root.style.setProperty('--font-heading', 'Inter');
 
+        if (!currentUser) return;
+        const userInState = appState?.users.find(u => u.id === currentUser.id) || currentUser;
+        const prefs = H.getUserPreferences(currentUser.id, userInState);
+        const bodyFontId = prefs.bodyFontId ?? appState?.settings?.bodyFontId;
+        const headingFontId = prefs.headingFontId ?? appState?.settings?.headingFontId;
+
         if (bodyFontId) {
             try {
-                const asset = await DB.getAsset(bodyFontId, currentUser?.schoolId);
+                const asset = await DB.getAsset(bodyFontId, currentUser.schoolId || 'global');
                 if (asset && asset.blob) {
                     const dataUrl = await readBlobAsDataURL(asset.blob);
                     const fontFace = new FontFace('CustomBodyFont', `url(${dataUrl})`);
                     await fontFace.load();
                     document.fonts.add(fontFace);
-                    // Add quotes to ensure CSS variable parses correctly
                     root.style.setProperty('--font-body', '"CustomBodyFont"');
                 }
             } catch (e) { console.error("Failed to load body font", e); }
@@ -1171,20 +1182,19 @@ export default function App() {
 
         if (headingFontId) {
             try {
-                const asset = await DB.getAsset(headingFontId, currentUser?.schoolId);
+                const asset = await DB.getAsset(headingFontId, currentUser.schoolId || 'global');
                 if (asset && asset.blob) {
                     const dataUrl = await readBlobAsDataURL(asset.blob);
                     const fontFace = new FontFace('CustomHeadingFont', `url(${dataUrl})`);
                     await fontFace.load();
                     document.fonts.add(fontFace);
-                    // Add quotes to ensure CSS variable parses correctly
                     root.style.setProperty('--font-heading', '"CustomHeadingFont"');
                 }
             } catch (e) { console.error("Failed to load heading font", e); }
         }
     };
     applyFonts();
-  }, [appState?.settings?.bodyFontId, appState?.settings?.headingFontId, currentUser?.schoolId]);
+  }, [appState?.settings?.bodyFontId, appState?.settings?.headingFontId, currentUser?.id, currentUser?.schoolId]);
 
   // Effect to load custom fonts for Eljur Info
   useEffect(() => {
@@ -1291,7 +1301,9 @@ export default function App() {
       ...u,
       theme: prefs.theme || 'light',
       language: prefs.language || 'ru',
-      showSeasonalAnimations: prefs.showSeasonalAnimations !== false
+      showSeasonalAnimations: prefs.showSeasonalAnimations !== false,
+      bodyFontId: prefs.bodyFontId,
+      headingFontId: prefs.headingFontId
     };
     DB.setCurrentSessionUser(enrichedUser);
     setCurrentUser(enrichedUser);
@@ -1306,7 +1318,9 @@ export default function App() {
           ...appState.settings,
           theme: enrichedUser.theme || 'light',
           language: enrichedUser.language || 'ru',
-          showSeasonalAnimations: enrichedUser.showSeasonalAnimations !== false
+          showSeasonalAnimations: enrichedUser.showSeasonalAnimations !== false,
+          bodyFontId: enrichedUser.bodyFontId,
+          headingFontId: enrichedUser.headingFontId
         }
       });
     }
@@ -1334,7 +1348,9 @@ export default function App() {
           ...appState.settings,
           theme: 'light',
           language: 'ru',
-          showSeasonalAnimations: true
+          showSeasonalAnimations: true,
+          bodyFontId: undefined,
+          headingFontId: undefined
         }
       });
     }
