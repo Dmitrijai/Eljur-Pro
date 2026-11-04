@@ -23,29 +23,6 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
     const goNextWeek = () => setWeekStart(d => H.addDays(d, 7));
     const goCurrentWeek = () => setWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
 
-    const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if (typeof window !== 'undefined' && window.innerWidth >= 768) return;
-        const target = e.target as HTMLElement | null;
-        if (target?.closest('input, textarea, select, button, [data-no-swipe]')) {
-            touchStartRef.current = null;
-            return;
-        }
-        if (e.touches.length === 1) {
-            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        }
-    };
-    const handleTouchEnd = (e: React.TouchEvent) => {
-        if (!touchStartRef.current || e.changedTouches.length === 0) return;
-        const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
-        const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
-        touchStartRef.current = null;
-        if (Math.abs(dx) >= 55 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-            if (dx > 0) goPrevWeek();
-            else goNextWeek();
-        }
-    };
-
     const schoolClasses = H.getSchoolClasses(state, user.schoolId);
     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
 
@@ -114,7 +91,7 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
     const vacationInfo = H.getVacationForWeek(weekStart, scheduleSettings, scheduleDates);
 
     return (
-        <div className="space-y-3 sm:space-y-6" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div className="space-y-3 sm:space-y-6">
             <div className="hidden print:block p-3 mb-3 border-b-2 border-black text-center">
                 <div className="text-xs font-bold uppercase tracking-widest text-slate-600">{H.getSchool(state, user.schoolId)?.name || 'ЭлЖур'}</div>
                 <div className="text-xl font-bold text-black mt-0.5">{t('my_schedule')} — {user.fio}</div>

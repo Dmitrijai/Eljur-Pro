@@ -361,10 +361,10 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-slate-500">{t('director')}</label>
-                                        <select
+                                        <Select
                                             value={editDirectorId}
                                             onChange={e => setEditDirectorId(e.target.value)}
-                                            className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                                            className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100"
                                         >
                                             {state.users
                                                 .filter(u => u.role !== 'creator' && u.role !== 'student' && (u.schoolId === s.id || u.id === editDirectorId || !u.schoolId))
@@ -376,7 +376,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                                             {!state.users.some(u => u.id === editDirectorId) && editDirectorId && (
                                                 <option value={editDirectorId}>ID: {editDirectorId}</option>
                                             )}
-                                        </select>
+                                        </Select>
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-slate-500">{t('school_id')}</label>

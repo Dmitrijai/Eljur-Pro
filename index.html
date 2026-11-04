@@ -6,10 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Journal Pro</title>
     <meta name="description" content="Электронный журнал и дневник образовательного учреждения">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="E-Journal Pro">
     <meta property="og:title" content="E-Journal Pro">
     <meta property="og:description" content="Электронный журнал и дневник образовательного учреждения">
+    <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="./assets/icon.png">
-    <link rel="apple-touch-icon" href="./assets/icon.png">
+    <link rel="apple-touch-icon" href="pwa-192x192.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
@@ -46,6 +52,14 @@
         
         body {
             font-family: var(--font-body), sans-serif !important;
+        }
+
+        @media screen {
+            html.modal-open,
+            body.modal-open {
+                overflow: hidden !important;
+                overscroll-behavior: none !important;
+            }
         }
 
         /* Table Headers Centering */

@@ -513,10 +513,10 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                         <label className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 sm:mb-1.5 block">
                                             {t('class_teacher')}
                                         </label>
-                                        <select 
+                                        <Select 
                                             value={c.headmasterId || ''} 
                                             onChange={e => handleAssignHeadmaster(c.class, c.letter, e.target.value)}
-                                            className="w-full text-[11px] sm:text-xs py-1 sm:py-2 px-2 sm:px-2.5 rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                                            className="w-full text-[11px] sm:text-xs py-1 sm:py-1.5 px-2 sm:px-2.5 rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"
                                         >
                                             <option value="">-- {t('not_assigned')} --</option>
                                             {headmasterCandidates.map(cand => {
@@ -533,7 +533,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                                     </option>
                                                 );
                                             })}
-                                        </select>
+                                        </Select>
                                     </div>
                                 </div>
                             );

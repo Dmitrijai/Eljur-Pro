@@ -16,6 +16,12 @@ if (typeof window !== 'undefined') {
     }
     originalError.apply(console, args);
   };
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
 }
 
 const container = document.getElementById('root');

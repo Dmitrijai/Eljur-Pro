@@ -734,7 +734,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
              </div>
            </div>
            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
-             <Button onClick={() => setShowFinalModal(true)} variant="primary" size="sm" className="flex-1 sm:flex-initial bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-700 whitespace-nowrap px-2.5 py-1.5 text-xs h-8 sm:h-9">
+             <Button onClick={() => { setSelectedGrade(null); setShowFinalModal(true); }} variant="primary" size="sm" className="flex-1 sm:flex-initial bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-700 whitespace-nowrap px-2.5 py-1.5 text-xs h-8 sm:h-9">
                <Calculator size={14} className="mr-1.5"/> {t('final_attestation')}
              </Button>
              <Button variant="secondary" size="sm" onClick={() => window.print()} className="w-auto whitespace-nowrap px-2.5 py-1.5 text-xs h-8 sm:h-9">

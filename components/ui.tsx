@@ -245,6 +245,7 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (
         createPortal(
           <div
             ref={menuRef}
+            data-select-portal="true"
             style={{
               position: 'fixed',
               left: `${menuRect.left}px`,
@@ -255,7 +256,7 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (
                 : { top: `${menuRect.top}px` }),
               zIndex: 99999,
             }}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-60 overflow-y-auto py-1 animate-fade-in"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl max-h-60 overflow-y-auto overscroll-contain py-1 animate-fade-in"
             onClick={(e) => e.stopPropagation()}
           >
             {options.length === 0 ? (
@@ -851,21 +852,85 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, select
 };
 
 // --- MODAL ---
-// Uses Portal for clean z-index hierarchy and ensures full accessibility
+// Uses Portal for clean z-index hierarchy, stacked modal support, and strict background scroll/click lock
+const activeModalStack: symbol[] = [];
+
+const syncModalScrollLock = () => {
+  if (typeof document === 'undefined') return;
+  if (activeModalStack.length > 0) {
+    document.body.classList.add('modal-open');
+    document.documentElement.classList.add('modal-open');
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
+  } else {
+    document.body.classList.remove('modal-open');
+    document.documentElement.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.documentElement.style.overflow = '';
+    document.body.style.overscrollBehavior = '';
+    document.documentElement.style.overscrollBehavior = '';
+  }
+};
+
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) => {
+  const modalIdRef = useRef<symbol>(Symbol('modal'));
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [stackIndex, setStackIndex] = useState(0);
+
   React.useEffect(() => {
-    if (isOpen) {
-      document.body.classList.add('modal-open');
-    } else {
-      document.body.classList.remove('modal-open');
+    if (!isOpen) return;
+    const id = modalIdRef.current;
+    if (!activeModalStack.includes(id)) {
+      activeModalStack.push(id);
     }
-    return () => document.body.classList.remove('modal-open');
+    setStackIndex(activeModalStack.indexOf(id));
+    syncModalScrollLock();
+
+    const preventBackgroundScroll = (e: Event) => {
+      // Only the topmost modal handles scroll containment
+      if (activeModalStack[activeModalStack.length - 1] !== id) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-select-portal="true"]')) return;
+      if (!contentRef.current || !contentRef.current.contains(target)) {
+        e.preventDefault();
+        return;
+      }
+    };
+
+    window.addEventListener('wheel', preventBackgroundScroll, { passive: false });
+    window.addEventListener('touchmove', preventBackgroundScroll, { passive: false });
+
+    return () => {
+      window.removeEventListener('wheel', preventBackgroundScroll);
+      window.removeEventListener('touchmove', preventBackgroundScroll);
+      const idx = activeModalStack.indexOf(id);
+      if (idx > -1) {
+        activeModalStack.splice(idx, 1);
+      }
+      syncModalScrollLock();
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
+  const computedZIndex = 9000 + Math.max(0, stackIndex) * 20;
+
   return createPortal(
-    <div className="modal-print-wrapper fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200 print:static print:h-auto print:w-full print:block print:bg-white print:p-0">
-      <div className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] overflow-y-auto flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}>
+    <div
+      ref={wrapperRef}
+      style={{ zIndex: computedZIndex }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      className="modal-print-wrapper fixed inset-0 w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200 overscroll-none print:static print:h-auto print:w-full print:block print:bg-white print:p-0"
+    >
+      <div
+        ref={contentRef}
+        className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] overflow-y-auto overscroll-contain flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}
+      >
         <div className="flex justify-between items-center px-3 py-2.5 sm:p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-xl sm:rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black gap-2">
           <h3 className="text-sm sm:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{title}</h3>
           <button type="button" onClick={onClose} className="text-xl sm:text-2xl leading-none text-slate-400 hover:text-slate-600 w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300 flex-shrink-0 no-print">&times;</button>
@@ -900,6 +965,7 @@ export const SideNavDrawer: React.FC<{
   const activeItem = items.find(i => i.id === activeId) || items[0];
   const totalBadges = items.reduce((acc, item) => acc + (item.badgeCount || 0), 0);
   const touchStartRef = useRef<{ x: number; y: number; fromLeftEdge: boolean } | null>(null);
+  const drawerLockIdRef = useRef<symbol>(Symbol('drawer'));
 
   useEffect(() => {
     if (onTabMetaChange && activeItem) {
@@ -907,10 +973,26 @@ export const SideNavDrawer: React.FC<{
     }
   }, [activeId, activeItem?.label, totalBadges]);
 
+  useEffect(() => {
+    const id = drawerLockIdRef.current;
+    if (isOpen) {
+      if (!activeModalStack.includes(id)) activeModalStack.push(id);
+      syncModalScrollLock();
+    }
+    return () => {
+      const idx = activeModalStack.indexOf(id);
+      if (idx > -1) {
+        activeModalStack.splice(idx, 1);
+        syncModalScrollLock();
+      }
+    };
+  }, [isOpen]);
+
   // Global touch listener on mobile (< 768px): swipe right from left edge to open, swipe left when open to close
   useEffect(() => {
     const handleTouchStart = (e: TouchEvent) => {
       if (window.innerWidth >= 768) return;
+      if (!isOpen && activeModalStack.length > 0) return;
       const t = e.touches[0];
       if (!t) return;
       touchStartRef.current = {
@@ -922,6 +1004,10 @@ export const SideNavDrawer: React.FC<{
 
     const handleTouchEnd = (e: TouchEvent) => {
       if (window.innerWidth >= 768 || !touchStartRef.current) return;
+      if (!isOpen && activeModalStack.length > 0) {
+        touchStartRef.current = null;
+        return;
+      }
       const t = e.changedTouches[0];
       if (!t) return;
       const dx = t.clientX - touchStartRef.current.x;
