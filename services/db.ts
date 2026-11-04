@@ -1495,8 +1495,6 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
               delete cleaned.theme;
               delete cleaned.language;
               delete cleaned.showSeasonalAnimations;
-              delete cleaned.bodyFontId;
-              delete cleaned.headingFontId;
               return cleaned;
             })()
           };
@@ -1517,6 +1515,8 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             if (activeSettings.adminPasswordHash) gatePayload.adminPasswordHash = activeSettings.adminPasswordHash;
             if (activeSettings.adminPasswordSalt) gatePayload.adminPasswordSalt = activeSettings.adminPasswordSalt;
             if (activeSettings.eljurInfo !== undefined) gatePayload.eljurInfo = activeSettings.eljurInfo;
+            if (activeSettings.bodyFontId !== undefined) gatePayload.bodyFontId = activeSettings.bodyFontId;
+            if (activeSettings.headingFontId !== undefined) gatePayload.headingFontId = activeSettings.headingFontId;
             queueSetIfChanged(
               doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'),
               `schools/${schoolId}/publicConfig/creatorGate`,

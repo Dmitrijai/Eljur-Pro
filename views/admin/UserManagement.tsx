@@ -513,10 +513,10 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                         <label className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 sm:mb-1.5 block">
                                             {t('class_teacher')}
                                         </label>
-                                        <Select 
+                                        <select 
                                             value={c.headmasterId || ''} 
                                             onChange={e => handleAssignHeadmaster(c.class, c.letter, e.target.value)}
-                                            className="w-full text-[11px] sm:text-xs py-1 sm:py-1.5 px-2 sm:px-2.5 rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"
+                                            className="w-full text-[11px] sm:text-xs py-1 sm:py-2 px-2 sm:px-2.5 rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
                                         >
                                             <option value="">-- {t('not_assigned')} --</option>
                                             {headmasterCandidates.map(cand => {
@@ -533,7 +533,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                                     </option>
                                                 );
                                             })}
-                                        </Select>
+                                        </select>
                                     </div>
                                 </div>
                             );
@@ -972,25 +972,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                 </div>
                 <Button variant="primary" onClick={addUser} className="w-full md:w-auto px-6 sm:px-12 h-9 sm:h-12 text-xs sm:text-base shadow-lg sm:shadow-xl disabled:bg-slate-300 disabled:shadow-none" disabled={validationErrors.length > 0}>{t('add_user')}</Button>
             </Card>
-            <Modal
-                isOpen={!!blockingUserId}
-                onClose={() => setBlockingUserId(null)}
-                title={t('block_user_title')}
-                maxWidth="max-w-sm"
-            >
-                {blockingUserId && (
-                    <div>
-                        <p className="text-sm text-slate-600 mb-6 dark:text-slate-300">{t('select_block_duration')}</p>
-                        <div className="grid grid-cols-1 gap-3">
-                            <Button variant="secondary" onClick={() => applyBlock(blockingUserId, '1h')}>{t('for_1_hour')}</Button>
-                            <Button variant="secondary" onClick={() => applyBlock(blockingUserId, '24h')}>{t('for_24_hours')}</Button>
-                            <Button variant="danger" onClick={() => applyBlock(blockingUserId, 'forever')}>{t('forever')}</Button>
-                            <div className="my-2 border-t border-slate-100 dark:border-slate-800"></div>
-                            <Button variant="primary" onClick={() => applyBlock(blockingUserId, 'unblock')}>{t('unlock')}</Button>
-                        </div>
-                    </div>
-                )}
-            </Modal>
+            {blockingUserId && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 dark:bg-slate-900 dark:border dark:border-slate-700"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-slate-800 dark:text-white">{t('block_user_title')}</h3><button onClick={() => setBlockingUserId(null)} className="text-slate-400 hover:text-slate-600"><UserX size={20}/></button></div><p className="text-sm text-slate-600 mb-6 dark:text-slate-300">{t('select_block_duration')}</p><div className="grid grid-cols-1 gap-3"><Button variant="secondary" onClick={() => applyBlock(blockingUserId, '1h')}>{t('for_1_hour')}</Button><Button variant="secondary" onClick={() => applyBlock(blockingUserId, '24h')}>{t('for_24_hours')}</Button><Button variant="danger" onClick={() => applyBlock(blockingUserId, 'forever')}>{t('forever')}</Button><div className="my-2 border-t border-slate-100 dark:border-slate-800"></div><Button variant="primary" onClick={() => applyBlock(blockingUserId, 'unblock')}>{t('unlock')}</Button></div></div></div>}
             
             {/* NEW CONFIRMATION MODAL */}
             <Modal isOpen={!!classRemovalConfirm} onClose={() => setClassRemovalConfirm(null)} title={t('confirm')}>

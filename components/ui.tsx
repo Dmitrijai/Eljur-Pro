@@ -851,148 +851,21 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, select
 };
 
 // --- MODAL ---
-// Uses Portal for clean z-index hierarchy, stacked modal isolation, and strict background scroll/click lock
-const activeModalStack: symbol[] = [];
-const modalStackListeners = new Set<() => void>();
-
-const notifyModalStackChange = () => {
-  modalStackListeners.forEach((fn) => fn());
-};
-
-const syncBodyModalLock = () => {
-  if (typeof document === 'undefined') return;
-  if (activeModalStack.length > 0) {
-    document.documentElement.classList.add('modal-open');
-    document.body.classList.add('modal-open');
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-  } else {
-    document.documentElement.classList.remove('modal-open');
-    document.body.classList.remove('modal-open');
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-  }
-  notifyModalStackChange();
-};
-
+// Uses Portal for clean z-index hierarchy and ensures full accessibility
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) => {
-  const modalIdRef = useRef<symbol>(Symbol('modal'));
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [stackIndex, setStackIndex] = useState(0);
-  const [isTopModal, setIsTopModal] = useState(true);
-
   React.useEffect(() => {
-    if (!isOpen) return;
-    const id = modalIdRef.current;
-    if (!activeModalStack.includes(id)) {
-      activeModalStack.push(id);
+    if (isOpen) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
     }
-    const updateStackState = () => {
-      const idx = activeModalStack.indexOf(id);
-      setStackIndex(Math.max(0, idx));
-      setIsTopModal(activeModalStack[activeModalStack.length - 1] === id);
-    };
-    modalStackListeners.add(updateStackState);
-    syncBodyModalLock();
-    updateStackState();
-
-    return () => {
-      modalStackListeners.delete(updateStackState);
-      const idx = activeModalStack.indexOf(id);
-      if (idx !== -1) {
-        activeModalStack.splice(idx, 1);
-      }
-      syncBodyModalLock();
-    };
+    return () => document.body.classList.remove('modal-open');
   }, [isOpen]);
 
-  // Non-passive touchmove and wheel guards to prevent background or underlying modal scroll chaining
-  React.useEffect(() => {
-    if (!isOpen) return;
-    const wrapperEl = wrapperRef.current;
-    if (!wrapperEl) return;
-
-    const findScrollableParent = (node: HTMLElement | null): HTMLElement | null => {
-      let cur = node;
-      while (cur && cur !== wrapperEl && cur !== document.body) {
-        const style = window.getComputedStyle(cur);
-        const oy = style.overflowY;
-        const ox = style.overflowX;
-        const canScrollY = (oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight + 1;
-        const canScrollX = (ox === 'auto' || ox === 'scroll') && cur.scrollWidth > cur.clientWidth + 1;
-        if (canScrollY || canScrollX) return cur;
-        cur = cur.parentElement;
-      }
-      return null;
-    };
-
-    const handleWheel = (e: WheelEvent) => {
-      if (!isTopModal) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      const target = e.target as HTMLElement | null;
-      if (!contentRef.current || !target || !contentRef.current.contains(target)) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      const scroller = findScrollableParent(target);
-      if (!scroller) {
-        e.preventDefault();
-      }
-      e.stopPropagation();
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!isTopModal) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      const target = e.target as HTMLElement | null;
-      if (!contentRef.current || !target || !contentRef.current.contains(target)) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      const scroller = findScrollableParent(target);
-      if (!scroller) {
-        e.preventDefault();
-      }
-      e.stopPropagation();
-    };
-
-    wrapperEl.addEventListener('wheel', handleWheel, { passive: false });
-    wrapperEl.addEventListener('touchmove', handleTouchMove, { passive: false });
-    return () => {
-      wrapperEl.removeEventListener('wheel', handleWheel);
-      wrapperEl.removeEventListener('touchmove', handleTouchMove);
-    };
-  }, [isOpen, isTopModal]);
-
   if (!isOpen) return null;
-  const computedZIndex = 9999 + stackIndex * 20;
-
   return createPortal(
-    <div
-      ref={wrapperRef}
-      style={{ zIndex: computedZIndex }}
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      className={`modal-print-wrapper fixed inset-0 w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200 overscroll-contain print:static print:h-auto print:w-full print:block print:bg-white print:p-0 ${
-        isTopModal ? 'pointer-events-auto' : 'pointer-events-none select-none'
-      }`}
-    >
-      <div
-        ref={contentRef}
-        onClick={(e) => e.stopPropagation()}
-        className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] ${
-          isTopModal ? 'overflow-y-auto' : 'overflow-hidden'
-        } overscroll-contain flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}
-      >
+    <div className="modal-print-wrapper fixed inset-0 z-[9999] w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200 print:static print:h-auto print:w-full print:block print:bg-white print:p-0">
+      <div className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] overflow-y-auto flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}>
         <div className="flex justify-between items-center px-3 py-2.5 sm:p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-xl sm:rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black gap-2">
           <h3 className="text-sm sm:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{title}</h3>
           <button type="button" onClick={onClose} className="text-xl sm:text-2xl leading-none text-slate-400 hover:text-slate-600 w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300 flex-shrink-0 no-print">&times;</button>
@@ -1004,7 +877,7 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
   );
 };
 
-// --- SIDE NAV DRAWER (Smooth Slide + Sensitive Touch Swipe) ---
+// --- SIDE NAV DRAWER (Smooth Slide + Left-Edge Touch Swipe) ---
 export interface NavTabItem {
   id: string;
   label: string;
@@ -1026,7 +899,7 @@ export const SideNavDrawer: React.FC<{
 }> = ({ items, activeId, onSelect, isOpen, onClose, onOpen, onTabMetaChange, userFio, userRoleLabel, schoolName, lang = 'ru' }) => {
   const activeItem = items.find(i => i.id === activeId) || items[0];
   const totalBadges = items.reduce((acc, item) => acc + (item.badgeCount || 0), 0);
-  const touchStartRef = useRef<{ x: number; y: number; canOpenDrawer: boolean; triggered: boolean } | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number; fromLeftEdge: boolean } | null>(null);
 
   useEffect(() => {
     if (onTabMetaChange && activeItem) {
@@ -1034,31 +907,8 @@ export const SideNavDrawer: React.FC<{
     }
   }, [activeId, activeItem?.label, totalBadges]);
 
-  // Global touch listener on mobile (< 768px): sensitive right-swipe to open even from further right on screen
+  // Global touch listener on mobile (< 768px): swipe right from left edge to open, swipe left when open to close
   useEffect(() => {
-    const canStartDrawerOpenSwipe = (target: EventTarget | null, clientX: number): boolean => {
-      if (activeModalStack.length > 0 || document.body.classList.contains('modal-open')) return false;
-      // Always allow from left 44px; also allow up to 65% of screen width if not inside a horizontally scrolled element
-      if (clientX <= 44) return true;
-      if (clientX > Math.max(200, window.innerWidth * 0.65)) return false;
-
-      let el = target as HTMLElement | null;
-      while (el && el !== document.body && el !== document.documentElement) {
-        const tag = el.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable) {
-          return false;
-        }
-        const style = window.getComputedStyle(el);
-        const overflowX = style.overflowX;
-        if ((overflowX === 'auto' || overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 4 && el.scrollLeft > 0) {
-          // User is panning back inside a horizontally scrolled table
-          return false;
-        }
-        el = el.parentElement;
-      }
-      return true;
-    };
-
     const handleTouchStart = (e: TouchEvent) => {
       if (window.innerWidth >= 768) return;
       const t = e.touches[0];
@@ -1066,53 +916,30 @@ export const SideNavDrawer: React.FC<{
       touchStartRef.current = {
         x: t.clientX,
         y: t.clientY,
-        canOpenDrawer: canStartDrawerOpenSwipe(e.target, t.clientX),
-        triggered: false
+        fromLeftEdge: t.clientX <= 32
       };
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (window.innerWidth >= 768 || !touchStartRef.current || touchStartRef.current.triggered) return;
-      const t = e.touches[0];
-      if (!t) return;
-      const dx = t.clientX - touchStartRef.current.x;
-      const dy = t.clientY - touchStartRef.current.y;
-      const isHorizontalSwipe = Math.abs(dx) > Math.abs(dy) * 1.15;
-
-      if (!isOpen && touchStartRef.current.canOpenDrawer && isHorizontalSwipe && dx >= 20) {
-        touchStartRef.current.triggered = true;
-        onOpen?.();
-      } else if (isOpen && isHorizontalSwipe && dx <= -24) {
-        touchStartRef.current.triggered = true;
-        onClose();
-      }
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
       if (window.innerWidth >= 768 || !touchStartRef.current) return;
-      if (!touchStartRef.current.triggered) {
-        const t = e.changedTouches[0];
-        if (t) {
-          const dx = t.clientX - touchStartRef.current.x;
-          const dy = t.clientY - touchStartRef.current.y;
-          const isHorizontalSwipe = Math.abs(dx) > Math.abs(dy) * 1.15;
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - touchStartRef.current.x;
+      const dy = t.clientY - touchStartRef.current.y;
+      const isHorizontalSwipe = Math.abs(dx) > Math.abs(dy) * 1.25;
 
-          if (!isOpen && touchStartRef.current.canOpenDrawer && isHorizontalSwipe && dx >= 18) {
-            onOpen?.();
-          } else if (isOpen && isHorizontalSwipe && dx <= -24) {
-            onClose();
-          }
-        }
+      if (!isOpen && touchStartRef.current.fromLeftEdge && isHorizontalSwipe && dx > 48) {
+        onOpen?.();
+      } else if (isOpen && isHorizontalSwipe && dx < -45) {
+        onClose();
       }
       touchStartRef.current = null;
     };
 
     window.addEventListener('touchstart', handleTouchStart, { passive: true });
-    window.addEventListener('touchmove', handleTouchMove, { passive: true });
     window.addEventListener('touchend', handleTouchEnd, { passive: true });
     return () => {
       window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isOpen, onOpen, onClose]);
@@ -1322,7 +1149,5 @@ export const ScrollableTableWrapper: React.FC<{
     </div>
   );
 };
-
-
 
 

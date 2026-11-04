@@ -2813,20 +2813,9 @@ export interface UserPreferences {
     theme?: 'light' | 'dark';
     language?: 'ru' | 'en';
     showSeasonalAnimations?: boolean;
-    bodyFontId?: string;
-    headingFontId?: string;
 }
 
-export const getUserPreferences = (
-    userId?: string | null,
-    userObj?: {
-        theme?: 'light' | 'dark';
-        language?: 'ru' | 'en';
-        showSeasonalAnimations?: boolean;
-        bodyFontId?: string;
-        headingFontId?: string;
-    } | null
-): UserPreferences => {
+export const getUserPreferences = (userId?: string | null, userObj?: { theme?: 'light' | 'dark'; language?: 'ru' | 'en'; showSeasonalAnimations?: boolean } | null): UserPreferences => {
     const key = userId ? `eljur_user_prefs_${userId}` : 'eljur_guest_prefs';
     let stored: UserPreferences = {};
     if (typeof window !== 'undefined') {
@@ -2843,8 +2832,6 @@ export const getUserPreferences = (
         showSeasonalAnimations: userObj?.showSeasonalAnimations !== undefined
             ? userObj.showSeasonalAnimations
             : (stored.showSeasonalAnimations !== undefined ? stored.showSeasonalAnimations : true),
-        bodyFontId: userObj?.bodyFontId !== undefined ? userObj.bodyFontId : stored.bodyFontId,
-        headingFontId: userObj?.headingFontId !== undefined ? userObj.headingFontId : stored.headingFontId,
     };
 };
 
@@ -2855,12 +2842,6 @@ export const saveUserPreferences = (userId: string | undefined | null, prefs: Pa
         ...current,
         ...prefs,
     };
-    if ('bodyFontId' in prefs && prefs.bodyFontId === undefined) {
-        delete updated.bodyFontId;
-    }
-    if ('headingFontId' in prefs && prefs.headingFontId === undefined) {
-        delete updated.headingFontId;
-    }
     if (typeof window !== 'undefined') {
         try {
             localStorage.setItem(key, JSON.stringify(updated));

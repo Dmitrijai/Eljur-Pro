@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 
 export type Role = 'director' | 'teacher' | 'student' | 'creator' | 'employee';
 
@@ -50,8 +49,6 @@ export interface User {
   theme?: 'light' | 'dark';
   language?: 'ru' | 'en';
   showSeasonalAnimations?: boolean;
-  bodyFontId?: string;
-  headingFontId?: string;
 }
 
 export interface SubgroupLesson {

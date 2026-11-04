@@ -205,7 +205,9 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
       secretCount: state.settings.secretCount || 4,
       adminPasswordHash: state.settings.adminPasswordHash,
       adminPasswordSalt: state.settings.adminPasswordSalt,
-      eljurInfo: serialized
+      eljurInfo: serialized,
+      bodyFontId: state.settings.bodyFontId,
+      headingFontId: state.settings.headingFontId
     }).catch(() => {});
     onUpdate({
       ...state,
@@ -235,7 +237,9 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
       secretCount: state.settings.secretCount || 4,
       adminPasswordHash: state.settings.adminPasswordHash,
       adminPasswordSalt: state.settings.adminPasswordSalt,
-      eljurInfo: serialized
+      eljurInfo: serialized,
+      bodyFontId: state.settings.bodyFontId,
+      headingFontId: state.settings.headingFontId
     }).catch(() => {});
     onUpdate({
       ...state,
