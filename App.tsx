@@ -756,7 +756,7 @@ export default function App() {
         };
         setAppState(prev => {
           const baseSchools = (Array.isArray(cached.schools) && cached.schools.length > 0) ? cached.schools : defaultState.schools;
-          const prevSchoolMap = new Map((prev?.schools || []).map(s => [s.id, s]));
+          const prevSchoolMap = new Map<string, any>((prev?.schools || []).map((s: any) => [s.id, s]));
           const hydratedSchools = baseSchools.map((s: any) => {
             const pS = prevSchoolMap.get(s.id);
             let fallbackEdu = '';
@@ -766,13 +766,20 @@ export default function App() {
               educationalResourceUrl: pS?.educationalResourceUrl || s.educationalResourceUrl || fallbackEdu || ''
             };
           });
+          const mergedCachedUsers = mergeById(defaultState.users, cached.users);
+          const activeCachedUser = currentUser
+            ? mergedCachedUsers.find(u => u.id === currentUser.id) || currentUser
+            : null;
+          const cachedUserPrefs = activeCachedUser
+            ? H.getUserPreferences(activeCachedUser.id, activeCachedUser)
+            : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true, bodyFontId: undefined, headingFontId: undefined };
           return {
             ...defaultState,
             ...cached,
             schools: hydratedSchools,
             classes: (Array.isArray(cached.classes) && cached.classes.length > 0) ? cached.classes : defaultState.classes,
             subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
-            users: mergeById(defaultState.users, cached.users),
+            users: mergedCachedUsers,
             schedules: { ...defaultState.schedules, ...(cached.schedules || {}) },
             grades: { ...defaultState.grades, ...(cached.grades || {}) },
             finalGrades: { ...defaultState.finalGrades, ...(cached.finalGrades || {}) },
@@ -781,7 +788,16 @@ export default function App() {
             announcements: mergeById(defaultState.announcements, cached.announcements),
             teacherAssignments: mergeById(defaultState.teacherAssignments, cached.teacherAssignments),
             quarters: (cached.quarters?.Q1 && cached.quarters.Q1.length > 2) ? cached.quarters : defaultState.quarters,
-            scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings
+            scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings,
+            settings: {
+              ...defaultState.settings,
+              ...(cached.settings || {}),
+              theme: cachedUserPrefs.theme || 'light',
+              language: cachedUserPrefs.language || 'ru',
+              showSeasonalAnimations: cachedUserPrefs.showSeasonalAnimations !== false,
+              bodyFontId: cachedUserPrefs.bodyFontId || undefined,
+              headingFontId: cachedUserPrefs.headingFontId || undefined
+            }
           };
         });
         setLoading(false);
@@ -1166,8 +1182,8 @@ export default function App() {
         if (!currentUser || !appState?.settings) return;
         const userInState = appState.users.find(u => u.id === currentUser.id) || currentUser;
         const prefs = H.getUserPreferences(currentUser.id, userInState);
-        const bodyFontId = prefs.bodyFontId ?? appState.settings.bodyFontId;
-        const headingFontId = prefs.headingFontId ?? appState.settings.headingFontId;
+        const bodyFontId = prefs.bodyFontId;
+        const headingFontId = prefs.headingFontId;
 
         if (bodyFontId) {
             try {

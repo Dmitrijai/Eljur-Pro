@@ -416,8 +416,8 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
   const currentSelfInState = state.users.find(u => u.id === user.id) || user;
   const currentUserFontPrefs = H.getUserPreferences(user.id, currentSelfInState);
-  const activeBodyFontId = currentSelfInState.bodyFontId ?? currentUserFontPrefs.bodyFontId ?? state.settings.bodyFontId;
-  const activeHeadingFontId = currentSelfInState.headingFontId ?? currentUserFontPrefs.headingFontId ?? state.settings.headingFontId;
+  const activeBodyFontId = currentUserFontPrefs.bodyFontId;
+  const activeHeadingFontId = currentUserFontPrefs.headingFontId;
 
   const updateSessionUserFonts = (nextBodyFontId?: string, nextHeadingFontId?: string) => {
     try {
@@ -425,8 +425,8 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       if (sessionRaw) {
         const parsed = JSON.parse(sessionRaw);
         if (parsed.user) {
-          parsed.user.bodyFontId = nextBodyFontId;
-          parsed.user.headingFontId = nextHeadingFontId;
+          parsed.user.bodyFontId = nextBodyFontId || '';
+          parsed.user.headingFontId = nextHeadingFontId || '';
           localStorage.setItem('eljur_session', JSON.stringify(parsed));
         }
       }
@@ -442,9 +442,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
         const nextBody = activeBodyFontId === id ? undefined : activeBodyFontId;
         const nextHeading = activeHeadingFontId === id ? undefined : activeHeadingFontId;
         H.saveUserPreferences(user.id, { bodyFontId: nextBody || '', headingFontId: nextHeading || '' });
-        user.bodyFontId = nextBody;
-        user.headingFontId = nextHeading;
-        state.users = state.users.map(u => u.id === user.id ? { ...u, bodyFontId: nextBody, headingFontId: nextHeading } : u);
+        user.bodyFontId = nextBody || '';
+        user.headingFontId = nextHeading || '';
+        state.users = state.users.map(u => u.id === user.id ? { ...u, bodyFontId: nextBody || '', headingFontId: nextHeading || '' } : u);
         state.settings.bodyFontId = nextBody;
         state.settings.headingFontId = nextHeading;
         updateSessionUserFonts(nextBody, nextHeading);
@@ -456,18 +456,20 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   };
 
   const setBodyFont = (id?: string) => {
-      H.saveUserPreferences(user.id, { bodyFontId: id || '' });
-      user.bodyFontId = id;
-      state.users = state.users.map(u => u.id === user.id ? { ...u, bodyFontId: id } : u);
+      const savedVal = id || '';
+      H.saveUserPreferences(user.id, { bodyFontId: savedVal });
+      user.bodyFontId = savedVal;
+      state.users = state.users.map(u => u.id === user.id ? { ...u, bodyFontId: savedVal } : u);
       state.settings.bodyFontId = id;
       updateSessionUserFonts(id, activeHeadingFontId);
       onUpdate({ ...state });
   };
 
   const setHeadingFont = (id?: string) => {
-      H.saveUserPreferences(user.id, { headingFontId: id || '' });
-      user.headingFontId = id;
-      state.users = state.users.map(u => u.id === user.id ? { ...u, headingFontId: id } : u);
+      const savedVal = id || '';
+      H.saveUserPreferences(user.id, { headingFontId: savedVal });
+      user.headingFontId = savedVal;
+      state.users = state.users.map(u => u.id === user.id ? { ...u, headingFontId: savedVal } : u);
       state.settings.headingFontId = id;
       updateSessionUserFonts(activeBodyFontId, id);
       onUpdate({ ...state });

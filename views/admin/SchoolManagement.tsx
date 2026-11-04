@@ -3,7 +3,7 @@ import { AppState, User } from '../../types';
 import * as H from '../../utils/helpers';
 import * as DB from '../../services/db';
 import { generateSalt, hashPassword, verifyUserPasswordDetailed } from '../../utils/auth';
-import { Button, Input, Card } from '../../components/ui';
+import { Button, Input, Card, Select } from '../../components/ui';
 import { Edit, Trash2, AlertCircle, Save } from 'lucide-react';
 
 export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, onUpdate: (s: AppState) => void, lang: any }) => {

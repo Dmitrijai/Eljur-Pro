@@ -854,6 +854,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, select
 // --- MODAL ---
 // Uses Portal for clean z-index hierarchy, stacked modal support, and strict background scroll/click lock
 const activeModalStack: symbol[] = [];
+const modalStackListeners = new Set<() => void>();
 
 const syncModalScrollLock = () => {
   if (typeof document === 'undefined') return;
@@ -872,22 +873,46 @@ const syncModalScrollLock = () => {
     document.body.style.overscrollBehavior = '';
     document.documentElement.style.overscrollBehavior = '';
   }
+  modalStackListeners.forEach((fn) => fn());
 };
 
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }> = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' }) => {
   const modalIdRef = useRef<symbol>(Symbol('modal'));
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [stackIndex, setStackIndex] = useState(0);
+  const [stackState, setStackState] = useState<{ index: number; isTop: boolean }>({ index: 0, isTop: true });
 
   React.useEffect(() => {
     if (!isOpen) return;
     const id = modalIdRef.current;
+    const updateStackState = () => {
+      const idx = activeModalStack.indexOf(id);
+      setStackState({
+        index: Math.max(0, idx),
+        isTop: activeModalStack[activeModalStack.length - 1] === id,
+      });
+    };
+    modalStackListeners.add(updateStackState);
+
     if (!activeModalStack.includes(id)) {
       activeModalStack.push(id);
     }
-    setStackIndex(activeModalStack.indexOf(id));
     syncModalScrollLock();
+
+    const canElementScroll = (startEl: HTMLElement | null, boundaryEl: HTMLElement | null): boolean => {
+      let el: HTMLElement | null = startEl;
+      while (el && boundaryEl && boundaryEl.contains(el)) {
+        const style = window.getComputedStyle(el);
+        const overflowY = style.overflowY;
+        const overflowX = style.overflowX;
+        const canScrollY = (overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 1;
+        const canScrollX = (overflowX === 'auto' || overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1;
+        if (canScrollY || canScrollX) return true;
+        if (el === boundaryEl) break;
+        el = el.parentElement;
+      }
+      return false;
+    };
 
     const preventBackgroundScroll = (e: Event) => {
       // Only the topmost modal handles scroll containment
@@ -899,6 +924,9 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
         e.preventDefault();
         return;
       }
+      if (!canElementScroll(target, contentRef.current)) {
+        e.preventDefault();
+      }
     };
 
     window.addEventListener('wheel', preventBackgroundScroll, { passive: false });
@@ -907,6 +935,7 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
     return () => {
       window.removeEventListener('wheel', preventBackgroundScroll);
       window.removeEventListener('touchmove', preventBackgroundScroll);
+      modalStackListeners.delete(updateStackState);
       const idx = activeModalStack.indexOf(id);
       if (idx > -1) {
         activeModalStack.splice(idx, 1);
@@ -916,7 +945,7 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
   }, [isOpen]);
 
   if (!isOpen) return null;
-  const computedZIndex = 9000 + Math.max(0, stackIndex) * 20;
+  const computedZIndex = 9000 + stackState.index * 20;
 
   return createPortal(
     <div
@@ -925,11 +954,15 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
       onMouseDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
-      className="modal-print-wrapper fixed inset-0 w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200 overscroll-none print:static print:h-auto print:w-full print:block print:bg-white print:p-0"
+      className={`modal-print-wrapper fixed inset-0 w-screen h-screen flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200 overscroll-none print:static print:h-auto print:w-full print:block print:bg-white print:p-0 ${
+        stackState.isTop ? 'pointer-events-auto' : 'pointer-events-none'
+      }`}
     >
       <div
         ref={contentRef}
-        className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] overflow-y-auto overscroll-contain flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}
+        className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] ${
+          stackState.isTop ? 'overflow-y-auto pointer-events-auto' : 'overflow-hidden pointer-events-none select-none'
+        } overscroll-contain flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}
       >
         <div className="flex justify-between items-center px-3 py-2.5 sm:p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-xl sm:rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black gap-2">
           <h3 className="text-sm sm:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{title}</h3>
