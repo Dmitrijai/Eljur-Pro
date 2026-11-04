@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ejournal-pro-pwa-v1';
+const CACHE_NAME = 'ejournal-pro-pwa-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -34,6 +34,18 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Never cache Vite dev server on-the-fly transformed modules
+  if (
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.endsWith('.tsx') ||
+    url.pathname.endsWith('.ts') ||
+    url.search.includes('v=') ||
+    url.search.includes('t=')
+  ) {
+    return;
+  }
 
   if (event.request.mode === 'navigate') {
     event.respondWith(

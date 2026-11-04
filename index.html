@@ -5,6 +5,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Journal Pro</title>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          regs.forEach(function(reg) {
+            if (reg.active && reg.active.scriptURL && reg.active.scriptURL.indexOf('dev-sw.js') !== -1) {
+              reg.unregister().then(function() {
+                if ('caches' in window) {
+                  caches.keys().then(function(keys) {
+                    Promise.all(keys.map(function(k) { return caches.delete(k); })).then(function() {
+                      window.location.reload();
+                    });
+                  });
+                } else {
+                  window.location.reload();
+                }
+              });
+            }
+          });
+        }).catch(function() {});
+      }
+    </script>
     <meta name="google-site-verification" content="1pOh5inSb8I7cMW1pkPynj9ff-B_aO8Hp4nLdpBreF8" />
     <meta name="google-site-verification" content="M8R0Bgfwj0DWFZW4WWjCb8SQgIOhShVxUDlR083xH2I" />
     <meta name="description" content="ЭлЖур Про (E-Journal Pro / Eljur Pro) — современный электронный журнал и дневник образовательного учреждения. Расписание уроков, оценки, домашние задания, сообщения и аналитика успеваемости.">
@@ -19,11 +40,11 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="E-Journal Pro">
+    <meta name="apple-mobile-web-app-title" content="ЭлЖур Про">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="ru_RU">
     <meta property="og:url" content="https://dmitrijai.github.io/Eljur-Pro/">
-    <meta property="og:site_name" content="ЭлЖур Про (E-Journal Pro)">
+    <meta property="og:site_name" content="ЭлЖур Про">
     <meta property="og:title" content="ЭлЖур Про (E-Journal Pro) — Электронный журнал и дневник">
     <meta property="og:description" content="ЭлЖур Про (E-Journal Pro / Eljur Pro) — современный электронный журнал и дневник образовательного учреждения. Расписание, оценки, домашние задания и успеваемость.">
     <meta property="og:image" content="https://dmitrijai.github.io/Eljur-Pro/pwa-512x512.png">
@@ -32,37 +53,39 @@
     <meta name="twitter:description" content="ЭлЖур Про (E-Journal Pro / Eljur Pro) — современный электронный журнал и дневник образовательного учреждения.">
     <meta name="twitter:image" content="https://dmitrijai.github.io/Eljur-Pro/pwa-512x512.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/png" href="./assets/icon.png">
-    <link rel="apple-touch-icon" href="pwa-192x192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="pwa-192x192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="pwa-512x512.png">
+    <link rel="shortcut icon" type="image/png" href="pwa-192x192.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="pwa-192x192.png">
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@graph": [
-        {
-          "@type": "WebSite",
-          "name": "ЭлЖур Про",
-          "alternateName": ["элжур про", "E-Journal Pro", "Eljur Pro", "ЭлЖур Про — Электронный журнал и дневник"],
-          "url": "https://dmitrijai.github.io/Eljur-Pro/",
-          "inLanguage": "ru-RU"
-        },
-        {
-          "@type": "WebApplication",
-          "name": "ЭлЖур Про — E-Journal Pro",
-          "alternateName": ["элжур про", "E-Journal Pro", "Eljur Pro", "Электронный журнал ЭлЖур Про"],
-          "url": "https://dmitrijai.github.io/Eljur-Pro/",
-          "applicationCategory": "EducationalApplication",
-          "operatingSystem": "All",
-          "browserRequirements": "Requires JavaScript. Works on Chrome, Yandex Browser, Safari (iPhone/iPad), Android, and Desktop.",
-          "description": "ЭлЖур Про (E-Journal Pro / Eljur Pro) — электронный школьный журнал и дневник для учеников, учителей, классных руководителей и администрации школы.",
-          "image": "https://dmitrijai.github.io/Eljur-Pro/pwa-512x512.png",
-          "inLanguage": "ru-RU",
-          "offers": {
-            "@type": "Offer",
-            "price": "0",
-            "priceCurrency": "RUB"
-          }
-        }
-      ]
+      "@type": "WebSite",
+      "@id": "https://dmitrijai.github.io/Eljur-Pro/#website",
+      "name": "ЭлЖур Про",
+      "alternateName": ["E-Journal Pro", "Eljur Pro", "элжур про", "ЭлЖур Про (E-Journal Pro)"],
+      "url": "https://dmitrijai.github.io/Eljur-Pro/",
+      "inLanguage": "ru-RU"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "ЭлЖур Про (E-Journal Pro)",
+      "alternateName": ["элжур про", "E-Journal Pro", "Eljur Pro", "Электронный журнал ЭлЖур Про"],
+      "url": "https://dmitrijai.github.io/Eljur-Pro/",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "All",
+      "browserRequirements": "Requires JavaScript. Works on Chrome, Yandex Browser, Safari (iPhone/iPad), Firefox, Android, and Desktop.",
+      "description": "ЭлЖур Про (E-Journal Pro / Eljur Pro) — электронный школьный журнал и дневник для учеников, учителей, классных руководителей и администрации школы.",
+      "image": "https://dmitrijai.github.io/Eljur-Pro/pwa-512x512.png",
+      "inLanguage": "ru-RU",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "RUB"
+      }
     }
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
