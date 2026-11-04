@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
             'robots.txt',
             'sitemap.xml',
             'google74c682c95adf1ccf.html',
+            'yandex_b6e1c962dd71d738.html',
           ],
           workbox: {
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
