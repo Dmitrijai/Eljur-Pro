@@ -23,8 +23,3 @@ dev-dist
 *.njsproj
 *.sln
 *.sw?
-
-# AI Studio temporary chat attachments
-public/assets/aistudio/
-migrated_prompt_history/
-

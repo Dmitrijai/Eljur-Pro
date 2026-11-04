@@ -21,12 +21,15 @@ export default defineConfig(({ mode }) => {
             'pwa-192x192.png',
             'pwa-512x512.png',
             'pwa-maskable-512x512.png',
+            'robots.txt',
+            'sitemap.xml',
+            'google74c682c95adf1ccf.html',
           ],
           workbox: {
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
             globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,ttf}'],
-            globIgnores: ['**/assets/aistudio/**'],
-            navigateFallbackDenylist: [/^\/api\//, /^\/__\//],
+            globIgnores: ['**/assets/aistudio/**', '**/google*.html', '**/yandex*.html'],
+            navigateFallbackDenylist: [/^\/api\//, /^\/__\//, /google.*\.html$/, /yandex.*\.html$/, /robots\.txt$/, /sitemap\.xml$/],
           },
           manifest: {
             name: 'E-Journal Pro',
