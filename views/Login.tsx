@@ -6,7 +6,7 @@ import * as H from '../utils/helpers';
 import { verifyUserPasswordDetailed, hashPassword } from '../utils/auth';
 import { saveSchoolEntity, syncUserAuthUidMap, ensureFirebaseAuthSession, getPublicCreatorGate, PublicCreatorGateConfig, fetchUsersForLoginLookup, setCurrentSessionUser } from '../services/db';
 import { defaultState } from '../App';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Eye, EyeOff } from 'lucide-react';
 
 interface LoginProps {
   users: User[];
@@ -27,12 +27,14 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
   const [role, setRole] = useState<'student' | 'teacher' | 'director' | 'employee'>('student');
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   // Secret Creator Login Modal State (triggered strictly by secret keypress combo)
   const [showCreatorModal, setShowCreatorModal] = useState(false);
   const [creatorPassword, setCreatorPassword] = useState('');
+  const [showCreatorPassword, setShowCreatorPassword] = useState(false);
   const [creatorError, setCreatorError] = useState('');
   const [creatorLoading, setCreatorLoading] = useState(false);
 
@@ -418,7 +420,9 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-3 sm:p-4 dark:bg-slate-950 font-sans relative">
       <Card className="w-full max-w-md p-5 sm:p-8 shadow-2xl border-t-[5px] sm:border-t-[6px] border-t-blue-600 dark:border-t-blue-500 relative">
         <div className="text-center mb-5 sm:mb-10">
-          <img
+          <div
+            role="button"
+            tabIndex={-1}
             onClick={(e) => {
               if (longPressTriggeredRef.current) {
                 e.preventDefault();
@@ -426,7 +430,7 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
                 longPressTriggeredRef.current = false;
                 return;
               }
-              onShowInfo();
+              onShowInfo?.();
             }}
             onTouchStart={startLogoLongPress}
             onTouchEnd={cancelLogoLongPress}
@@ -436,12 +440,16 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
             onMouseUp={cancelLogoLongPress}
             onMouseLeave={cancelLogoLongPress}
             onContextMenu={(e) => e.preventDefault()}
-            src={`${import.meta.env.BASE_URL}assets/icon.png`}
-            alt="ЭлЖур"
-            draggable={false}
-            style={{ WebkitTouchCallout: 'none' }}
-            className="w-[72px] h-[72px] sm:w-24 sm:h-24 object-contain mx-auto mb-3 sm:mb-6 transform hover:scale-105 transition-transform duration-300 cursor-pointer select-none"
-          />
+            onDragStart={(e) => e.preventDefault()}
+            className="w-[72px] h-[72px] sm:w-24 sm:h-24 mx-auto mb-3 sm:mb-6 transform hover:scale-105 transition-transform duration-300 cursor-pointer select-none [-webkit-touch-callout:none] [-webkit-user-select:none]"
+          >
+            <img
+              src={`${import.meta.env.BASE_URL}assets/icon.png`}
+              alt="ЭлЖур"
+              draggable={false}
+              className="w-full h-full object-contain pointer-events-none select-none [-webkit-user-drag:none] [-webkit-touch-callout:none]"
+            />
+          </div>
           <h2 className="text-xl sm:text-3xl font-bold text-slate-800 dark:text-white mb-1 sm:mb-2 font-heading">{schoolName}</h2>
           <p className="text-xs sm:text-base text-slate-500 dark:text-slate-400">{t('login_title')}</p>
         </div>
@@ -462,7 +470,24 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           </div>
           <div>
             <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('password')}</label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t('enter_pass')} className="h-9 sm:h-12 text-xs sm:text-base" />
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t('enter_pass')}
+                className="h-9 sm:h-12 text-xs sm:text-base pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors focus:outline-none"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Eye className="w-4 h-4 sm:w-5 sm:h-5" />}
+              </button>
+            </div>
           </div>
           
           {error && <div className="text-red-600 text-xs sm:text-sm bg-red-50 p-2.5 sm:p-3 rounded-lg border border-red-100 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">{error}</div>}
@@ -479,7 +504,7 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
       {/* Secret Administrator Password Modal */}
       <Modal 
         isOpen={showCreatorModal} 
-        onClose={() => { setShowCreatorModal(false); setCreatorError(''); setCreatorPassword(''); }} 
+        onClose={() => { setShowCreatorModal(false); setCreatorError(''); setCreatorPassword(''); setShowCreatorPassword(false); }} 
         title={lang === 'ru' ? 'Вход администратора' : 'Administrator Access'}
       >
         <div className="p-1 sm:p-2 space-y-3 sm:space-y-4">
@@ -493,14 +518,25 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
               <label className="block text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5 sm:mb-2">
                 {lang === 'ru' ? 'Секретный пароль администратора' : 'Administrator Password'}
               </label>
-              <Input 
-                type="password" 
-                value={creatorPassword} 
-                onChange={(e) => setCreatorPassword(e.target.value)} 
-                placeholder="••••••••" 
-                className="h-9 sm:h-12 text-xs sm:text-base" 
-                autoFocus
-              />
+              <div className="relative">
+                <Input 
+                  type={showCreatorPassword ? 'text' : 'password'} 
+                  value={creatorPassword} 
+                  onChange={(e) => setCreatorPassword(e.target.value)} 
+                  placeholder="••••••••" 
+                  className="h-9 sm:h-12 text-xs sm:text-base pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden" 
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowCreatorPassword((prev) => !prev)}
+                  aria-label={showCreatorPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                  className="absolute inset-y-0 right-0 flex items-center justify-center px-3 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors focus:outline-none"
+                >
+                  {showCreatorPassword ? <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Eye className="w-4 h-4 sm:w-5 sm:h-5" />}
+                </button>
+              </div>
             </div>
 
             {creatorError && (
@@ -522,7 +558,7 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
                 type="button" 
                 variant="ghost" 
                 className="h-9 sm:h-12 px-4 sm:px-5 text-xs sm:text-base" 
-                onClick={() => { setShowCreatorModal(false); setCreatorError(''); setCreatorPassword(''); }}
+                onClick={() => { setShowCreatorModal(false); setCreatorError(''); setCreatorPassword(''); setShowCreatorPassword(false); }}
               >
                 {lang === 'ru' ? 'Отмена' : 'Cancel'}
               </Button>
