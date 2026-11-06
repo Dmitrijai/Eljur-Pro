@@ -17,6 +17,10 @@ if (typeof window !== 'undefined') {
     originalError.apply(console, args);
   };
 
+  if (!/bot|googlebot|yandex|crawler|spider|robot|crawling|lighthouse/i.test(navigator.userAgent || '')) {
+    document.title = 'E-Journal Pro';
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
