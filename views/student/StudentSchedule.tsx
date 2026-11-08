@@ -10,14 +10,14 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
     const lang = state.settings.language || 'ru';
     const t = (k: string) => H.t(k, lang);
-    const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+    const systemNow = H.getSchoolNow(state, user.schoolId);
     const defaultWeekIso = H.dateToIso(H.getStartOfWeek(systemNow));
     const [scheduleWeekIso, setScheduleWeekIso] = H.useSyncedState<string>(`eljur_st_sched_week_${user.id}`, defaultWeekIso);
     const scheduleWeekStart = new Date(scheduleWeekIso || defaultWeekIso);
 
     const goPrevWeek = () => setScheduleWeekIso(H.dateToIso(H.addDays(scheduleWeekStart, -7)));
     const goNextWeek = () => setScheduleWeekIso(H.dateToIso(H.addDays(scheduleWeekStart, 7)));
-    const goCurrentWeek = () => setScheduleWeekIso(H.dateToIso(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)))));
+    const goCurrentWeek = () => setScheduleWeekIso(H.dateToIso(H.getStartOfWeek(H.getSchoolNow(state, user.schoolId))));
 
     const scheduleDays = Object.values(schedule).filter(d => H.isDateInWeek(d.date, scheduleWeekStart)).sort((a,b) => a.date.localeCompare(b.date));
     const scheduleDates = scheduleDays.map(d => d.date);

@@ -70,7 +70,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
        const schedule = H.getSchoolClassSchedule(state, user.schoolId, cls);
        if (!schedule) return [];
        const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
-       const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+       const today = H.getSchoolNow(state, user.schoolId);
        today.setHours(0,0,0,0);
        const dates = new Set<string>();
        Object.values(schedule).forEach((d: any) => {
@@ -99,7 +99,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
      if (H.isHoliday(date, scheduleSettings) || H.getVacationForDay(date, scheduleSettings)) {
          return alert(t('cant_assign_hw_holiday_vacation'));
      }
-     const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); today.setHours(0, 0, 0, 0);
+     const today = H.getSchoolNow(state, user.schoolId); today.setHours(0, 0, 0, 0);
      const selectedDate = new Date(date); selectedDate.setHours(0, 0, 0, 0);
      if (selectedDate < today && !editId) { return alert(t('cant_hw_past')); }
      const targetSchoolId = user.schoolId || 'school_1';
@@ -127,7 +127,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
    };
 
    const startEdit = (h: any) => {
-      const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); today.setHours(0,0,0,0);
+      const today = H.getSchoolNow(state, user.schoolId); today.setHours(0,0,0,0);
       const hwDate = new Date(h.date); hwDate.setHours(0,0,0,0);
       if (hwDate < today) { alert(t('cant_hw_past')); return; }
       const initialAtts: Attachment[] = [...(h.attachments || [])];
@@ -141,7 +141,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
    const deleteHW = (id: string) => {
       const h = state.homework.find((x:any) => x.id === id);
       if (h) {
-          const today = new Date(Date.now() + (state.settings.systemTimeOffset || 0)); today.setHours(0,0,0,0);
+          const today = H.getSchoolNow(state, user.schoolId); today.setHours(0,0,0,0);
           const hwDate = new Date(h.date); hwDate.setHours(0,0,0,0);
           if (hwDate < today) { alert(t('cant_hw_past')); return; }
       }
@@ -200,7 +200,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
            <div className="space-y-2.5 sm:space-y-4">
              {filteredHistory.map((h: any) => {
                const lIdxLabel = (h.lessonIndex !== undefined && h.lessonIndex > 0) ? ` (${t('lesson_order')} ${h.lessonIndex + 1})` : '';
-               const isPast = new Date(h.date).setHours(0,0,0,0) < new Date(Date.now() + (state.settings.systemTimeOffset || 0)).setHours(0,0,0,0);
+               const isPast = new Date(h.date).setHours(0,0,0,0) < H.getSchoolNow(state, user.schoolId).setHours(0,0,0,0);
                return (
                <Card key={h.id} className="p-3 sm:p-5 text-xs sm:text-sm border-l-4 sm:border-l-[6px] border-l-blue-400 dark:border-l-blue-600">
                   <div className="flex justify-between items-center mb-1.5 sm:mb-3 gap-2"><div className="font-bold text-slate-800 text-xs sm:text-base truncate dark:text-white">{h.subject}{lIdxLabel}</div><div className="flex items-center gap-1.5 shrink-0"><div className="text-[10px] sm:text-xs font-mono font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full dark:bg-slate-800 dark:text-slate-400">{h.class}{h.letter} • {H.formatDateDDMMYYYY(h.date)}</div>{!isPast && (<><button onClick={() => startEdit(h)} className="text-blue-500 hover:text-blue-700"><Edit size={13}/></button><button onClick={() => deleteHW(h.id)} className="text-red-500 hover:text-red-700"><Trash2 size={13}/></button></>)}{isPast && <span title={t('past_edit_forbidden')} className="text-slate-300 cursor-not-allowed"><Edit size={13}/></span>}</div></div>

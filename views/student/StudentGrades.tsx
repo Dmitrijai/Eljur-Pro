@@ -21,7 +21,7 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
     
     const defaultStudentQuarter = useMemo(() => {
         if (scheduleSettings.quarterDefinitions) {
-            const nowIso = H.dateToIso(new Date(Date.now() + (state.settings.systemTimeOffset || 0)));
+            const nowIso = H.dateToIso(H.getSchoolNow(state, user.schoolId));
             for (const [key, def] of Object.entries(scheduleSettings.quarterDefinitions)) {
                if (def.start && def.end && nowIso >= def.start && nowIso <= def.end) { 
                    return key; 

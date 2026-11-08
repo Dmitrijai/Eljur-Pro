@@ -122,7 +122,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
 
    const defaultQuarter = useMemo(() => {
        if (scheduleSettings.quarterDefinitions) {
-           const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0));
+           const systemNow = H.getSchoolNow(localState, user.schoolId);
            const dateStr = H.dateToIso(systemNow);
            for (const qKey of ['Q1', 'Q2', 'Q3', 'Q4']) {
                const def = scheduleSettings.quarterDefinitions[qKey];
@@ -203,7 +203,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
        });
        const combined = new Set([...savedDates.filter((d: string) => validLessonDates.includes(d)), ...Array.from(datesWithGrades)]);
        if (combined.size === 0 && validLessonDates.length > 0) {
-           const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0));
+           const systemNow = H.getSchoolNow(localState, user.schoolId);
            const todayIso = H.dateToIso(systemNow);
            const pastOrToday = validLessonDates.filter(d => d <= todayIso);
            (pastOrToday.length > 0 ? pastOrToday : validLessonDates).forEach(d => combined.add(d));
@@ -238,7 +238,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
    const getLessonsPerWeek = (classKey: string, subject: string): number => {
        const schedule = H.getSchoolClassSchedule(localState, user.schoolId, classKey);
        if (!schedule) return 0;
-       const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0));
+       const systemNow = H.getSchoolNow(localState, user.schoolId);
        const weekStart = H.getStartOfWeek(systemNow);
        const countDaySubject = (day: any) => {
            let c = 0;
@@ -285,7 +285,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
    };
 
    const updateGrade = (studentId: string, date: string, val: string, type: string, forcedLessonIndex?: number) => {
-     const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0));
+     const systemNow = H.getSchoolNow(localState, user.schoolId);
      const todayIso = H.dateToIso(systemNow);
      if (date > todayIso) { setUiNotice(t('cant_grade_future')); return; }
      if (getLessonCount(date) === 0) { setUiNotice(t('no_lesson_grade')); return; }
@@ -535,7 +535,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
        commitGradebookChanges(newState);
    };
    const confirmFinalGrade = (studentId: string, field: 'q1' | 'q2' | 'q3' | 'q4' | 'year' | 'exam') => { const entry = getFinalData(studentId); if (field === 'q1') entry.isQ1Confirmed = true; if (field === 'q2') entry.isQ2Confirmed = true; if (field === 'q3') entry.isQ3Confirmed = true; if (field === 'q4') entry.isQ4Confirmed = true; if (field === 'exam') entry.isExamConfirmed = true; if (field === 'year') entry.isYearConfirmed = true; const newState = {...localState}; setLocalState(newState); setHasUnsavedGrades?.(false); commitGradebookChanges(newState); };
-   const systemNow = new Date(Date.now() + (localState.settings.systemTimeOffset || 0)); const todayIso = H.dateToIso(systemNow); systemNow.setHours(0,0,0,0);
+   const systemNow = H.getSchoolNow(localState, user.schoolId); const todayIso = H.dateToIso(systemNow); systemNow.setHours(0,0,0,0);
 
    const [mobileViewMode, setMobileViewMode] = H.useSyncedState<'by_date' | 'table'>(`eljur_gb_mobmode_${user.id}`, 'by_date');
    const [selectedMobileDate, setSelectedMobileDate] = H.useSyncedState<string>(`eljur_gb_mobdate_${user.id}`, '');

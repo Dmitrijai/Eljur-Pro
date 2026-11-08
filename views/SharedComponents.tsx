@@ -121,7 +121,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                         </div>
                       )}
                       {item.editedAt && (
-                        <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {new Date(item.editedAt).toLocaleString()}</div>
+                        <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {H.formatDateTimeInSchoolTz(item.editedAt, state, item.schoolId, lang as 'ru' | 'en')}</div>
                       )}
                       {isEdited && editedByDisplay && (
                         <div className="text-amber-300 font-semibold">
@@ -388,7 +388,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                       </div>
                     )}
                     {item.editedAt && (
-                      <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {new Date(item.editedAt).toLocaleString()}</div>
+                      <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {H.formatDateTimeInSchoolTz(item.editedAt, state, item.schoolId, lang as 'ru' | 'en')}</div>
                     )}
                     {isEdited && editedByDisplay && (
                       <div className="text-amber-300 font-semibold">
@@ -722,7 +722,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
                       </div>
                     )}
                     {item.editedAt && (
-                      <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {new Date(item.editedAt).toLocaleString()}</div>
+                      <div>{lang === 'ru' ? 'Исправлено:' : 'Edited:'} {H.formatDateTimeInSchoolTz(item.editedAt, state, item.schoolId || currentUser.schoolId, lang as 'ru' | 'en')}</div>
                     )}
                     {(item.editedAt || item.editedById) && editedByDisplay && (
                       <div className="text-amber-300 font-semibold">
@@ -734,7 +734,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
               </div>
             )}
             <span className="text-[10px] sm:text-xs font-semibold text-slate-400 bg-slate-100 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded dark:bg-slate-800 dark:text-slate-500">
-              {new Date(item.date).toLocaleString()}
+              {H.formatDateTimeInSchoolTz(item.date, state, item.schoolId || currentUser.schoolId, lang as 'ru' | 'en')}
             </span>
             {activeTab === 'sent' && (
               <>
@@ -1082,6 +1082,8 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
 
       const collectionName = isAnnounce ? 'announcements' : 'messages';
 
+      const accurateIsoNow = await H.getAccurateNowIsoAsync(state.settings?.systemTimeOffset || 0);
+
       if (editId) {
         // Edit existing
         const list = isAnnounce ? state.announcements : state.messages;
@@ -1100,7 +1102,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             title: trimmedTitle,
             body: trimmedBody,
             attachments: mergedAtts,
-            editedAt: new Date().toISOString(),
+            editedAt: accurateIsoNow,
             editedById: currentUser.id,
             readBeforeEditBy: prevReadBefore,
             readAfterEditBy: [],
@@ -1126,7 +1128,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
           title: trimmedTitle,
           body: trimmedBody,
           attachments: newAttachments,
-          date: new Date().toISOString()
+          date: accurateIsoNow
         };
 
         if (isAnnounce) {

@@ -8,7 +8,7 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
     const [highlightClass, setHighlightClass] = H.useSyncedState<string>(`eljur_tsched_cls_${user.id}`, '');
     const t = (k: string) => H.t(k, lang);
 
-    const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+    const systemNow = H.getSchoolNow(state, user.schoolId);
     const [weekStartIso, setWeekStartIso] = H.useSyncedState<string>(`eljur_tsched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
     const weekStart = useMemo(() => {
         const parsed = new Date(weekStartIso);
@@ -21,7 +21,7 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
 
     const goPrevWeek = () => setWeekStart(d => H.addDays(d, -7));
     const goNextWeek = () => setWeekStart(d => H.addDays(d, 7));
-    const goCurrentWeek = () => setWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
+    const goCurrentWeek = () => setWeekStart(H.getStartOfWeek(H.getSchoolNow(state, user.schoolId)));
 
     const schoolClasses = H.getSchoolClasses(state, user.schoolId);
     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);

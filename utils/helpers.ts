@@ -1413,7 +1413,7 @@ export const isGradeExpiredNU = (grade: Grade | undefined | null, systemTimeOffs
     if (!grade || grade.value === undefined || grade.value === null) return false;
     const valStr = String(grade.value).trim().toUpperCase();
     if (valStr !== 'Н/У' && valStr !== 'N/U') return false;
-    const systemNowIso = dateToIso(new Date(Date.now() + systemTimeOffset));
+    const systemNowIso = dateToIso(getSchoolNow(systemTimeOffset));
     const deadlineIso = getNUDeadlineIso(grade);
     if (!deadlineIso) return false;
     return systemNowIso >= deadlineIso;
@@ -2817,33 +2817,37 @@ export interface UserPreferences {
     headingFontId?: string;
 }
 
-export const getUserPreferences = (userId?: string | null, userObj?: { theme?: 'light' | 'dark'; language?: 'ru' | 'en'; showSeasonalAnimations?: boolean; bodyFontId?: string; headingFontId?: string } | null): UserPreferences => {
-    const key = userId ? `eljur_user_prefs_${userId}` : 'eljur_guest_prefs';
+const DEVICE_PREFS_KEY = 'eljur_device_prefs';
+
+export const getUserPreferences = (userId?: string | null, _userObj?: { theme?: 'light' | 'dark'; language?: 'ru' | 'en'; showSeasonalAnimations?: boolean; bodyFontId?: string; headingFontId?: string } | null): UserPreferences => {
     let stored: UserPreferences = {};
     if (typeof window !== 'undefined') {
         try {
-            const raw = localStorage.getItem(key);
-            if (raw) {
-                stored = JSON.parse(raw) || {};
+            const rawDevice = localStorage.getItem(DEVICE_PREFS_KEY);
+            if (rawDevice) {
+                stored = JSON.parse(rawDevice) || {};
+            } else {
+                // One-time migration from previous local storage keys on this device if present
+                const fallbackKey = userId ? `eljur_user_prefs_${userId}` : 'eljur_guest_prefs';
+                const rawFallback = localStorage.getItem(fallbackKey) || localStorage.getItem('eljur_guest_prefs');
+                if (rawFallback) {
+                    stored = JSON.parse(rawFallback) || {};
+                    localStorage.setItem(DEVICE_PREFS_KEY, JSON.stringify(stored));
+                }
             }
         } catch {}
     }
-    const resolvedBodyFont = userObj?.bodyFontId !== undefined ? userObj.bodyFontId : stored.bodyFontId;
-    const resolvedHeadingFont = userObj?.headingFontId !== undefined ? userObj.headingFontId : stored.headingFontId;
     return {
-        theme: userObj?.theme ?? stored.theme ?? 'light',
-        language: userObj?.language ?? stored.language ?? 'ru',
-        showSeasonalAnimations: userObj?.showSeasonalAnimations !== undefined
-            ? userObj.showSeasonalAnimations
-            : (stored.showSeasonalAnimations !== undefined ? stored.showSeasonalAnimations : true),
-        bodyFontId: resolvedBodyFont || undefined,
-        headingFontId: resolvedHeadingFont || undefined,
+        theme: stored.theme ?? 'light',
+        language: stored.language ?? 'ru',
+        showSeasonalAnimations: stored.showSeasonalAnimations !== undefined ? stored.showSeasonalAnimations : true,
+        bodyFontId: stored.bodyFontId || undefined,
+        headingFontId: stored.headingFontId || undefined,
     };
 };
 
-export const saveUserPreferences = (userId: string | undefined | null, prefs: Partial<UserPreferences>): UserPreferences => {
-    const key = userId ? `eljur_user_prefs_${userId}` : 'eljur_guest_prefs';
-    const current = getUserPreferences(userId, null);
+export const saveUserPreferences = (_userId: string | undefined | null, prefs: Partial<UserPreferences>): UserPreferences => {
+    const current = getUserPreferences(null, null);
     const updated: UserPreferences = {
         ...current,
         ...prefs,
@@ -2852,11 +2856,157 @@ export const saveUserPreferences = (userId: string | undefined | null, prefs: Pa
     if (!updated.headingFontId) delete updated.headingFontId;
     if (typeof window !== 'undefined') {
         try {
-            localStorage.setItem(key, JSON.stringify(updated));
-            emitCrossTabSync('KV_UPDATE', key, updated);
+            localStorage.setItem(DEVICE_PREFS_KEY, JSON.stringify(updated));
+            emitCrossTabSync('KV_UPDATE', DEVICE_PREFS_KEY, updated);
         } catch {}
     }
     return updated;
 };
+
+let networkClockSkewMs = 0;
+let networkClockSynced = false;
+let networkClockSyncPromise: Promise<number> | null = null;
+let activeSystemTimeOffset = 0;
+let activeSchoolTimezone = 'UTC+3';
+
+export const setActiveTimeContext = (systemTimeOffset?: number, timezone?: string | null) => {
+    if (typeof systemTimeOffset === 'number' && !isNaN(systemTimeOffset)) {
+        activeSystemTimeOffset = systemTimeOffset;
+    }
+    if (timezone && typeof timezone === 'string') {
+        activeSchoolTimezone = timezone;
+    }
+};
+
+export const syncNetworkClockOffset = (force: boolean = false): Promise<number> => {
+    if (typeof window === 'undefined') return Promise.resolve(0);
+    if (networkClockSyncPromise && !force) return networkClockSyncPromise;
+    networkClockSyncPromise = (async () => {
+        try {
+            const url = `${window.location.origin}${window.location.pathname}?_t=${Date.now()}`;
+            const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+            const dateHeader = res.headers.get('date');
+            if (dateHeader) {
+                const serverMs = Date.parse(dateHeader);
+                if (!isNaN(serverMs)) {
+                    networkClockSkewMs = serverMs - Date.now();
+                    networkClockSynced = true;
+                }
+            }
+        } catch {}
+        return networkClockSkewMs;
+    })();
+    return networkClockSyncPromise;
+};
+
+if (typeof window !== 'undefined') {
+    syncNetworkClockOffset();
+    setInterval(() => {
+        syncNetworkClockOffset(true);
+    }, 60_000);
+}
+
+export const getWorldNowMs = (): number => {
+    return Date.now() + networkClockSkewMs;
+};
+
+export const parseTimezoneOffsetHours = (tz?: string | null): number => {
+    if (!tz || typeof tz !== 'string') return 3;
+    const m = tz.match(/UTC([+-]?\d+)/i);
+    if (m && m[1]) {
+        const parsed = parseInt(m[1], 10);
+        if (!isNaN(parsed)) return parsed;
+    }
+    return 3;
+};
+
+export const getSchoolTimezone = (state?: any, schoolId?: string | null): string => {
+    const targetSid = schoolId && schoolId !== 'global' ? schoolId : undefined;
+    if (targetSid) {
+        const sch = state?.schools?.find?.((s: any) => s.id === targetSid);
+        if (sch?.timezone) return sch.timezone;
+        if (state?.settings?.schoolsSettings?.[targetSid]?.timezone) {
+            return state.settings.schoolsSettings[targetSid].timezone;
+        }
+    }
+    if (state?.settings?.timezone) return state.settings.timezone;
+    return activeSchoolTimezone || 'UTC+3';
+};
+
+export const getSchoolNow = (stateOrOffset?: any, schoolIdOrTz?: string | null): Date => {
+    let offset = activeSystemTimeOffset || 0;
+    if (typeof stateOrOffset === 'number' && !isNaN(stateOrOffset)) {
+        offset = stateOrOffset;
+    } else if (stateOrOffset && typeof stateOrOffset === 'object') {
+        if (typeof stateOrOffset.settings?.systemTimeOffset === 'number') {
+            offset = stateOrOffset.settings.systemTimeOffset;
+        } else if (typeof stateOrOffset.systemTimeOffset === 'number') {
+            offset = stateOrOffset.systemTimeOffset;
+        }
+    }
+
+    let tz = activeSchoolTimezone || 'UTC+3';
+    if (schoolIdOrTz && /^UTC[+-]?\d+$/i.test(schoolIdOrTz)) {
+        tz = schoolIdOrTz;
+    } else {
+        tz = getSchoolTimezone(typeof stateOrOffset === 'object' ? stateOrOffset : null, schoolIdOrTz);
+    }
+
+    const effectiveUtcMs = getWorldNowMs() + offset;
+    const schoolTzOffsetMs = parseTimezoneOffsetHours(tz) * 3_600_000;
+    const localOffsetMs = -new Date(effectiveUtcMs).getTimezoneOffset() * 60_000;
+    return new Date(effectiveUtcMs + schoolTzOffsetMs - localOffsetMs);
+};
+
+export const parseWallClockInSchoolTz = (datePart: string, timePart: string, tz?: string | null): number => {
+    const [y, m, d] = (datePart || '').split('-').map(Number);
+    const [hh, mm, ss] = (timePart || '00:00:00').split(':').map(Number);
+    if (!y || !m || !d || isNaN(hh) || isNaN(mm)) return NaN;
+    const utcWallMs = Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0);
+    const schoolTzOffsetMs = parseTimezoneOffsetHours(tz) * 3_600_000;
+    return utcWallMs - schoolTzOffsetMs;
+};
+
+export const formatDateTimeInSchoolTz = (
+    isoOrDate: string | Date | undefined | null,
+    state?: any,
+    schoolId?: string | null,
+    lang: 'ru' | 'en' = 'ru'
+): string => {
+    if (!isoOrDate) return '';
+    const utcMs = typeof isoOrDate === 'string' ? Date.parse(isoOrDate) : (isoOrDate instanceof Date ? isoOrDate.getTime() : NaN);
+    if (isNaN(utcMs)) return String(isoOrDate);
+    const tz = getSchoolTimezone(state, schoolId);
+    const schoolTzOffsetMs = parseTimezoneOffsetHours(tz) * 3_600_000;
+    const d = new Date(utcMs + schoolTzOffsetMs);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const day = pad(d.getUTCDate());
+    const month = pad(d.getUTCMonth() + 1);
+    const year = d.getUTCFullYear();
+    const hours = pad(d.getUTCHours());
+    const mins = pad(d.getUTCMinutes());
+    const secs = pad(d.getUTCSeconds());
+    if (lang === 'en') {
+        return `${month}/${day}/${year}, ${hours}:${mins}:${secs}`;
+    }
+    return `${day}.${month}.${year}, ${hours}:${mins}:${secs}`;
+};
+
+export const getAccurateNow = (systemTimeOffset: number = 0): Date => {
+    return new Date(getWorldNowMs() + (systemTimeOffset || 0));
+};
+
+export const getAccurateNowIso = (systemTimeOffset: number = 0): string => {
+    return getAccurateNow(systemTimeOffset).toISOString();
+};
+
+export const getAccurateNowIsoAsync = async (systemTimeOffset: number = 0): Promise<string> => {
+    if (!networkClockSynced) {
+        await syncNetworkClockOffset(true);
+    }
+    return getAccurateNow(systemTimeOffset).toISOString();
+};
+
+
 
 

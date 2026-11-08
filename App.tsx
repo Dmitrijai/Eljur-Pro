@@ -256,13 +256,13 @@ export const defaultState: AppState = {
     { id: 'u_creator', schoolId: 'global', fio: 'Создатель', role: 'creator', login: 'creator', password: 'admin123' },
     { id: 'u_dir', schoolId: 'school_1', fio: 'Иванов Иван', role: 'director', login: 'director', password: 'dir123' },
     { id: 'u_teacher', schoolId: 'school_1', fio: 'Петров Пётр', role: 'teacher', login: 'teacher', password: 'teach123', subjects: ['Математика', 'Физика'], classes: ['10_А'] },
-    { id: 'u_s1_t2', schoolId: 'school_1', fio: 'Смирнова Елена Викторовна', role: 'teacher', login: 'smirnova_ev', password: 'teach123', subjects: ['Русский язык', 'Литература', 'Английский язык'], classes: ['10_А', '9_А'] },
-    { id: 'u_s1_t3', schoolId: 'school_1', fio: 'Морозов Андрей Сергеевич', role: 'teacher', login: 'morozov_as', password: 'teach123', subjects: ['Информатика', 'История', 'Химия', 'Биология', 'География', 'Физкультура'], classes: ['10_А', '9_А'] },
+    { id: 'u_s1_t2', schoolId: 'school_1', fio: 'Смирнова Елена Викторовна', role: 'teacher', login: 'smirnova_ev', password: 'teach123_2', subjects: ['Русский язык', 'Литература', 'Английский язык'], classes: ['10_А', '9_А'] },
+    { id: 'u_s1_t3', schoolId: 'school_1', fio: 'Морозов Андрей Сергеевич', role: 'teacher', login: 'morozov_as', password: 'teach123_3', subjects: ['Информатика', 'История', 'Химия', 'Биология', 'География', 'Физкультура'], classes: ['10_А', '9_А'] },
     { id: 'u_emp', schoolId: 'school_1', fio: 'Сидоров Сидр', role: 'employee', customRole: 'Заместитель директора по УВР', login: 'emp', password: 'emp123', employeePermissions: { allowedTabs: ['messages', 'rating', 'schedule', 'announcements', 'users'], isAdministration: true, canSendAsDirector: true, messagingScope: ['ALL'] } },
     { id: 's_1', schoolId: 'school_1', fio: 'Кузнецов Алексей', role: 'student', login: 's10a_1', password: 'pass123', class: '10', letter: 'А' },
-    { id: 'u_s1_s2', schoolId: 'school_1', fio: 'Соколова Мария Александровна', role: 'student', login: 's10a_2', password: 'pass123', class: '10', letter: 'А' },
-    { id: 'u_s1_s3', schoolId: 'school_1', fio: 'Попов Дмитрий Игоревич', role: 'student', login: 's10a_3', password: 'pass123', class: '10', letter: 'А' },
-    { id: 'u_s1_s4', schoolId: 'school_1', fio: 'Лебедева Анна Денисовна', role: 'student', login: 's10a_4', password: 'pass123', class: '10', letter: 'А' }
+    { id: 'u_s1_s2', schoolId: 'school_1', fio: 'Соколова Мария Александровна', role: 'student', login: 's10a_2', password: 'pass123_2', class: '10', letter: 'А' },
+    { id: 'u_s1_s3', schoolId: 'school_1', fio: 'Попов Дмитрий Игоревич', role: 'student', login: 's10a_3', password: 'pass123_3', class: '10', letter: 'А' },
+    { id: 'u_s1_s4', schoolId: 'school_1', fio: 'Лебедева Анна Денисовна', role: 'student', login: 's10a_4', password: 'pass123_4', class: '10', letter: 'А' }
   ],
   userOrder: ['u_dir', 'u_teacher', 'u_s1_t2', 'u_s1_t3', 'u_emp', 's_1', 'u_s1_s2', 'u_s1_s3', 'u_s1_s4'],
   classes: [
@@ -518,8 +518,8 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
         return null;
     }
 
-    // Use Virtual Time for seasonal effects
-    const now = new Date(Date.now() + (timeOffset || 0));
+    // Use Virtual Time and School Timezone for seasonal effects
+    const now = H.getSchoolNow(timeOffset || 0);
     const month = now.getMonth(); // 0-11
     
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -630,7 +630,20 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
 });
 
 export default function App() {
-  const [appState, setAppState] = useState<AppState>(defaultState);
+  const [appState, setAppState] = useState<AppState>(() => {
+    const prefs = H.getUserPreferences(null, null);
+    return {
+      ...defaultState,
+      settings: {
+        ...defaultState.settings,
+        theme: prefs.theme || 'light',
+        language: prefs.language || 'ru',
+        showSeasonalAnimations: prefs.showSeasonalAnimations !== false,
+        bodyFontId: prefs.bodyFontId || undefined,
+        headingFontId: prefs.headingFontId || undefined,
+      },
+    };
+  });
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = H.useSyncedState<'dashboard' | 'settings'>(
@@ -677,7 +690,7 @@ export default function App() {
             (appStateRef.current?.users || []).find((u: any) => u.id === targetId) ||
             session.user ||
             defaultState.users.find((u: any) => u.id === targetId);
-          if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= new Date())) {
+          if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= H.getAccurateNow(appStateRef.current?.settings?.systemTimeOffset || 0))) {
             DB.setCurrentSessionUser(foundUser);
             setCurrentUser(foundUser);
             setShowLogoutConfirm(false);
@@ -707,6 +720,18 @@ export default function App() {
         }
       } else if (msg.type === 'STATE_UPDATE' && msg.value) {
         setAppState(msg.value as AppState);
+      } else if (msg.type === 'KV_UPDATE' && msg.key === 'eljur_device_prefs' && msg.value) {
+        setAppState((prev) => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            theme: msg.value.theme || 'light',
+            language: msg.value.language || 'ru',
+            showSeasonalAnimations: msg.value.showSeasonalAnimations !== false,
+            bodyFontId: msg.value.bodyFontId || undefined,
+            headingFontId: msg.value.headingFontId || undefined,
+          },
+        }));
       }
     });
 
@@ -755,9 +780,12 @@ export default function App() {
           return Array.from(map.values());
         };
         setAppState(prev => {
-          const baseSchools = (Array.isArray(cached.schools) && cached.schools.length > 0) ? cached.schools : defaultState.schools;
+          const combinedSchools = mergeById(
+            defaultState.schools,
+            mergeById(Array.isArray(cached.schools) ? cached.schools : [], prev?.schools || [])
+          );
           const prevSchoolMap = new Map<string, any>((prev?.schools || []).map((s: any) => [s.id, s]));
-          const hydratedSchools = baseSchools.map((s: any) => {
+          const hydratedSchools = combinedSchools.map((s: any) => {
             const pS = prevSchoolMap.get(s.id);
             let fallbackEdu = '';
             try { fallbackEdu = localStorage.getItem(`eljur_edu_url_${s.id}`) || ''; } catch {}
@@ -766,13 +794,11 @@ export default function App() {
               educationalResourceUrl: pS?.educationalResourceUrl || s.educationalResourceUrl || fallbackEdu || ''
             };
           });
-          const mergedCachedUsers = mergeById(defaultState.users, cached.users);
-          const activeCachedUser = currentUser
-            ? mergedCachedUsers.find(u => u.id === currentUser.id) || currentUser
-            : null;
-          const cachedUserPrefs = activeCachedUser
-            ? H.getUserPreferences(activeCachedUser.id, activeCachedUser)
-            : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true, bodyFontId: undefined, headingFontId: undefined };
+          const mergedCachedUsers = mergeById(
+            defaultState.users,
+            mergeById(cached.users, prev?.users || [])
+          );
+          const cachedUserPrefs = H.getUserPreferences(currentUser?.id, null);
           return {
             ...defaultState,
             ...cached,
@@ -780,13 +806,13 @@ export default function App() {
             classes: (Array.isArray(cached.classes) && cached.classes.length > 0) ? cached.classes : defaultState.classes,
             subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
             users: mergedCachedUsers,
-            schedules: { ...defaultState.schedules, ...(cached.schedules || {}) },
-            grades: { ...defaultState.grades, ...(cached.grades || {}) },
-            finalGrades: { ...defaultState.finalGrades, ...(cached.finalGrades || {}) },
-            homework: mergeById(defaultState.homework, cached.homework),
-            messages: mergeById(defaultState.messages, cached.messages),
-            announcements: mergeById(defaultState.announcements, cached.announcements),
-            teacherAssignments: mergeById(defaultState.teacherAssignments, cached.teacherAssignments),
+            schedules: { ...defaultState.schedules, ...(prev?.schedules || {}), ...(cached.schedules || {}) },
+            grades: { ...defaultState.grades, ...(prev?.grades || {}), ...(cached.grades || {}) },
+            finalGrades: { ...defaultState.finalGrades, ...(prev?.finalGrades || {}), ...(cached.finalGrades || {}) },
+            homework: mergeById(defaultState.homework, mergeById(cached.homework, prev?.homework)),
+            messages: mergeById(defaultState.messages, mergeById(cached.messages, prev?.messages)),
+            announcements: mergeById(defaultState.announcements, mergeById(cached.announcements, prev?.announcements)),
+            teacherAssignments: mergeById(defaultState.teacherAssignments, mergeById(cached.teacherAssignments, prev?.teacherAssignments)),
             quarters: (cached.quarters?.Q1 && cached.quarters.Q1.length > 2) ? cached.quarters : defaultState.quarters,
             scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings,
             settings: {
@@ -813,7 +839,7 @@ export default function App() {
                   (cached.users || []).find((user: any) => user.id === session.userId) ||
                   session.user ||
                   defaultState.users.find((user: any) => user.id === session.userId);
-                if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= new Date())) {
+                if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= H.getAccurateNow(cached?.settings?.systemTimeOffset || 0))) {
                   DB.setCurrentSessionUser(foundUser);
                   setCurrentUser(foundUser);
                   if (session.viewMode) setViewMode(session.viewMode);
@@ -835,7 +861,7 @@ export default function App() {
               (appState?.users || []).find((user: any) => user.id === session.userId) ||
               session.user ||
               defaultState.users.find((user: any) => user.id === session.userId);
-            if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= new Date())) {
+            if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= H.getAccurateNow(appState?.settings?.systemTimeOffset || 0))) {
               DB.setCurrentSessionUser(u);
               setCurrentUser(u);
               if (session.viewMode) setViewMode(session.viewMode);
@@ -864,7 +890,8 @@ export default function App() {
               adminPassword: gate.adminPassword || cur.settings.adminPassword || 'admin123',
               adminPasswordHash: gate.adminPasswordHash || cur.settings.adminPasswordHash,
               adminPasswordSalt: gate.adminPasswordSalt || cur.settings.adminPasswordSalt,
-              eljurInfo: gate.eljurInfo !== undefined ? gate.eljurInfo : cur.settings.eljurInfo
+              eljurInfo: gate.eljurInfo !== undefined ? gate.eljurInfo : cur.settings.eljurInfo,
+              systemTimeOffset: (gate as any).systemTimeOffset !== undefined ? (gate as any).systemTimeOffset : cur.settings.systemTimeOffset
             }
           };
         });
@@ -921,13 +948,49 @@ export default function App() {
         let mergedMessages = cur.messages || [];
         if (schoolUpdate.messages !== undefined) {
           const otherMsgs = mergedMessages.filter(m => (m.schoolId || 'school_1') !== targetSid);
-          mergedMessages = [...otherMsgs, ...schoolUpdate.messages];
+          const msgMap = new Map<string, any>();
+          [...otherMsgs, ...schoolUpdate.messages].forEach((m: any) => {
+            if (!m?.id) return;
+            const existing = msgMap.get(m.id);
+            if (!existing) {
+              msgMap.set(m.id, m);
+            } else {
+              const combinedReadBy = Array.from(new Set([...(existing.readBy || []), ...(m.readBy || [])]));
+              const combinedBefore = Array.from(new Set([...(existing.readBeforeEditBy || []), ...(m.readBeforeEditBy || [])]));
+              const combinedAfter = Array.from(new Set([...(existing.readAfterEditBy || []), ...(m.readAfterEditBy || [])]));
+              msgMap.set(m.id, {
+                ...existing,
+                ...m,
+                read: Boolean(existing.read || m.read || combinedReadBy.length > 0),
+                readBy: combinedReadBy,
+                ...(combinedBefore.length > 0 ? { readBeforeEditBy: combinedBefore } : {}),
+                ...(combinedAfter.length > 0 ? { readAfterEditBy: combinedAfter } : {})
+              });
+            }
+          });
+          mergedMessages = Array.from(msgMap.values());
         }
 
         let mergedAnnouncements = cur.announcements || [];
         if (schoolUpdate.announcements !== undefined) {
           const otherAnns = mergedAnnouncements.filter(a => (a.schoolId || 'school_1') !== targetSid);
-          mergedAnnouncements = [...otherAnns, ...schoolUpdate.announcements];
+          const annMap = new Map<string, any>();
+          [...otherAnns, ...schoolUpdate.announcements].forEach((a: any) => {
+            if (!a?.id) return;
+            const existing = annMap.get(a.id);
+            if (!existing) {
+              annMap.set(a.id, a);
+            } else {
+              const combinedReadBy = Array.from(new Set([...(existing.readBy || []), ...(a.readBy || [])]));
+              annMap.set(a.id, {
+                ...existing,
+                ...a,
+                read: Boolean(existing.read || a.read || combinedReadBy.length > 0),
+                readBy: combinedReadBy
+              });
+            }
+          });
+          mergedAnnouncements = Array.from(annMap.values());
         }
 
         let mergedGroups = cur.studentGroups || [];
@@ -953,19 +1016,16 @@ export default function App() {
           });
         }
 
-        const activeSelfUser = currentUser
-          ? mergedUsers.find(u => u.id === currentUser.id) || currentUser
-          : null;
-        const userPrefs = activeSelfUser
-          ? H.getUserPreferences(activeSelfUser.id, activeSelfUser)
-          : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true, bodyFontId: undefined, headingFontId: undefined };
-        if (activeSelfUser) {
-          H.saveUserPreferences(activeSelfUser.id, userPrefs);
-        }
+        const userPrefs = H.getUserPreferences(currentUser?.id, null);
 
         const baseSettings = isPrimarySchool && schoolUpdate.settings
           ? { ...cur.settings, ...schoolUpdate.settings }
-          : { ...cur.settings };
+          : {
+              ...cur.settings,
+              ...(schoolUpdate.settings?.systemTimeOffset !== undefined
+                ? { systemTimeOffset: schoolUpdate.settings.systemTimeOffset }
+                : {})
+            };
 
         const updated: AppState = {
           ...cur,
@@ -1048,6 +1108,13 @@ export default function App() {
                   schools: updatedSchools
                 };
               });
+              const activeIdsSet = new Set(schools.map((s: any) => s.id));
+              extraSchoolUnsubs.forEach((unsubFn, sId) => {
+                if (!activeIdsSet.has(sId)) {
+                  try { unsubFn(); } catch {}
+                  extraSchoolUnsubs.delete(sId);
+                }
+              });
               schools.forEach((s: any) => {
                 if (s.id && s.id !== activeSchoolId && s.id !== 'global' && !extraSchoolUnsubs.has(s.id)) {
                   const uSub = DB.subscribeToSchool(s.id, (upd) => mergeSchoolUpdate(s.id, upd, false));
@@ -1085,34 +1152,11 @@ export default function App() {
     };
   }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
 
-  // Synchronize active user's personal preferences (theme, language, seasonal animations, fonts) with appState.settings
+  // Synchronize device-local visual preferences (theme, language, seasonal animations, fonts) with appState.settings
   useEffect(() => {
     setAppState(prev => {
       if (!prev) return prev;
-      if (!currentUser) {
-        if (
-          prev.settings.theme === 'light' &&
-          prev.settings.language === 'ru' &&
-          prev.settings.showSeasonalAnimations !== false &&
-          !prev.settings.bodyFontId &&
-          !prev.settings.headingFontId
-        ) {
-          return prev;
-        }
-        return {
-          ...prev,
-          settings: {
-            ...prev.settings,
-            theme: 'light',
-            language: 'ru',
-            showSeasonalAnimations: true,
-            bodyFontId: undefined,
-            headingFontId: undefined
-          }
-        };
-      }
-      const userInState = prev.users.find(u => u.id === currentUser.id) || currentUser;
-      const prefs = H.getUserPreferences(currentUser.id, userInState);
+      const prefs = H.getUserPreferences(currentUser?.id, null);
       const nextTheme = prefs.theme || 'light';
       const nextLang = prefs.language || 'ru';
       const nextSeasonal = prefs.showSeasonalAnimations !== false;
@@ -1141,11 +1185,9 @@ export default function App() {
     });
   }, [currentUser?.id]);
 
-  // Effect to toggle body class for theme
+  // Effect to toggle body class for theme (applies to Login screen and all users on this device)
   useEffect(() => {
-    const activeTheme = currentUser
-      ? (H.getUserPreferences(currentUser.id, appState?.users.find(u => u.id === currentUser.id) || currentUser).theme || appState?.settings?.theme || 'light')
-      : 'light';
+    const activeTheme = H.getUserPreferences(currentUser?.id, null).theme || appState?.settings?.theme || 'light';
     if (activeTheme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
@@ -1155,13 +1197,11 @@ export default function App() {
 
   // Effect to set HTML lang for native input localization
   useEffect(() => {
-    const activeLang = currentUser
-      ? (H.getUserPreferences(currentUser.id, appState?.users.find(u => u.id === currentUser.id) || currentUser).language || appState?.settings?.language || 'ru')
-      : 'ru';
+    const activeLang = H.getUserPreferences(currentUser?.id, null).language || appState?.settings?.language || 'ru';
     document.documentElement.lang = activeLang;
   }, [appState?.settings?.language, currentUser?.id]);
 
-  // Effect to Apply Fonts (strictly bound to the logged-in user's profile)
+  // Effect to Apply Fonts (device-local across Login screen and all users)
   useEffect(() => {
     const readBlobAsDataURL = (blob: Blob): Promise<string> => {
         return new Promise((resolve, reject) => {
@@ -1179,15 +1219,14 @@ export default function App() {
         root.style.setProperty('--font-body', 'Inter');
         root.style.setProperty('--font-heading', 'Inter');
 
-        if (!currentUser || !appState?.settings) return;
-        const userInState = appState.users.find(u => u.id === currentUser.id) || currentUser;
-        const prefs = H.getUserPreferences(currentUser.id, userInState);
-        const bodyFontId = prefs.bodyFontId;
-        const headingFontId = prefs.headingFontId;
+        const prefs = H.getUserPreferences(currentUser?.id, null);
+        const bodyFontId = prefs.bodyFontId || appState?.settings?.bodyFontId;
+        const headingFontId = prefs.headingFontId || appState?.settings?.headingFontId;
+        const fallbackSid = currentUser?.schoolId || 'global';
 
         if (bodyFontId) {
             try {
-                const asset = await DB.getAsset(bodyFontId, currentUser.schoolId);
+                const asset = await DB.getAsset(bodyFontId, fallbackSid);
                 if (asset && asset.blob) {
                     const dataUrl = await readBlobAsDataURL(asset.blob);
                     const fontFace = new FontFace('CustomBodyFont', `url(${dataUrl})`);
@@ -1200,7 +1239,7 @@ export default function App() {
 
         if (headingFontId) {
             try {
-                const asset = await DB.getAsset(headingFontId, currentUser.schoolId);
+                const asset = await DB.getAsset(headingFontId, fallbackSid);
                 if (asset && asset.blob) {
                     const dataUrl = await readBlobAsDataURL(asset.blob);
                     const fontFace = new FontFace('CustomHeadingFont', `url(${dataUrl})`);
@@ -1257,8 +1296,11 @@ export default function App() {
       const schoolIds = Array.from(new Set(activeIds.length > 0 ? activeIds : ['school_1']));
       schoolIds.forEach(sId => {
         DB.saveSchoolState(sId, stateToFlush);
+        DB.saveSchoolCache(sId, stateToFlush);
       });
-      DB.saveSchoolCache(schoolIds[0] || 'school_1', stateToFlush);
+      if (!schoolIds.includes('school_1')) {
+        DB.saveSchoolCache('school_1', stateToFlush);
+      }
     } else {
       const targetSchoolId = currentUser?.schoolId && currentUser.schoolId !== 'global'
         ? currentUser.schoolId
@@ -1282,6 +1324,7 @@ export default function App() {
   }, [currentUser?.schoolId, currentUser?.role]);
 
   const handleUpdateState = (newState: AppState) => {
+    const prefs = H.getUserPreferences(currentUser?.id, null);
     const clonedState: AppState = {
       ...newState,
       schools: [...(newState.schools || [])],
@@ -1295,7 +1338,14 @@ export default function App() {
       grades: { ...(newState.grades || {}) },
       finalGrades: { ...(newState.finalGrades || {}) },
       quarters: { ...(newState.quarters || { Q1: [], Q2: [], Q3: [], Q4: [] }) },
-      settings: { theme: 'light', language: 'ru', ...(newState.settings || {}) }
+      settings: {
+        ...(newState.settings || {}),
+        theme: prefs.theme || newState.settings?.theme || 'light',
+        language: prefs.language || newState.settings?.language || 'ru',
+        showSeasonalAnimations: prefs.showSeasonalAnimations !== undefined ? prefs.showSeasonalAnimations : (newState.settings?.showSeasonalAnimations !== false),
+        bodyFontId: prefs.bodyFontId || undefined,
+        headingFontId: prefs.headingFontId || undefined
+      }
     };
     setAppState(clonedState);
     pendingStateRef.current = clonedState;
@@ -1309,12 +1359,11 @@ export default function App() {
         flushPendingState(pendingStateRef.current);
         pendingStateRef.current = null;
       }
-    }, 250);
+    }, 80);
   };
 
   const handleLogin = (u: User) => {
-    const prefs = H.getUserPreferences(u.id, u);
-    H.saveUserPreferences(u.id, prefs);
+    const prefs = H.getUserPreferences(u.id, null);
     const enrichedUser: User = {
       ...u,
       theme: prefs.theme || 'light',
@@ -1330,16 +1379,21 @@ export default function App() {
       try { localStorage.setItem('eljur_active_school_id', enrichedUser.schoolId); } catch {}
     }
     if (appState) {
-      setAppState({
-        ...appState,
-        settings: {
-          ...appState.settings,
-          theme: enrichedUser.theme || 'light',
-          language: enrichedUser.language || 'ru',
-          showSeasonalAnimations: enrichedUser.showSeasonalAnimations !== false,
-          bodyFontId: enrichedUser.bodyFontId || undefined,
-          headingFontId: enrichedUser.headingFontId || undefined
-        }
+      setAppState(prev => {
+        const userExists = prev.users.some(usr => usr.id === enrichedUser.id);
+        const updatedUsers = userExists ? prev.users : [...prev.users, enrichedUser];
+        return {
+          ...prev,
+          users: updatedUsers,
+          settings: {
+            ...prev.settings,
+            theme: prefs.theme || 'light',
+            language: prefs.language || 'ru',
+            showSeasonalAnimations: prefs.showSeasonalAnimations !== false,
+            bodyFontId: prefs.bodyFontId || undefined,
+            headingFontId: prefs.headingFontId || undefined
+          }
+        };
       });
     }
     
@@ -1356,6 +1410,15 @@ export default function App() {
     }
   };
   const handleLogout = () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (pendingStateRef.current) {
+      flushPendingState(pendingStateRef.current);
+      pendingStateRef.current = null;
+    }
+    const prefs = H.getUserPreferences(null, null);
     DB.setCurrentSessionUser(null);
     setCurrentUser(null);
     setViewMode('dashboard');
@@ -1364,11 +1427,11 @@ export default function App() {
         ...appState,
         settings: {
           ...appState.settings,
-          theme: 'light',
-          language: 'ru',
-          showSeasonalAnimations: true,
-          bodyFontId: undefined,
-          headingFontId: undefined
+          theme: prefs.theme || 'light',
+          language: prefs.language || 'ru',
+          showSeasonalAnimations: prefs.showSeasonalAnimations !== false,
+          bodyFontId: prefs.bodyFontId || undefined,
+          headingFontId: prefs.headingFontId || undefined
         }
       });
     }
@@ -1377,22 +1440,22 @@ export default function App() {
   };
 
   const currentSchool = appState?.schools.find(s => s.id === currentUser?.schoolId);
-  const currentUserPrefs = currentUser
-    ? H.getUserPreferences(currentUser.id, appState?.users.find(u => u.id === currentUser.id) || currentUser)
-    : { theme: 'light' as const, language: 'ru' as const, showSeasonalAnimations: true };
-  const lang = currentUser ? (currentUserPrefs.language || appState?.settings?.language || 'ru') : 'ru';
+  H.setActiveTimeContext(
+    appState?.settings?.systemTimeOffset || 0,
+    H.getSchoolTimezone(appState, currentUser?.schoolId)
+  );
+  const currentUserPrefs = H.getUserPreferences(currentUser?.id, null);
+  const lang = currentUserPrefs.language || appState?.settings?.language || 'ru';
   const t = (k: string) => H.t(k, lang);
   const eduResourceUrl = currentUser && currentUser.role !== 'creator'
     ? H.formatExternalResourceUrl(H.getSchoolEducationalResourceUrl(appState, currentUser.schoolId))
     : '';
 
   // Render loading state
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-blue-600 font-medium dark:bg-slate-900">{H.t('loading', 'ru')}</div>;
-  if (!appState) return <div className="p-10 text-red-600">{H.t('error_state', 'ru')}</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-blue-600 font-medium dark:bg-slate-900">{H.t('loading', lang)}</div>;
+  if (!appState) return <div className="p-10 text-red-600">{H.t('error_state', lang)}</div>;
 
-  const showAnimations = currentUser
-    ? (currentUserPrefs.showSeasonalAnimations !== false)
-    : true;
+  const showAnimations = currentUserPrefs.showSeasonalAnimations !== false;
 
   const renderEljurInfo = () => {
     const info = H.getSchoolEljurInfo(appState, currentUser?.schoolId) || H.DEFAULT_ELJUR_INFO_HTML;
@@ -1745,7 +1808,7 @@ export default function App() {
           </main>
           
           <footer className="py-8 text-center text-slate-400 text-xs no-print border-t border-slate-200 mt-auto bg-white dark:bg-slate-900 dark:border-slate-800 relative z-10">
-            &copy; {new Date().getFullYear()} {t('footer_text')}.
+            &copy; {H.getSchoolNow(appState, currentUser?.schoolId).getFullYear()} {t('footer_text')}.
           </footer>
           
         </>

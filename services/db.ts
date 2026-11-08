@@ -211,7 +211,8 @@ export const ensureFirebaseAuthSession = async (
  */
 export const fetchUsersForLoginLookup = async (): Promise<User[]> => {
   try {
-    if (!auth.currentUser) {
+    const currentEmail = auth.currentUser?.email?.toLowerCase();
+    if (currentEmail !== 'login_lookup@school1.eljur.org') {
       await ensureFirebaseAuthSession('login_lookup@school1.eljur.org', 'eljur_lookup_123456');
     }
     const schoolIds = new Set<string>(['school_1']);
@@ -220,10 +221,24 @@ export const fetchUsersForLoginLookup = async (): Promise<User[]> => {
       schoolIds.add(lastSchoolId);
     }
     try {
+      const rawKnown = localStorage.getItem('eljur_known_school_ids');
+      if (rawKnown) {
+        const parsedKnown = JSON.parse(rawKnown);
+        if (Array.isArray(parsedKnown)) {
+          parsedKnown.forEach((id: string) => {
+            if (id && id !== 'global') schoolIds.add(id);
+          });
+        }
+      }
+    } catch {}
+    try {
       const schoolsSnap = await getDocs(collection(db, 'schools'));
       schoolsSnap.docs.forEach(d => {
         if (d.id && d.id !== 'global') schoolIds.add(d.id);
       });
+      try {
+        localStorage.setItem('eljur_known_school_ids', JSON.stringify(Array.from(schoolIds)));
+      } catch {}
     } catch {
       // fallback to known schoolIds
     }
@@ -869,6 +884,7 @@ export interface PublicCreatorGateConfig {
   eljurInfo?: string;
   bodyFontId?: string;
   headingFontId?: string;
+  systemTimeOffset?: number;
   updatedAt?: string;
 }
 
@@ -1137,19 +1153,20 @@ export const subscribeToSchool = (
           }
         } catch {}
 
-        const schoolLevelSettings = data.settings ? { ...data.settings } : undefined;
-        if (schoolLevelSettings) {
-          delete schoolLevelSettings.theme;
-          delete schoolLevelSettings.language;
-          delete schoolLevelSettings.showSeasonalAnimations;
-          delete schoolLevelSettings.bodyFontId;
-          delete schoolLevelSettings.headingFontId;
-        }
+        const resolvedSchoolTz = data.timezone || data.settings?.schoolsSettings?.[schoolId]?.timezone || data.settings?.timezone || 'UTC+3';
+        const schoolLevelSettings = data.settings ? { ...data.settings } : ({} as any);
+        schoolLevelSettings.timezone = resolvedSchoolTz;
+        delete schoolLevelSettings.theme;
+        delete schoolLevelSettings.language;
+        delete schoolLevelSettings.showSeasonalAnimations;
+        delete schoolLevelSettings.bodyFontId;
+        delete schoolLevelSettings.headingFontId;
 
         docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
           name: data.name || 'Школа №1',
           directorId: data.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
+          timezone: resolvedSchoolTz,
           classes: schoolClasses,
           subjects: schoolSubjects,
           quarters: schoolQuarters,
@@ -1166,6 +1183,7 @@ export const subscribeToSchool = (
             id: data.id || schoolId,
             name: data.name || 'Школа №1',
             directorId: data.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
+            timezone: resolvedSchoolTz,
             classes: schoolClasses,
             subjects: schoolSubjects,
             quarters: schoolQuarters,
@@ -1175,7 +1193,7 @@ export const subscribeToSchool = (
             scheduleSettings: normalizedScheduleSettings,
             educationalResourceUrl: resolvedEduUrl,
             eljurInfo: data.eljurInfo ?? data.settings?.eljurInfo
-          }],
+          } as any],
           classes: schoolClasses,
           subjects: schoolSubjects,
           quarters: schoolQuarters,
@@ -1339,6 +1357,22 @@ export const subscribeToSchool = (
       onUpdate({ studentGroups });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/studentGroups`));
     unsubs.push(unsubGroups);
+
+    // 11. Global Creator Gate (Time Machine systemTimeOffset & gate settings)
+    const unsubGlobalGate = onSnapshot(doc(db, 'schools', 'school_1', 'publicConfig', 'creatorGate'), (snap) => {
+      if (isCancelled) return;
+      if (snap.exists()) {
+        const gData = snap.data() as any;
+        if (typeof gData.systemTimeOffset === 'number') {
+          onUpdate({
+            settings: {
+              systemTimeOffset: gData.systemTimeOffset
+            } as any
+          });
+        }
+      }
+    }, () => {});
+    unsubs.push(unsubGlobalGate);
   };
 
   if (auth.currentUser) {
@@ -1490,10 +1524,16 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             gradeTypes: school.gradeTypes || plainState.schoolGradeTypes?.[schoolId] || (schoolId === 'school_1' ? plainState.gradeTypes : []),
             subjectRequirements: school.subjectRequirements || (schoolId === 'school_1' ? plainState.subjectRequirements : {}),
             scheduleSettings: school.scheduleSettings || plainState.schoolScheduleSettings?.[schoolId] || (schoolId === 'school_1' ? plainState.scheduleSettings : undefined),
+            timezone: (school as any).timezone || plainState.settings?.schoolsSettings?.[schoolId]?.timezone || plainState.schoolsSettings?.[schoolId]?.timezone || plainState.settings?.timezone || 'UTC+3',
             settings: (() => {
-              const rawSettings = plainState.schoolsSettings?.[schoolId] || plainState.settings;
+              const rawSettings = plainState.settings || plainState.schoolsSettings?.[schoolId];
               if (!rawSettings) return undefined;
-              const cleaned = { ...rawSettings };
+              const cleaned = {
+                ...rawSettings,
+                ...(plainState.settings?.schoolsSettings?.[schoolId] || {}),
+                systemTimeOffset: plainState.settings?.systemTimeOffset ?? 0,
+                timezone: (school as any).timezone || plainState.settings?.schoolsSettings?.[schoolId]?.timezone || plainState.schoolsSettings?.[schoolId]?.timezone || plainState.settings?.timezone || 'UTC+3'
+              };
               delete cleaned.theme;
               delete cleaned.language;
               delete cleaned.showSeasonalAnimations;
@@ -1509,11 +1549,12 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
         }
 
         if (isDirectorOrCreator) {
-          const activeSettings = plainState.schoolsSettings?.[schoolId] || plainState.settings;
+          const activeSettings = plainState.settings || plainState.schoolsSettings?.[schoolId];
           if (activeSettings) {
             const gatePayload: any = {
               secretKey: activeSettings.secretKey || 'Space',
-              secretCount: activeSettings.secretCount || 4
+              secretCount: activeSettings.secretCount || 4,
+              systemTimeOffset: activeSettings.systemTimeOffset ?? 0
             };
             if (activeSettings.adminPassword) gatePayload.adminPassword = activeSettings.adminPassword;
             if (activeSettings.adminPasswordHash) gatePayload.adminPasswordHash = activeSettings.adminPasswordHash;
@@ -1542,15 +1583,13 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       }
       for (const u of schoolUsers) {
         const userDoc = { ...u };
+        delete userDoc.theme;
+        delete userDoc.language;
+        delete userDoc.showSeasonalAnimations;
+        delete userDoc.bodyFontId;
+        delete userDoc.headingFontId;
         queueSetIfChanged(doc(db, 'schools', schoolId, 'users', u.id), `schools/${schoolId}/users/${u.id}`, userDoc, true);
         synced.users.add(u.id);
-      }
-    } else if (currentUserId) {
-      // Non-admin user can only update their own user preferences (e.g. theme, language, showSeasonalAnimations)
-      const selfUser = schoolUsers.find((u: any) => u.id === currentUserId);
-      if (selfUser) {
-        const userDoc = { ...selfUser };
-        queueSetIfChanged(doc(db, 'schools', schoolId, 'users', currentUserId), `schools/${schoolId}/users/${currentUserId}`, userDoc, true);
       }
     }
 
@@ -1679,7 +1718,12 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     }
 
     // 8. Messages diff & sync (all school members can create messages, update readBy, and delete their own messages)
-    const schoolMessages = (plainState.messages || []).filter((m: any) => m.schoolId === schoolId || (!m.schoolId && schoolId === 'school_1'));
+    const schoolUserIdSet = new Set(schoolUsers.map((u: any) => u.id));
+    const schoolMessages = (plainState.messages || []).filter((m: any) =>
+      m.schoolId === schoolId ||
+      (!m.schoolId && schoolId === 'school_1') ||
+      (Array.isArray(m.toIds) && m.toIds.some((tid: string) => schoolUserIdSet.has(tid)))
+    );
     const currentMsgIds = new Set(schoolMessages.map((m: any) => m.id));
     for (const prevId of Array.from(synced.messages)) {
       if (!currentMsgIds.has(prevId)) {

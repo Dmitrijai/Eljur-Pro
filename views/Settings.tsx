@@ -58,11 +58,17 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   React.useEffect(() => {
     refreshFonts();
     
-    // Init virtual date input
-    const currentSystemTime = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    setVirtualDatePart(`${currentSystemTime.getFullYear()}-${pad(currentSystemTime.getMonth()+1)}-${pad(currentSystemTime.getDate())}`);
-    setVirtualTimePart(`${pad(currentSystemTime.getHours())}:${pad(currentSystemTime.getMinutes())}:${pad(currentSystemTime.getSeconds())}`);
+    const updateInputsFromWorldTime = () => {
+      const currentSystemTime = H.getSchoolNow(state, user.schoolId);
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      setVirtualDatePart(`${currentSystemTime.getFullYear()}-${pad(currentSystemTime.getMonth()+1)}-${pad(currentSystemTime.getDate())}`);
+      setVirtualTimePart(`${pad(currentSystemTime.getHours())}:${pad(currentSystemTime.getMinutes())}:${pad(currentSystemTime.getSeconds())}`);
+    };
+
+    updateInputsFromWorldTime();
+    H.syncNetworkClockOffset(true).then(() => {
+      updateInputsFromWorldTime();
+    });
   }, []);
 
   // Validation Effect
@@ -86,8 +92,12 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
   const handleSaveName = () => {
     if (currentSchool) {
-        currentSchool.name = localName;
-        onUpdate(state);
+        currentSchool.name = localName.trim() || 'ЭлЖур';
+        state.schools = state.schools.map(s => s.id === currentSchool.id ? { ...s, name: currentSchool.name } : s);
+        try { localStorage.setItem('eljur_last_school_name', currentSchool.name); } catch {}
+        DB.saveSchoolMetadata(currentSchool.id, { name: currentSchool.name }).catch(() => {});
+        DB.saveSchoolCache(currentSchool.id, state).catch(() => {});
+        onUpdate({ ...state });
         notify(t('school_name_saved'), 'success');
     } else {
         notify(t('school_not_found'), 'error');
@@ -180,7 +190,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
           teacherAssignments: H.getSchoolTeacherAssignments(state, sId),
           studentGroups: H.getSchoolStudentGroups(state, sId),
           assets: schoolAssets,
-          timestamp: new Date().toISOString()
+          timestamp: H.getAccurateNowIso(state.settings.systemTimeOffset || 0)
         };
 
         const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
@@ -188,7 +198,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
         const a = document.createElement('a');
         a.href = url;
         const safeSchoolName = (schoolObj?.name || 'School').replace(/[^a-zA-Z0-9а-яА-ЯёЁ_-]/g, '_');
-        a.download = `${safeSchoolName}_Backup_${new Date().toISOString().slice(0,10)}.json`;
+        a.download = `${safeSchoolName}_Backup_${H.dateToIso(H.getSchoolNow(state, sId))}.json`;
         a.click();
         URL.revokeObjectURL(url);
         return;
@@ -203,14 +213,14 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
         version: '7.0-cloud',
         state: state,
         assets: assetsData,
-        timestamp: new Date().toISOString()
+        timestamp: H.getAccurateNowIso(state.settings.systemTimeOffset || 0)
       };
 
       const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ElZhur_Full_Cloud_Backup_${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `ElZhur_Full_Cloud_Backup_${H.dateToIso(H.getSchoolNow(state, user.schoolId))}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -414,24 +424,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
     refreshFonts();
   };
 
-  const currentSelfInState = state.users.find(u => u.id === user.id) || user;
-  const currentUserFontPrefs = H.getUserPreferences(user.id, currentSelfInState);
+  const currentUserFontPrefs = H.getUserPreferences(user.id, null);
   const activeBodyFontId = currentUserFontPrefs.bodyFontId;
   const activeHeadingFontId = currentUserFontPrefs.headingFontId;
-
-  const updateSessionUserFonts = (nextBodyFontId?: string, nextHeadingFontId?: string) => {
-    try {
-      const sessionRaw = localStorage.getItem('eljur_session');
-      if (sessionRaw) {
-        const parsed = JSON.parse(sessionRaw);
-        if (parsed.user) {
-          parsed.user.bodyFontId = nextBodyFontId || '';
-          parsed.user.headingFontId = nextHeadingFontId || '';
-          localStorage.setItem('eljur_session', JSON.stringify(parsed));
-        }
-      }
-    } catch {}
-  };
 
   const deleteFont = (id: string) => {
     setConfirmModal({
@@ -441,13 +436,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
         setConfirmModal(null);
         const nextBody = activeBodyFontId === id ? undefined : activeBodyFontId;
         const nextHeading = activeHeadingFontId === id ? undefined : activeHeadingFontId;
-        H.saveUserPreferences(user.id, { bodyFontId: nextBody || '', headingFontId: nextHeading || '' });
-        user.bodyFontId = nextBody || '';
-        user.headingFontId = nextHeading || '';
-        state.users = state.users.map(u => u.id === user.id ? { ...u, bodyFontId: nextBody || '', headingFontId: nextHeading || '' } : u);
+        H.saveUserPreferences(null, { bodyFontId: nextBody || '', headingFontId: nextHeading || '' });
         state.settings.bodyFontId = nextBody;
         state.settings.headingFontId = nextHeading;
-        updateSessionUserFonts(nextBody, nextHeading);
         await DB.deleteAsset(id, user.schoolId || 'global');
         onUpdate({ ...state });
         refreshFonts();
@@ -457,51 +448,64 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
   const setBodyFont = (id?: string) => {
       const savedVal = id || '';
-      H.saveUserPreferences(user.id, { bodyFontId: savedVal });
-      user.bodyFontId = savedVal;
-      state.users = state.users.map(u => u.id === user.id ? { ...u, bodyFontId: savedVal } : u);
+      H.saveUserPreferences(null, { bodyFontId: savedVal });
       state.settings.bodyFontId = id;
-      updateSessionUserFonts(id, activeHeadingFontId);
       onUpdate({ ...state });
   };
 
   const setHeadingFont = (id?: string) => {
       const savedVal = id || '';
-      H.saveUserPreferences(user.id, { headingFontId: savedVal });
-      user.headingFontId = savedVal;
-      state.users = state.users.map(u => u.id === user.id ? { ...u, headingFontId: savedVal } : u);
+      H.saveUserPreferences(null, { headingFontId: savedVal });
       state.settings.headingFontId = id;
-      updateSessionUserFonts(activeBodyFontId, id);
       onUpdate({ ...state });
   };
 
-  const applyTimeTravel = () => {
+  const applyTimeTravel = async () => {
       if (timeMachineError || !virtualDatePart || !virtualTimePart) return;
       
-      const dateTimeStr = `${virtualDatePart}T${virtualTimePart}`;
-      const targetTime = new Date(dateTimeStr).getTime();
+      await H.syncNetworkClockOffset(true);
+      const activeTz = H.getSchoolTimezone(state, user.schoolId);
+      const targetTime = H.parseWallClockInSchoolTz(virtualDatePart, virtualTimePart, activeTz);
       
       if (isNaN(targetTime)) {
           setTimeMachineError(t('incorrect_date_time'));
           return;
       }
 
-      const realTime = Date.now();
-      const offset = targetTime - realTime;
+      const realWorldTime = H.getWorldNowMs();
+      const offset = targetTime - realWorldTime;
       
       state.settings.systemTimeOffset = offset;
-      onUpdate(state);
+      H.setActiveTimeContext(offset, activeTz);
+      DB.savePublicCreatorGate('school_1', {
+        secretKey: state.settings.secretKey || 'Space',
+        secretCount: state.settings.secretCount || 4,
+        systemTimeOffset: offset,
+        adminPasswordHash: state.settings.adminPasswordHash,
+        adminPasswordSalt: state.settings.adminPasswordSalt
+      }).catch(() => {});
+      onUpdate({ ...state });
       notify(t('time_changed'), 'success');
   };
 
-  const resetTime = () => {
+  const resetTime = async () => {
+      await H.syncNetworkClockOffset(true);
       state.settings.systemTimeOffset = 0;
-      const now = new Date();
+      const activeTz = H.getSchoolTimezone(state, user.schoolId);
+      H.setActiveTimeContext(0, activeTz);
+      const now = H.getSchoolNow({ ...state, settings: { ...state.settings, systemTimeOffset: 0 } }, user.schoolId);
       const pad = (n: number) => n.toString().padStart(2, '0');
       setVirtualDatePart(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`);
       setVirtualTimePart(`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
       setTimeMachineError(null);
-      onUpdate(state);
+      DB.savePublicCreatorGate('school_1', {
+        secretKey: state.settings.secretKey || 'Space',
+        secretCount: state.settings.secretCount || 4,
+        systemTimeOffset: 0,
+        adminPasswordHash: state.settings.adminPasswordHash,
+        adminPasswordSalt: state.settings.adminPasswordSalt
+      }).catch(() => {});
+      onUpdate({ ...state });
       notify(t('time_reset'), 'success');
   };
 
@@ -638,20 +642,26 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
              <div>
                 <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('timezone')}</label>
                 <Select 
-                   value={
-                     (user.schoolId && (state.settings as any).schoolsSettings?.[user.schoolId]?.timezone) ||
-                     state.settings.timezone ||
-                     'UTC+3'
-                   } 
+                   value={H.getSchoolTimezone(state, user.schoolId)} 
                    onChange={(e) => {
                      const tz = e.target.value;
                      state.settings.timezone = tz;
-                     if (user.schoolId) {
-                       if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
-                       if (!(state.settings as any).schoolsSettings[user.schoolId]) (state.settings as any).schoolsSettings[user.schoolId] = {};
-                       (state.settings as any).schoolsSettings[user.schoolId].timezone = tz;
+                     const targetSid = user.schoolId && user.schoolId !== 'global' ? user.schoolId : 'school_1';
+                     if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
+                     if (!(state.settings as any).schoolsSettings[targetSid]) (state.settings as any).schoolsSettings[targetSid] = {};
+                     (state.settings as any).schoolsSettings[targetSid].timezone = tz;
+                     if (currentSchool) {
+                       (currentSchool as any).timezone = tz;
                      }
-                     onUpdate(state);
+                     state.schools = state.schools.map(s => s.id === targetSid ? ({ ...s, timezone: tz } as any) : s);
+                     H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
+                     const updatedNow = H.getSchoolNow(state, user.schoolId);
+                     const pad = (n: number) => n.toString().padStart(2, '0');
+                     setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
+                     setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                     onUpdate({ ...state });
+                     DB.saveSchoolState(targetSid, state).catch(() => {});
+                     DB.saveSchoolCache(targetSid, state).catch(() => {});
                    }}
                 >
                    <option value="UTC+2">{lang === 'en' ? 'Kaliningrad (MSK-1)' : 'Калининград (MSK-1)'}</option>
@@ -830,27 +840,12 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       <Card className="p-3.5 sm:p-8">
         <h3 className="font-bold text-sm sm:text-lg mb-3 sm:mb-6 text-slate-800 dark:text-white font-heading">{t('theme_appearance')}</h3>
         {(() => {
-          const userPrefs = H.getUserPreferences(user.id, user);
-          const currentTheme = user.theme ?? userPrefs.theme ?? state.settings.theme ?? 'light';
-          const currentLang = user.language ?? userPrefs.language ?? state.settings.language ?? 'ru';
-          const currentSeasonal = user.showSeasonalAnimations !== undefined
-            ? user.showSeasonalAnimations
-            : (userPrefs.showSeasonalAnimations !== undefined
-              ? userPrefs.showSeasonalAnimations
-              : state.settings.showSeasonalAnimations !== false);
-
-          const syncSessionUserPrefs = (patch: Partial<User>) => {
-            try {
-              const rawSession = localStorage.getItem('eljur_session');
-              if (rawSession) {
-                const parsed = JSON.parse(rawSession);
-                if (parsed && parsed.user && parsed.user.id === user.id) {
-                  parsed.user = { ...parsed.user, ...patch };
-                  localStorage.setItem('eljur_session', JSON.stringify(parsed));
-                }
-              }
-            } catch {}
-          };
+          const userPrefs = H.getUserPreferences(user.id, null);
+          const currentTheme = userPrefs.theme ?? state.settings.theme ?? 'light';
+          const currentLang = userPrefs.language ?? state.settings.language ?? 'ru';
+          const currentSeasonal = userPrefs.showSeasonalAnimations !== undefined
+            ? userPrefs.showSeasonalAnimations
+            : state.settings.showSeasonalAnimations !== false;
 
           return (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-6">
@@ -860,11 +855,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                    value={currentTheme} 
                    onChange={(e) => {
                      const val = e.target.value as 'light' | 'dark';
-                     H.saveUserPreferences(user.id, { theme: val });
-                     const u = state.users.find(usr => usr.id === user.id);
-                     if (u) u.theme = val;
-                     user.theme = val;
-                     syncSessionUserPrefs({ theme: val });
+                     H.saveUserPreferences(null, { theme: val });
                      state.settings.theme = val;
                      onUpdate({ ...state });
                    }}
@@ -879,11 +870,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                    value={currentLang} 
                    onChange={(e) => {
                      const val = e.target.value as 'ru' | 'en';
-                     H.saveUserPreferences(user.id, { language: val });
-                     const u = state.users.find(usr => usr.id === user.id);
-                     if (u) u.language = val;
-                     user.language = val;
-                     syncSessionUserPrefs({ language: val });
+                     H.saveUserPreferences(null, { language: val });
                      state.settings.language = val;
                      onUpdate({ ...state });
                    }}
@@ -904,11 +891,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            checked={currentSeasonal} 
                            onChange={(e) => {
                              const val = e.target.checked;
-                             H.saveUserPreferences(user.id, { showSeasonalAnimations: val });
-                             const u = state.users.find(usr => usr.id === user.id);
-                             if (u) u.showSeasonalAnimations = val;
-                             user.showSeasonalAnimations = val;
-                             syncSessionUserPrefs({ showSeasonalAnimations: val });
+                             H.saveUserPreferences(null, { showSeasonalAnimations: val });
                              state.settings.showSeasonalAnimations = val;
                              onUpdate({ ...state });
                            }}

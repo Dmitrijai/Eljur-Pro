@@ -236,7 +236,7 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
                     {filterClass ? `${t('class')}: ${filterClass.replace('_', '')} • ` : ''}
                     {selectedProfile ? `${selectedProfile} • ` : ''}
                     {selectedSubjects.length > 0 ? `${t('subjects')}: ${selectedSubjects.join(', ')} • ` : ''}
-                    {t('date')}: {H.formatDateDDMMYYYY(new Date().toISOString().split('T')[0])}
+                    {t('date')}: {H.formatDateDDMMYYYY(H.dateToIso(H.getSchoolNow(state, schoolId)))}
                 </div>
             </div>
             <div className="mb-3 sm:mb-5">

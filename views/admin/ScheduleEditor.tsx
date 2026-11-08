@@ -125,7 +125,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   const t = (k: string) => H.t(k, lang);
   const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
   
-  const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+  const systemNow = H.getSchoolNow(state, user.schoolId);
   const [currentWeekStartIso, setCurrentWeekStartIso] = H.useSyncedState<string>(`eljur_admin_sched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
   const currentWeekStart = React.useMemo(() => {
       const parsed = new Date(currentWeekStartIso);
@@ -160,7 +160,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   
   const goPrevWeek = () => setCurrentWeekStart(d => H.addDays(d, -7));
   const goNextWeek = () => setCurrentWeekStart(d => H.addDays(d, 7));
-  const goCurrentWeek = () => setCurrentWeekStart(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0))));
+  const goCurrentWeek = () => setCurrentWeekStart(H.getStartOfWeek(H.getSchoolNow(state, user.schoolId)));
 
   let canAddMoreDaysToWeek = false;
   if (visibleDayKeys.length < 7 && !isPastWeek && targetScheduleKey) {

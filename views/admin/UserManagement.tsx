@@ -60,15 +60,19 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             if (sameFio) errors.push(t('already_exists'));
         }
 
-        // Credential combo uniqueness check (globally across all schools):
-        // Logins can be identical, passwords can be identical, but login + password combination cannot be identical
-        if (normLogin && newUser.password) {
-            const comboTaken = state.users.some(u => 
-                u.login?.toLowerCase().trim() === normLogin && 
-                u.password === newUser.password
-            );
-            if (comboTaken) {
-                errors.push(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
+        // Strict uniqueness check (globally across all users):
+        // Neither login nor password can be identical to an already existing user's login or password
+        if (normLogin) {
+            const loginTaken = state.users.some(u => u.login?.toLowerCase().trim() === normLogin);
+            if (loginTaken) {
+                errors.push(t('login_taken'));
+            }
+        }
+        const rawPass = newUser.password.trim();
+        if (rawPass) {
+            const passUsed = state.users.some(u => (u.password && u.password.trim() === rawPass) || u.password === newUser.password);
+            if (passUsed) {
+                errors.push(t('password_used'));
             }
         }
         return errors; 
@@ -107,15 +111,30 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     return;
                 }
             }
-            if (field === 'login' || field === 'password') {
-                const testLogin = field === 'login' ? String(val).toLowerCase().trim() : (userToUpdate.login || '').toLowerCase().trim();
-                const testPass = field === 'password' ? String(val) : '';
-                if (testLogin && testPass) {
+            if (field === 'login') {
+                const testLogin = String(val).toLowerCase().trim();
+                if (testLogin) {
+                    const loginTaken = state.users.some(other => other.id !== userId && other.login?.toLowerCase().trim() === testLogin);
+                    if (loginTaken) {
+                        setUiError(t('login_taken'));
+                        setUiErrorUserId(userId);
+                        return;
+                    }
+                }
+            }
+            if (field === 'password') {
+                const testPass = String(val).trim();
+                if (testPass) {
                     for (const other of state.users) {
-                        if (other.id !== userId && other.login?.toLowerCase().trim() === testLogin) {
+                        if (other.id !== userId) {
+                            if ((other.password && other.password.trim() === testPass) || other.password === String(val)) {
+                                setUiError(t('password_used'));
+                                setUiErrorUserId(userId);
+                                return;
+                            }
                             const isMatch = await verifyUserPasswordDetailed(other, testPass);
                             if (isMatch.valid) {
-                                setUiError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
+                                setUiError(t('password_used'));
                                 setUiErrorUserId(userId);
                                 return;
                             }
@@ -180,7 +199,13 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             } else { 
                 (state.users[uIndex] as any)[field] = val; 
             } 
+            state.users = [...state.users];
+            const updatedUsr = state.users[uIndex];
+            const sid = updatedUsr?.schoolId && updatedUsr.schoolId !== 'global' ? updatedUsr.schoolId : 'school_1';
             onUpdate(state); 
+            DB.saveSchoolEntity(sid, 'users', updatedUsr.id, updatedUsr).catch(() => {});
+            DB.saveSchoolCache(sid, state).catch(() => {});
+            if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
         } 
     };
     const updateCustomRole = (userId: string, val: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { state.users[uIndex].customRole = val; onUpdate(state); } };
@@ -306,7 +331,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
 
         onUpdate(state); 
     };
-    const applyBlock = (id: string, duration: any) => { const uIndex = state.users.findIndex(u => u.id === id); if (uIndex > -1) { state.users[uIndex].blockedUntil = duration === 'unblock' ? undefined : new Date(Date.now() + (duration==='1h'?3600000:duration==='24h'?86400000:3153600000000)).toISOString(); onUpdate(state); } setBlockingUserId(null); };
+    const applyBlock = (id: string, duration: any) => { const uIndex = state.users.findIndex(u => u.id === id); if (uIndex > -1) { const nowMs = H.getAccurateNow(state.settings.systemTimeOffset || 0).getTime(); state.users[uIndex].blockedUntil = duration === 'unblock' ? undefined : new Date(nowMs + (duration==='1h'?3600000:duration==='24h'?86400000:3153600000000)).toISOString(); onUpdate(state); } setBlockingUserId(null); };
     const addUser = async () => { 
         if (!newUser.fio || !newUser.login || !newUser.password) { 
             setUiError(t('fill_fields')); 
@@ -329,24 +354,35 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             } 
         } 
         const normLogin = newUser.login.toLowerCase().trim();
+        const rawPass = newUser.password.trim();
         for (const existingUser of state.users) {
             if (existingUser.login?.toLowerCase().trim() === normLogin) {
-                const isMatch = await verifyUserPasswordDetailed(existingUser, newUser.password);
-                if (isMatch.valid) {
-                    setUiError(lang === 'ru' ? 'Связка логина и пароля уже занята другим пользователем' : 'This login and password combination is already taken');
-                    setUiErrorUserId('NEW_USER_FORM');
-                    return;
-                }
+                setUiError(t('login_taken'));
+                setUiErrorUserId('NEW_USER_FORM');
+                return;
+            }
+        }
+        for (const existingUser of state.users) {
+            if ((existingUser.password && existingUser.password.trim() === rawPass) || existingUser.password === newUser.password) {
+                setUiError(t('password_used'));
+                setUiErrorUserId('NEW_USER_FORM');
+                return;
+            }
+            const isMatch = await verifyUserPasswordDetailed(existingUser, rawPass);
+            if (isMatch.valid) {
+                setUiError(t('password_used'));
+                setUiErrorUserId('NEW_USER_FORM');
+                return;
             }
         }
         const salt = generateSalt();
-        const hashed = await hashPassword(newUser.password, salt);
+        const hashed = await hashPassword(rawPass, salt);
         const u: User = { 
             id: H.uid('u'), 
             schoolId: targetSchoolId, 
             fio: newUser.fio.trim(), 
             login: newUser.login.trim(), 
-            password: newUser.password,
+            password: rawPass,
             passwordSalt: salt,
             passwordHash: hashed,
             role: newUser.role, 
@@ -364,9 +400,13 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             const targetSchool = state.schools.find(s => s.id === targetSchoolId);
             if (targetSchool) targetSchool.directorId = u.id;
         }
-        state.users.push(u); 
-        state.userOrder.push(u.id); 
+        state.users = [...state.users, u]; 
+        state.userOrder = [...state.userOrder, u.id]; 
+        const sid = u.schoolId && u.schoolId !== 'global' ? u.schoolId : 'school_1';
         onUpdate(state); 
+        DB.saveSchoolEntity(sid, 'users', u.id, u).catch(() => {});
+        DB.saveSchoolCache(sid, state).catch(() => {});
+        if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
         setNewUser({ ...newUser, fio: '', login: '', password: '', role: 'student', customRole: '', classKey: '', teacherClasses: [] }); 
         setNewRoleInputOpen(false); 
         setUiError(null); 
@@ -556,7 +596,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             <Card className="p-0 border-t-[6px] border-t-blue-600">
                 <div className="hidden print:block p-4 border-b-2 border-black mb-2">
                     <h1 className="text-lg font-bold uppercase">{isGlobal ? t('global_list') : `${H.getSchool(state, currentUser.schoolId)?.name || ''} — ${t('school_users')}`}</h1>
-                    <p className="text-xs text-slate-600">{t('date')}: {new Date().toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US')}</p>
+                    <p className="text-xs text-slate-600">{t('date')}: {H.getSchoolNow(state, currentUser.schoolId).toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US')}</p>
                 </div>
                 <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col gap-4 bg-slate-50/50 dark:bg-slate-900 dark:border-slate-700 no-print"><div className="flex flex-wrap gap-3 sm:gap-4 justify-between items-center"><div className="flex flex-wrap items-center gap-3 w-full lg:w-auto"><h3 className="font-bold text-slate-800 text-lg dark:text-white mr-2 font-heading w-full sm:w-auto">{isGlobal ? t('global_list') : t('school_users')}</h3><div className="w-full sm:w-64"><SearchableSelect lang={lang as 'ru'|'en'} placeholder={t('search_fio')} options={filteredUsers.map(u => ({ value: u.id, label: u.fio }))} value="" onChange={handleSearchSelect} className="h-10 text-xs" /></div>{isGlobal && <Select value={filterSchool} onChange={e => { setFilterSchool(e.target.value); setFilterClass(''); }} className="w-full sm:w-40 text-xs py-1.5 h-auto"><option value="">{t('all_schools')}</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>}<Select value={filterRole} onChange={e => setFilterRole(e.target.value)} className="flex-1 sm:w-32 text-xs py-1.5 h-auto"><option value="">{t('all_roles')}</option><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option><option value="director">{t('director')}</option><option value="employee">{t('employee')}</option></Select>{(!isGlobal || filterSchool) && <Select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="flex-1 sm:w-32 text-xs py-1.5 h-auto"><option value="">{t('all_classes')}</option>{(isGlobal ? H.getSchoolClasses(state, filterSchool) : schoolClasses).map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select>}<Select value={sortField} onChange={e => setSortField(e.target.value as any)} className="w-full sm:w-40 text-xs py-1.5 h-auto"><option value="default">{t('sort_manual')}</option><option value="fio">{t('sort_fio')}</option><option value="role">{t('sort_role')}</option></Select></div><Button size="sm" onClick={() => window.print()} className="no-print w-full sm:w-auto"><Printer className="w-4 h-4 mr-2"/> {t('print')}</Button></div></div>
                 {/* Mobile User Cards (No horizontal scroll) */}

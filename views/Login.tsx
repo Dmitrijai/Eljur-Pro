@@ -19,6 +19,7 @@ interface LoginProps {
     adminPassword?: string;
     adminPasswordHash?: string;
     adminPasswordSalt?: string;
+    systemTimeOffset?: number;
   };
   onShowInfo?: () => void;
 }
@@ -87,7 +88,7 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
     };
   }, []);
 
-  const lang = settings?.language || 'ru';
+  const lang = H.getUserPreferences(null, null).language || settings?.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 
   // Guarantee that users are never an empty list and always include default test roles
@@ -183,10 +184,35 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           return u.role === role;
         });
 
-      let candidates = filterByLoginAndRole(pool);
+      const matchCandidateByPassword = async (list: User[]) => {
+        let found: User | null = null;
+        let upgraded: User | null = null;
+        for (const u of list) {
+          const verif = await verifyUserPasswordDetailed(u, password);
+          if (verif.valid) {
+            if (verif.needsRehash && verif.newHash && verif.newSalt) {
+              const upg: User = {
+                ...u,
+                password: password,
+                passwordHash: verif.newHash,
+                passwordSalt: verif.newSalt,
+              };
+              found = upg;
+              upgraded = upg;
+            } else {
+              found = u;
+            }
+            break;
+          }
+        }
+        return { found, upgraded };
+      };
 
-      if (candidates.length === 0) {
-        // Fetch users from Firestore across schools in case user was created on another device
+      let candidates = filterByLoginAndRole(pool);
+      let { found: matchedUser, upgraded: upgradedUserToSave } = await matchCandidateByPassword(candidates);
+
+      // If no local candidate matched both login+role AND password, fetch latest users across all schools from Firestore
+      if (!matchedUser) {
         const remoteUsers = await fetchUsersForLoginLookup();
         if (remoteUsers.length > 0) {
           const mergedMap = new Map<string, User>();
@@ -194,6 +220,9 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           remoteUsers.forEach(u => mergedMap.set(`${u.schoolId || 'school_1'}_${u.id}`, u));
           pool = Array.from(mergedMap.values());
           candidates = filterByLoginAndRole(pool);
+          const remoteMatch = await matchCandidateByPassword(candidates);
+          matchedUser = remoteMatch.found;
+          upgradedUserToSave = remoteMatch.upgraded;
         }
       }
 
@@ -211,32 +240,12 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
         return;
       }
 
-      let matchedUser: User | null = null;
-      let upgradedUserToSave: User | null = null;
-      for (const u of candidates) {
-        const verif = await verifyUserPasswordDetailed(u, password);
-        if (verif.valid) {
-          if (verif.needsRehash && verif.newHash && verif.newSalt) {
-            const upgraded: User = {
-              ...u,
-              password: password,
-              passwordHash: verif.newHash,
-              passwordSalt: verif.newSalt,
-            };
-            matchedUser = upgraded;
-            upgradedUserToSave = upgraded;
-          } else {
-            matchedUser = u;
-          }
-          break;
-        }
-      }
-
       if (matchedUser) {
         if (matchedUser.blockedUntil) {
           const blockDate = new Date(matchedUser.blockedUntil);
-          if (blockDate > new Date()) {
-            setError(`${t('account_blocked')} ${blockDate.toLocaleString()}`);
+          const effectiveOffset = creatorGate?.systemTimeOffset ?? settings?.systemTimeOffset ?? 0;
+          if (blockDate > H.getAccurateNow(effectiveOffset)) {
+            setError(`${t('account_blocked')} ${H.formatDateTimeInSchoolTz(matchedUser.blockedUntil, undefined, matchedUser.schoolId, lang)}`);
             setLoading(false);
             return;
           }

@@ -169,7 +169,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
         const schedule = H.getSchoolClassSchedule(state, schoolId, classKey);
         if (!schedule) return 0;
         
-        const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+        const systemNow = H.getSchoolNow(state, schoolId);
         const weekStart = H.getStartOfWeek(systemNow);
         
         let count = 0;

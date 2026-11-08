@@ -17,7 +17,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
     const gradeTypes = H.getSchoolGradeTypes(state, user.schoolId);
     const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
     
-    const systemNow = new Date(Date.now() + (state.settings.systemTimeOffset || 0));
+    const systemNow = H.getSchoolNow(state, user.schoolId);
     const defaultWeekIso = H.dateToIso(H.getStartOfWeek(systemNow));
     const [journalWeekIso, setJournalWeekIso] = H.useSyncedState<string>(`eljur_st_journal_week_${user.id}`, defaultWeekIso);
     const journalWeekStart = new Date(journalWeekIso || defaultWeekIso);
@@ -26,7 +26,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
 
     const goPrevJournalWeek = () => setJournalWeekIso(H.dateToIso(H.addDays(journalWeekStart, -7)));
     const goNextJournalWeek = () => setJournalWeekIso(H.dateToIso(H.addDays(journalWeekStart, 7)));
-    const goCurrentJournalWeek = () => setJournalWeekIso(H.dateToIso(H.getStartOfWeek(new Date(Date.now() + (state.settings.systemTimeOffset || 0)))));
+    const goCurrentJournalWeek = () => setJournalWeekIso(H.dateToIso(H.getStartOfWeek(H.getSchoolNow(state, user.schoolId))));
     
     const journalDates = journalDays.map(d => d.date);
     const journalVacation = H.getVacationForWeek(journalWeekStart, scheduleSettings, journalDates);

@@ -209,7 +209,7 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
         <span>{lang === 'ru' ? 'Период' : 'Period'}: {selectedQuarter === 'all' ? (lang === 'ru' ? 'Весь год (1-4 четверти)' : 'All Year') : `${selectedQuarter.replace('Q','')} ${t('quarter')}`}</span>
         <span>{lang === 'ru' ? 'Учеников' : 'Students'}: {classStats.total}</span>
         <span>{lang === 'ru' ? 'Ср. балл' : 'Avg GPA'}: {classStats.avgGpa}</span>
-        <span>{lang === 'ru' ? 'Дата выгрузки' : 'Date'}: {H.formatDateDDMMYYYY(new Date().toISOString().split('T')[0])}</span>
+        <span>{lang === 'ru' ? 'Дата выгрузки' : 'Date'}: {H.formatDateDDMMYYYY(H.dateToIso(H.getSchoolNow(state, user.schoolId)))}</span>
       </div>
     </div>
   );
