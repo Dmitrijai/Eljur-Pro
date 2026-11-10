@@ -63,19 +63,36 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
   const resetTimerRef = useRef<any>(null);
   const longPressTimerRef = useRef<any>(null);
   const longPressTriggeredRef = useRef(false);
+  const longPressStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  const startLogoLongPress = () => {
+  const startLogoLongPress = (clientX?: number, clientY?: number) => {
     longPressTriggeredRef.current = false;
+    if (typeof clientX === 'number' && typeof clientY === 'number') {
+      longPressStartPosRef.current = { x: clientX, y: clientY };
+    } else {
+      longPressStartPosRef.current = null;
+    }
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = setTimeout(() => {
       longPressTriggeredRef.current = true;
+      longPressTimerRef.current = null;
       setShowCreatorModal(true);
       setCreatorPassword('');
+      setCreatorError('');
       setError('');
     }, 3000);
   };
 
+  const handleLogoMove = (clientX: number, clientY: number) => {
+    if (!longPressTimerRef.current || !longPressStartPosRef.current) return;
+    const dist = Math.hypot(clientX - longPressStartPosRef.current.x, clientY - longPressStartPosRef.current.y);
+    if (dist > 25) {
+      cancelLogoLongPress();
+    }
+  };
+
   const cancelLogoLongPress = () => {
+    longPressStartPosRef.current = null;
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -441,16 +458,30 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
               }
               onShowInfo?.();
             }}
-            onTouchStart={startLogoLongPress}
-            onTouchEnd={cancelLogoLongPress}
+            onTouchStart={(e) => {
+              const t0 = e.touches?.[0];
+              startLogoLongPress(t0?.clientX, t0?.clientY);
+            }}
+            onTouchMove={(e) => {
+              const t0 = e.touches?.[0];
+              if (t0) handleLogoMove(t0.clientX, t0.clientY);
+            }}
+            onTouchEnd={(e) => {
+              cancelLogoLongPress();
+              if (longPressTriggeredRef.current) {
+                e.preventDefault();
+              }
+            }}
             onTouchCancel={cancelLogoLongPress}
-            onTouchMove={cancelLogoLongPress}
-            onMouseDown={startLogoLongPress}
+            onMouseDown={(e) => {
+              if (e.button === 0) startLogoLongPress(e.clientX, e.clientY);
+            }}
+            onMouseMove={(e) => handleLogoMove(e.clientX, e.clientY)}
             onMouseUp={cancelLogoLongPress}
             onMouseLeave={cancelLogoLongPress}
             onContextMenu={(e) => e.preventDefault()}
             onDragStart={(e) => e.preventDefault()}
-            className="w-[72px] h-[72px] sm:w-24 sm:h-24 mx-auto mb-3 sm:mb-6 transform hover:scale-105 transition-transform duration-300 cursor-pointer select-none [-webkit-touch-callout:none] [-webkit-user-select:none]"
+            className="w-[72px] h-[72px] sm:w-24 sm:h-24 mx-auto mb-3 sm:mb-6 transform hover:scale-105 transition-transform duration-300 cursor-pointer select-none touch-none [-webkit-touch-callout:none] [-webkit-user-select:none]"
           >
             <img
               src={`${import.meta.env.BASE_URL}assets/icon.png`}

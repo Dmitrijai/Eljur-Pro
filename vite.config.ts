@@ -34,16 +34,23 @@ export default defineConfig(({ mode }) => {
             navigateFallbackDenylist: [/^\/api\//, /^\/__\//, /google.*\.html$/, /yandex.*\.html$/, /robots\.txt$/, /sitemap\.xml$/],
           },
           manifest: {
+            id: './',
             name: 'E-Journal Pro',
             short_name: 'E-Journal',
             description: 'Электронный журнал и дневник образовательного учреждения',
-            theme_color: '#4f46e5',
-            background_color: '#f8fafc',
+            theme_color: '#ffffff',
+            background_color: '#ffffff',
             display: 'standalone',
             start_url: './',
             scope: './',
             orientation: 'any',
             icons: [
+              {
+                src: 'apple-touch-icon.png',
+                sizes: '180x180',
+                type: 'image/png',
+                purpose: 'any',
+              },
               {
                 src: 'pwa-192x192.png',
                 sizes: '192x192',
