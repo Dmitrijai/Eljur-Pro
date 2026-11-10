@@ -589,9 +589,12 @@ const MessageCard: React.FC<MessageCardProps> = ({
     activeTab === 'inbox' &&
     !!item.editedAt &&
     !(item.readAfterEditBy || []).includes(currentUser.id);
+  const needsReadBySync =
+    activeTab === 'inbox' &&
+    !(item.readBy || []).includes(currentUser.id);
 
   useEffect(() => {
-    if ((!isUnread && !needsPostEditRead) || activeTab !== 'inbox' || !cardRef.current) return;
+    if ((!isUnread && !needsPostEditRead && !needsReadBySync) || activeTab !== 'inbox' || !cardRef.current) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -613,7 +616,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
     return () => {
       observer.disconnect();
     };
-  }, [isUnread, needsPostEditRead, activeTab, item.id, onVisible]);
+  }, [isUnread, needsPostEditRead, needsReadBySync, activeTab, item.id, onVisible]);
 
   const sender = state.users.find((u) => u.id === item.fromId);
   const realAuthor = item.realAuthorId ? state.users.find((u) => u.id === item.realAuthorId) : null;
@@ -970,6 +973,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         targetList.forEach((item) => {
           if (idsToMark.includes(item.id)) {
             let itemModified = false;
+            H.recordLocalReadReceipt(item.id, currentUser.id, item.editedAt);
             if (!item.readBy) item.readBy = [];
             if (!item.readBy.includes(currentUser.id)) {
               item.readBy.push(currentUser.id);
@@ -991,16 +995,20 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         });
 
         if (hasChanges) {
-          const targetSchoolId = currentUser.schoolId || 'school_1';
+          const fallbackSchoolId = (currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : 'school_1';
           const collectionName = isAnnounce ? 'announcements' : 'messages';
           updatedItems.forEach((item) => {
-            DB.saveSchoolEntity(item.schoolId || targetSchoolId, collectionName, item.id, item).catch((e) => {
+            const senderSchoolId = state.users.find(u => u.id === item.fromId)?.schoolId;
+            const resolvedSid = (item.schoolId && item.schoolId !== 'global')
+              ? item.schoolId
+              : ((senderSchoolId && senderSchoolId !== 'global') ? senderSchoolId : fallbackSchoolId);
+            DB.saveReadReceipt(resolvedSid, collectionName, item).catch((e) => {
               console.warn('Failed to persist read receipt:', e);
             });
           });
           onUpdate({ ...state });
         }
-      }, 350);
+      }, 200);
     },
     [isAnnounce, state, currentUser.id, currentUser.schoolId, onUpdate]
   );
@@ -1470,7 +1478,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         >
           <span>{t('inbox')}</span>
           {unreadInboxCount > 0 && (
-            <span className={`inline-flex items-center justify-center min-w-[18px] sm:min-w-[20px] h-4 sm:h-5 px-1 sm:px-1.5 text-[10px] sm:text-xs font-bold rounded-full leading-none transition-transform duration-200 ${
+            <span className={`inline-flex items-center justify-center min-w-[18px] sm:min-w-[20px] h-[18px] sm:h-5 ${unreadInboxCount > 9 ? 'px-1 sm:px-1.5' : 'w-[18px] sm:w-5 px-0'} text-[10px] sm:text-xs font-bold rounded-full leading-none shrink-0 transition-transform duration-200 ${
               activeTab === 'inbox' 
                 ? 'bg-white text-blue-600 shadow-sm' 
                 : 'bg-red-500 text-white shadow-sm'

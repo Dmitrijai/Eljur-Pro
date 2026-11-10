@@ -34,14 +34,17 @@ interface Props {
   onUpdate: (s: AppState) => void;
   lang: 'ru' | 'en';
   setHasUnsavedChanges?: (val: boolean) => void;
+  mode?: 'eljur' | 'school';
+  schoolId?: string;
 }
 
-export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }: Props) {
+export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, mode = 'eljur', schoolId }: Props) {
   const [quillContent, setQuillContent] = useState('');
   const [elements, setElements] = useState<FloatingElement[]>([]);
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [videoUrlInput, setVideoUrlInput] = useState('');
@@ -168,11 +171,17 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
     }, 1000);
   };
 
+  const currentRawInfo = mode === 'school'
+    ? H.getSchoolInfo(state, schoolId)
+    : H.getSchoolEljurInfo(state, undefined);
+
   useEffect(() => {
-    const info = H.getSchoolEljurInfo(state, undefined);
+    const info = mode === 'school'
+      ? H.getSchoolInfo(state, schoolId)
+      : H.getSchoolEljurInfo(state, undefined);
     try {
       const parsed = JSON.parse(info);
-      if (parsed.isComplex) {
+      if (parsed && parsed.isComplex) {
         const sanitized = H.sanitizeRichHtml(parsed.quillContent || '');
         quillContentRef.current = sanitized;
         setQuillContent(sanitized);
@@ -184,11 +193,13 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
     } catch (e) {
       // Not JSON, fallback to pure HTML
     }
-    const sanitized = H.sanitizeRichHtml(info);
+    const sanitized = H.sanitizeRichHtml(info || '');
     quillContentRef.current = sanitized;
     setQuillContent(sanitized);
+    setElements([]);
+    setBackgroundImage(null);
     if (setHasUnsavedChanges) setHasUnsavedChanges(false);
-  }, [state.settings.eljurInfo]);
+  }, [mode, schoolId, currentRawInfo]);
 
   const handleSave = () => {
     const safeQuillContent = H.sanitizeRichHtml(quillContent);
@@ -199,22 +210,35 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
       backgroundImage: H.sanitizeSafeUrl(backgroundImage, 'background') || null
     };
     const serialized = JSON.stringify(complexData);
-    const updatedSchools = (state.schools || []).map(s => ({ ...s, eljurInfo: serialized }));
-    DB.savePublicCreatorGate('school_1', {
-      secretKey: state.settings.secretKey || 'Space',
-      secretCount: state.settings.secretCount || 4,
-      adminPasswordHash: state.settings.adminPasswordHash,
-      adminPasswordSalt: state.settings.adminPasswordSalt,
-      eljurInfo: serialized
-    }).catch(() => {});
-    onUpdate({
-      ...state,
-      schools: updatedSchools,
-      settings: {
-        ...state.settings,
+    if (mode === 'school') {
+      const targetSid = schoolId && schoolId !== 'global' ? schoolId : 'school_1';
+      H.setSchoolInfo(state, targetSid, serialized);
+      const updatedSchools = (state.schools || []).map(s => s.id === targetSid ? { ...s, schoolInfo: serialized } : s);
+      const nextState: AppState = {
+        ...state,
+        schools: updatedSchools
+      };
+      DB.saveSchoolMetadata(targetSid, { schoolInfo: serialized }).catch(() => {});
+      DB.saveSchoolCache(targetSid, nextState).catch(() => {});
+      onUpdate(nextState);
+    } else {
+      const updatedSchools = (state.schools || []).map(s => ({ ...s, eljurInfo: serialized }));
+      DB.savePublicCreatorGate('school_1', {
+        secretKey: state.settings.secretKey || 'Space',
+        secretCount: state.settings.secretCount || 4,
+        adminPasswordHash: state.settings.adminPasswordHash,
+        adminPasswordSalt: state.settings.adminPasswordSalt,
         eljurInfo: serialized
-      }
-    });
+      }).catch(() => {});
+      onUpdate({
+        ...state,
+        schools: updatedSchools,
+        settings: {
+          ...state.settings,
+          eljurInfo: serialized
+        }
+      });
+    }
     setShowSuccess(true);
     if (setHasUnsavedChanges) setHasUnsavedChanges(false);
     setTimeout(() => setShowSuccess(false), 3000);
@@ -229,19 +253,32 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
     setShowClearConfirm(false);
     const complexData = { isComplex: true, quillContent: '', elements: [], backgroundImage: null };
     const serialized = JSON.stringify(complexData);
-    const updatedSchools = (state.schools || []).map(s => ({ ...s, eljurInfo: serialized }));
-    DB.savePublicCreatorGate('school_1', {
-      secretKey: state.settings.secretKey || 'Space',
-      secretCount: state.settings.secretCount || 4,
-      adminPasswordHash: state.settings.adminPasswordHash,
-      adminPasswordSalt: state.settings.adminPasswordSalt,
-      eljurInfo: serialized
-    }).catch(() => {});
-    onUpdate({
-      ...state,
-      schools: updatedSchools,
-      settings: { ...state.settings, eljurInfo: serialized }
-    });
+    if (mode === 'school') {
+      const targetSid = schoolId && schoolId !== 'global' ? schoolId : 'school_1';
+      H.setSchoolInfo(state, targetSid, serialized);
+      const updatedSchools = (state.schools || []).map(s => s.id === targetSid ? { ...s, schoolInfo: serialized } : s);
+      const nextState: AppState = {
+        ...state,
+        schools: updatedSchools
+      };
+      DB.saveSchoolMetadata(targetSid, { schoolInfo: serialized }).catch(() => {});
+      DB.saveSchoolCache(targetSid, nextState).catch(() => {});
+      onUpdate(nextState);
+    } else {
+      const updatedSchools = (state.schools || []).map(s => ({ ...s, eljurInfo: serialized }));
+      DB.savePublicCreatorGate('school_1', {
+        secretKey: state.settings.secretKey || 'Space',
+        secretCount: state.settings.secretCount || 4,
+        adminPasswordHash: state.settings.adminPasswordHash,
+        adminPasswordSalt: state.settings.adminPasswordSalt,
+        eljurInfo: serialized
+      }).catch(() => {});
+      onUpdate({
+        ...state,
+        schools: updatedSchools,
+        settings: { ...state.settings, eljurInfo: serialized }
+      });
+    }
     if (setHasUnsavedChanges) setHasUnsavedChanges(false);
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
@@ -298,7 +335,8 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
             if (setHasUnsavedChanges) setHasUnsavedChanges(true);
           } catch (err) {
             console.error('Error converting Word file:', err);
-            alert(lang === 'ru' ? 'Ошибка при конвертации файла' : 'Error converting file');
+            setErrorMsg(lang === 'ru' ? 'Ошибка при конвертации файла' : 'Error converting file');
+            setTimeout(() => setErrorMsg(null), 3500);
           }
         };
         reader.readAsArrayBuffer(file);
@@ -395,7 +433,8 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
     }
     const safeEmbedUrl = H.sanitizeSafeUrl(embedUrl, 'iframe');
     if (!safeEmbedUrl) {
-      alert(lang === 'ru' ? 'Разрешены только защищенные ссылки https://' : 'Only secure https:// links are allowed');
+      setErrorMsg(lang === 'ru' ? 'Разрешены только защищенные ссылки https://' : 'Only secure https:// links are allowed');
+      setTimeout(() => setErrorMsg(null), 3500);
       return;
     }
     const newEl: FloatingElement = {
@@ -632,7 +671,11 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
         `).join('\n')}
       `}</style>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-        <h2 className="text-base sm:text-xl font-bold">{lang === 'ru' ? 'Информация об ЭлЖуре' : 'Eljur Info'}</h2>
+        <h2 className="text-base sm:text-xl font-bold">
+          {mode === 'school'
+            ? (lang === 'ru' ? 'Информация о школе' : 'School Info')
+            : (lang === 'ru' ? 'Информация об ЭлЖуре' : 'Eljur Info')}
+        </h2>
         <div className="flex flex-wrap gap-1.5 sm:gap-2">
           <Button variant="outline" size="sm" onClick={handleWordUpload} className="flex items-center gap-1.5">
             <FileText size={14} />
@@ -789,6 +832,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges }:
       </div>
 
       <div className="mt-4 flex justify-end items-center gap-4">
+        {errorMsg && <span className="text-red-600 font-bold animate-in fade-in">{errorMsg}</span>}
         {showSuccess && <span className="text-green-600 font-bold animate-in fade-in">{lang === 'ru' ? 'Успешно сохранено!' : 'Successfully saved!'}</span>}
         <Button variant="primary" onClick={handleSave}>
           {lang === 'ru' ? 'Сохранить' : 'Save'}

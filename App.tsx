@@ -9,7 +9,7 @@ import StudentDashboard from './views/StudentDashboard';
 import CreatorDashboard from './views/CreatorDashboard';
 import EmployeeDashboard from './views/EmployeeDashboard';
 import Settings from './views/Settings';
-import { Settings as SettingsIcon, LogOut, Menu, GraduationCap } from 'lucide-react';
+import { Settings as SettingsIcon, LogOut, Menu, GraduationCap, ExternalLink, Copy, Check } from 'lucide-react';
 import * as H from './utils/helpers';
 import { Modal, Button } from './components/ui';
 import ReactQuill from 'react-quill-new';
@@ -247,7 +247,8 @@ const defaultSchool: School = {
     Q4: []
   },
   scheduleSettings: INITIAL_SCHEDULE_SETTINGS,
-  eljurInfo: H.DEFAULT_ELJUR_INFO_HTML
+  eljurInfo: H.DEFAULT_ELJUR_INFO_HTML,
+  schoolInfo: H.DEFAULT_SCHOOL_1_INFO_HTML
 };
 
 export const defaultState: AppState = {
@@ -632,8 +633,20 @@ const SeasonalBackground = React.memo(({ enabled, timeOffset }: { enabled: boole
 export default function App() {
   const [appState, setAppState] = useState<AppState>(() => {
     const prefs = H.getUserPreferences(null, null);
+    const hydratedInitialSchools = defaultState.schools.map(s => {
+      try {
+        const savedName = localStorage.getItem(`eljur_school_name_${s.id}`);
+        if (savedName && savedName.trim()) {
+          return { ...s, name: savedName.trim() };
+        }
+      } catch {}
+      return s;
+    });
     return {
       ...defaultState,
+      schools: hydratedInitialSchools,
+      messages: defaultState.messages.map(m => H.applyLocalReadReceipts(m).item),
+      announcements: defaultState.announcements.map(a => H.applyLocalReadReceipts(a).item),
       settings: {
         ...defaultState.settings,
         theme: prefs.theme || 'light',
@@ -653,6 +666,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showEljurInfo, setShowEljurInfo] = useState(false);
   const [showEmptyEduResourceModal, setShowEmptyEduResourceModal] = useState(false);
+  const [copiedResourceId, setCopiedResourceId] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [customFonts, setCustomFonts] = useState<{name: string, displayName: string}[]>([]);
   const [dbError, setDbError] = useState<string | null>(null);
@@ -661,6 +675,7 @@ export default function App() {
   currentUserRef.current = currentUser;
   const appStateRef = useRef<AppState>(appState);
   appStateRef.current = appState;
+  const cloudSyncedSchoolsRef = useRef<Set<string>>(new Set());
 
   // Cross-tab synchronization for login/logout and state updates
   useEffect(() => {
@@ -775,28 +790,71 @@ export default function App() {
       if (cached) {
         const mergeById = <T extends { id: string }>(defaults: T[], current?: T[]) => {
           const map = new Map<string, T>();
-          (defaults || []).forEach(item => map.set(item.id, item));
-          (current || []).forEach(item => map.set(item.id, item));
+          (defaults || []).forEach(item => {
+            if (item?.id) map.set(item.id, item);
+          });
+          (current || []).forEach(item => {
+            if (item?.id) map.set(item.id, item);
+          });
+          return Array.from(map.values());
+        };
+        const mergeMessagesById = (defaults: any[], current?: any[]) => {
+          const map = new Map<string, any>();
+          (defaults || []).forEach(item => {
+            if (item?.id) {
+              const { item: hydrated } = H.applyLocalReadReceipts(item);
+              map.set(item.id, hydrated);
+            }
+          });
+          (current || []).forEach(item => {
+            if (item?.id) {
+              const existing = map.get(item.id);
+              map.set(item.id, H.mergeMessageReadState(existing, item));
+            }
+          });
           return Array.from(map.values());
         };
         setAppState(prev => {
           const combinedSchools = mergeById(
             defaultState.schools,
-            mergeById(Array.isArray(cached.schools) ? cached.schools : [], prev?.schools || [])
+            mergeById(prev?.schools || [], Array.isArray(cached.schools) ? cached.schools : [])
           );
           const prevSchoolMap = new Map<string, any>((prev?.schools || []).map((s: any) => [s.id, s]));
           const hydratedSchools = combinedSchools.map((s: any) => {
             const pS = prevSchoolMap.get(s.id);
+            if (cloudSyncedSchoolsRef.current.has(s.id) && pS) {
+              return pS;
+            }
             let fallbackEdu = '';
-            try { fallbackEdu = localStorage.getItem(`eljur_edu_url_${s.id}`) || ''; } catch {}
+            let fallbackEduResources: any[] | undefined = undefined;
+            let fallbackSchoolInfo: string | undefined = undefined;
+            let savedSchoolName = '';
+            try {
+              savedSchoolName = (localStorage.getItem(`eljur_school_name_${s.id}`) || '').trim();
+              fallbackEdu = localStorage.getItem(`eljur_edu_url_${s.id}`) || '';
+              const rawRes = localStorage.getItem(`eljur_edu_resources_${s.id}`);
+              if (rawRes) {
+                const parsedRes = JSON.parse(rawRes);
+                if (Array.isArray(parsedRes)) fallbackEduResources = parsedRes;
+              }
+              const rawInfo = localStorage.getItem(`eljur_school_info_${s.id}`);
+              if (rawInfo !== null) fallbackSchoolInfo = rawInfo;
+            } catch {}
+            const rawResolvedInfo = s.schoolInfo ?? pS?.schoolInfo ?? fallbackSchoolInfo ?? (s.id === 'school_1' ? H.DEFAULT_SCHOOL_1_INFO_HTML : undefined);
+            const resolvedName = savedSchoolName || s.name || pS?.name || 'Гимназия №1 им. А.С. Пушкина';
             return {
               ...s,
-              educationalResourceUrl: pS?.educationalResourceUrl || s.educationalResourceUrl || fallbackEdu || ''
+              name: resolvedName,
+              educationalResourceUrl: s.educationalResourceUrl || pS?.educationalResourceUrl || fallbackEdu || '',
+              educationalResources: s.educationalResources ?? pS?.educationalResources ?? fallbackEduResources,
+              schoolInfo: s.id === 'school_1' && typeof rawResolvedInfo === 'string'
+                ? H.normalizeLegacySchool1Info(rawResolvedInfo)
+                : rawResolvedInfo
             };
           });
           const mergedCachedUsers = mergeById(
             defaultState.users,
-            mergeById(cached.users, prev?.users || [])
+            mergeById(prev?.users || [], cached.users)
           );
           const cachedUserPrefs = H.getUserPreferences(currentUser?.id, null);
           return {
@@ -809,10 +867,10 @@ export default function App() {
             schedules: { ...defaultState.schedules, ...(prev?.schedules || {}), ...(cached.schedules || {}) },
             grades: { ...defaultState.grades, ...(prev?.grades || {}), ...(cached.grades || {}) },
             finalGrades: { ...defaultState.finalGrades, ...(prev?.finalGrades || {}), ...(cached.finalGrades || {}) },
-            homework: mergeById(defaultState.homework, mergeById(cached.homework, prev?.homework)),
-            messages: mergeById(defaultState.messages, mergeById(cached.messages, prev?.messages)),
-            announcements: mergeById(defaultState.announcements, mergeById(cached.announcements, prev?.announcements)),
-            teacherAssignments: mergeById(defaultState.teacherAssignments, mergeById(cached.teacherAssignments, prev?.teacherAssignments)),
+            homework: mergeById(defaultState.homework, mergeById(prev?.homework || [], cached.homework)),
+            messages: mergeMessagesById(defaultState.messages, mergeMessagesById(prev?.messages || [], cached.messages)),
+            announcements: mergeMessagesById(defaultState.announcements, mergeMessagesById(prev?.announcements || [], cached.announcements)),
+            teacherAssignments: mergeById(defaultState.teacherAssignments, mergeById(prev?.teacherAssignments || [], cached.teacherAssignments)),
             quarters: (cached.quarters?.Q1 && cached.quarters.Q1.length > 2) ? cached.quarters : defaultState.quarters,
             scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings,
             settings: {
@@ -947,48 +1005,42 @@ export default function App() {
 
         let mergedMessages = cur.messages || [];
         if (schoolUpdate.messages !== undefined) {
+          const existingTargetMap = new Map<string, any>();
+          mergedMessages.forEach((m: any) => {
+            if (m?.id && (m.schoolId || 'school_1') === targetSid) {
+              existingTargetMap.set(m.id, m);
+            }
+          });
           const otherMsgs = mergedMessages.filter(m => (m.schoolId || 'school_1') !== targetSid);
           const msgMap = new Map<string, any>();
-          [...otherMsgs, ...schoolUpdate.messages].forEach((m: any) => {
+          otherMsgs.forEach((m: any) => {
+            if (m?.id) msgMap.set(m.id, m);
+          });
+          schoolUpdate.messages.forEach((m: any) => {
             if (!m?.id) return;
-            const existing = msgMap.get(m.id);
-            if (!existing) {
-              msgMap.set(m.id, m);
-            } else {
-              const combinedReadBy = Array.from(new Set([...(existing.readBy || []), ...(m.readBy || [])]));
-              const combinedBefore = Array.from(new Set([...(existing.readBeforeEditBy || []), ...(m.readBeforeEditBy || [])]));
-              const combinedAfter = Array.from(new Set([...(existing.readAfterEditBy || []), ...(m.readAfterEditBy || [])]));
-              msgMap.set(m.id, {
-                ...existing,
-                ...m,
-                read: Boolean(existing.read || m.read || combinedReadBy.length > 0),
-                readBy: combinedReadBy,
-                ...(combinedBefore.length > 0 ? { readBeforeEditBy: combinedBefore } : {}),
-                ...(combinedAfter.length > 0 ? { readAfterEditBy: combinedAfter } : {})
-              });
-            }
+            const prevMsg = existingTargetMap.get(m.id) || msgMap.get(m.id);
+            msgMap.set(m.id, H.mergeMessageReadState(prevMsg, m));
           });
           mergedMessages = Array.from(msgMap.values());
         }
 
         let mergedAnnouncements = cur.announcements || [];
         if (schoolUpdate.announcements !== undefined) {
+          const existingTargetMap = new Map<string, any>();
+          mergedAnnouncements.forEach((a: any) => {
+            if (a?.id && (a.schoolId || 'school_1') === targetSid) {
+              existingTargetMap.set(a.id, a);
+            }
+          });
           const otherAnns = mergedAnnouncements.filter(a => (a.schoolId || 'school_1') !== targetSid);
           const annMap = new Map<string, any>();
-          [...otherAnns, ...schoolUpdate.announcements].forEach((a: any) => {
+          otherAnns.forEach((a: any) => {
+            if (a?.id) annMap.set(a.id, a);
+          });
+          schoolUpdate.announcements.forEach((a: any) => {
             if (!a?.id) return;
-            const existing = annMap.get(a.id);
-            if (!existing) {
-              annMap.set(a.id, a);
-            } else {
-              const combinedReadBy = Array.from(new Set([...(existing.readBy || []), ...(a.readBy || [])]));
-              annMap.set(a.id, {
-                ...existing,
-                ...a,
-                read: Boolean(existing.read || a.read || combinedReadBy.length > 0),
-                readBy: combinedReadBy
-              });
-            }
+            const prevAnn = existingTargetMap.get(a.id) || annMap.get(a.id);
+            annMap.set(a.id, H.mergeMessageReadState(prevAnn, a));
           });
           mergedAnnouncements = Array.from(annMap.values());
         }
@@ -1002,6 +1054,7 @@ export default function App() {
         let mergedSchools = [...(cur.schools && cur.schools.length > 0 ? cur.schools : [defaultSchool])];
         if (schoolUpdate.schools && schoolUpdate.schools.length > 0) {
           schoolUpdate.schools.forEach((incS: any) => {
+            if (incS.id) cloudSyncedSchoolsRef.current.add(incS.id);
             const idx = mergedSchools.findIndex(s => s.id === incS.id);
             const enriched = {
               ...(idx > -1 ? mergedSchools[idx] : {}),
@@ -1099,6 +1152,8 @@ export default function App() {
                     name: s.name || existing.name || 'Школа',
                     directorId: s.directorId ?? existing.directorId ?? '',
                     educationalResourceUrl: s.educationalResourceUrl ?? existing.educationalResourceUrl ?? '',
+                    educationalResources: s.educationalResources ?? existing.educationalResources,
+                    schoolInfo: s.schoolInfo ?? existing.schoolInfo,
                     classes: Array.isArray(s.classes) ? s.classes : (existing.classes || []),
                     subjects: (Array.isArray(s.subjects) && s.subjects.length > 0) ? s.subjects : (existing.subjects || defaultState.subjects)
                   };
@@ -1447,9 +1502,13 @@ export default function App() {
   const currentUserPrefs = H.getUserPreferences(currentUser?.id, null);
   const lang = currentUserPrefs.language || appState?.settings?.language || 'ru';
   const t = (k: string) => H.t(k, lang);
-  const eduResourceUrl = currentUser && currentUser.role !== 'creator'
-    ? H.formatExternalResourceUrl(H.getSchoolEducationalResourceUrl(appState, currentUser.schoolId))
+  const eduResources = currentUser && currentUser.role !== 'creator'
+    ? H.getSchoolEducationalResources(appState, currentUser.schoolId)
+    : [];
+  const schoolInfoRaw = currentUser && currentUser.role !== 'creator'
+    ? H.getSchoolInfo(appState, currentUser.schoolId)
     : '';
+  const hasSchoolInfo = H.hasRichInfoContent(schoolInfoRaw);
 
   // Render loading state
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-blue-600 font-medium dark:bg-slate-900">{H.t('loading', lang)}</div>;
@@ -1457,8 +1516,7 @@ export default function App() {
 
   const showAnimations = currentUserPrefs.showSeasonalAnimations !== false;
 
-  const renderEljurInfo = () => {
-    const info = H.getSchoolEljurInfo(appState, currentUser?.schoolId) || H.DEFAULT_ELJUR_INFO_HTML;
+  const renderRichInfoContent = (info: string, fallbackHtml: string = '') => {
     const responsiveInfoCss = `
       ${customFonts.map(f => `
         .ql-font-${H.sanitizeCssIdentifier(f.name)} {
@@ -1544,9 +1602,9 @@ export default function App() {
     `;
     try {
       const parsed = JSON.parse(info);
-      if (parsed.isComplex) {
+      if (parsed && parsed.isComplex) {
         const safeBg = H.sanitizeSafeUrl(parsed.backgroundImage, 'background');
-        const safeQuillHtml = H.sanitizeRichHtml(parsed.quillContent || H.DEFAULT_ELJUR_INFO_HTML);
+        const safeQuillHtml = H.sanitizeRichHtml(parsed.quillContent || fallbackHtml);
         const safeElements = Array.isArray(parsed.elements) ? parsed.elements : [];
         return (
           <div 
@@ -1606,6 +1664,15 @@ export default function App() {
     );
   };
 
+  const renderEljurInfo = () => {
+    const info = H.getSchoolEljurInfo(appState, currentUser?.schoolId) || H.DEFAULT_ELJUR_INFO_HTML;
+    return renderRichInfoContent(info, H.DEFAULT_ELJUR_INFO_HTML);
+  };
+
+  const renderSchoolInfo = () => {
+    return renderRichInfoContent(schoolInfoRaw, '');
+  };
+
   return (
     <div className={`min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-300 font-sans overflow-x-hidden`}>
       {/* Seasonal Background is rendered here, at the top level, to persist across Login/Dashboard views and avoid reset */}
@@ -1640,7 +1707,7 @@ export default function App() {
                   {(() => {
                     const unreadTotal = H.getUnreadMessagesCount(appState, currentUser) + (currentUser.role !== 'creator' ? H.getUnreadAnnouncementsCount(appState, currentUser) : 0);
                     return unreadTotal > 0 ? (
-                      <span className="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1 text-[10px] font-bold rounded-full bg-red-500 text-white leading-none">
+                      <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] ${unreadTotal > 9 ? 'px-1' : 'w-[18px] px-0'} text-[10px] font-bold rounded-full bg-red-500 text-white leading-none shrink-0`}>
                         {unreadTotal > 99 ? '99+' : unreadTotal}
                       </span>
                     ) : null;
@@ -1658,28 +1725,15 @@ export default function App() {
                   />
 
                   {currentUser.role !== 'creator' && (
-                    eduResourceUrl ? (
-                      <a
-                        href={eduResourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 rounded-xl transition-all bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300 flex items-center justify-center"
-                        title={t('educational_resource')}
-                        aria-label={t('educational_resource')}
-                      >
-                        <GraduationCap size={18} />
-                      </a>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setShowEmptyEduResourceModal(true)}
-                        className="p-2 rounded-xl transition-all bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300 flex items-center justify-center"
-                        title={t('educational_resource')}
-                        aria-label={t('educational_resource')}
-                      >
-                        <GraduationCap size={18} />
-                      </button>
-                    )
+                    <button
+                      type="button"
+                      onClick={() => setShowEmptyEduResourceModal(true)}
+                      className="p-2 rounded-xl transition-all bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300 flex items-center justify-center"
+                      title={t('educational_resource')}
+                      aria-label={t('educational_resource')}
+                    >
+                      <GraduationCap size={18} />
+                    </button>
                   )}
 
                   <button 
@@ -1736,28 +1790,15 @@ export default function App() {
 
                   <div className="flex items-center gap-1.5">
                     {currentUser.role !== 'creator' && (
-                      eduResourceUrl ? (
-                        <a
-                          href={eduResourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-2.5 rounded-xl transition-all hover:bg-slate-100 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 flex items-center justify-center"
-                          title={t('educational_resource')}
-                          aria-label={t('educational_resource')}
-                        >
-                          <GraduationCap size={20} />
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setShowEmptyEduResourceModal(true)}
-                          className="p-2.5 rounded-xl transition-all hover:bg-slate-100 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 flex items-center justify-center"
-                          title={t('educational_resource')}
-                          aria-label={t('educational_resource')}
-                        >
-                          <GraduationCap size={20} />
-                        </button>
-                      )
+                      <button
+                        type="button"
+                        onClick={() => setShowEmptyEduResourceModal(true)}
+                        className="p-2.5 rounded-xl transition-all hover:bg-slate-100 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200 flex items-center justify-center"
+                        title={t('educational_resource')}
+                        aria-label={t('educational_resource')}
+                      >
+                        <GraduationCap size={20} />
+                      </button>
                     )}
 
                     <button 
@@ -1821,16 +1862,106 @@ export default function App() {
       <Modal
         isOpen={showEmptyEduResourceModal}
         onClose={() => setShowEmptyEduResourceModal(false)}
-        title={t('educational_resource')}
+        title={currentSchool?.name || t('educational_resources')}
+        maxWidth={hasSchoolInfo ? "max-w-5xl w-full" : "max-w-xl w-full"}
       >
-        <div className="py-4 text-center space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto">
-            <GraduationCap size={24} />
+        {eduResources.length === 0 && !hasSchoolInfo ? (
+          <div className="py-4 text-center space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto">
+              <GraduationCap size={24} />
+            </div>
+            <p className="text-slate-700 dark:text-slate-300 text-sm sm:text-base font-medium">
+              {t('educational_resource_empty')}
+            </p>
           </div>
-          <p className="text-slate-700 dark:text-slate-300 text-sm sm:text-base font-medium">
-            {t('educational_resource_empty')}
-          </p>
-        </div>
+        ) : (
+          <div className="space-y-5">
+            {eduResources.length > 0 && (
+              <div className="space-y-2.5">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">
+                  {t('educational_resources')}
+                </div>
+                <div className="grid gap-2">
+                  {eduResources.map((res) => (
+                    <div
+                      key={res.id}
+                      className="group flex items-center justify-between gap-2 px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 hover:bg-blue-50/80 hover:border-blue-300 dark:bg-slate-800/60 dark:hover:bg-blue-900/25 dark:hover:border-blue-700 transition-all"
+                    >
+                      <a
+                        href={res.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 min-w-0 flex-1"
+                      >
+                        <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                          <GraduationCap size={18} />
+                        </div>
+                        <span className="font-semibold text-sm sm:text-base text-blue-600 group-hover:text-blue-700 dark:text-blue-400 dark:group-hover:text-blue-300 underline-offset-4 group-hover:underline truncate">
+                          {res.title}
+                        </span>
+                      </a>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText(res.url).catch(() => {});
+                            } else {
+                              try {
+                                const ta = document.createElement('textarea');
+                                ta.value = res.url;
+                                ta.style.position = 'fixed';
+                                ta.style.opacity = '0';
+                                document.body.appendChild(ta);
+                                ta.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(ta);
+                              } catch {}
+                            }
+                            setCopiedResourceId(res.id);
+                            setTimeout(() => {
+                              setCopiedResourceId(prev => (prev === res.id ? null : prev));
+                            }, 2000);
+                          }}
+                          className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-100/70 dark:text-slate-500 dark:hover:text-blue-400 dark:hover:bg-blue-900/40 transition-colors"
+                          title={lang === 'ru' ? 'Скопировать ссылку' : 'Copy link'}
+                          aria-label={lang === 'ru' ? 'Скопировать ссылку' : 'Copy link'}
+                        >
+                          {copiedResourceId === res.id ? (
+                            <Check size={16} className="text-emerald-600 dark:text-emerald-400" />
+                          ) : (
+                            <Copy size={16} />
+                          )}
+                        </button>
+                        <a
+                          href={res.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-100/70 dark:text-slate-500 dark:hover:text-blue-400 dark:hover:bg-blue-900/40 transition-colors"
+                          title={lang === 'ru' ? 'Открыть ресурс' : 'Open resource'}
+                          aria-label={lang === 'ru' ? 'Открыть ресурс' : 'Open resource'}
+                        >
+                          <ExternalLink size={16} />
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {hasSchoolInfo && (
+              <div className={eduResources.length > 0 ? "pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2.5" : "space-y-2.5"}>
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">
+                  {t('school_info_section')}
+                </div>
+                {renderSchoolInfo()}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <Modal 

@@ -1,12 +1,12 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { AppState, User } from '../types';
+import { AppState, User, EducationalResource } from '../types';
 import * as DB from '../services/db';
 import * as H from '../utils/helpers';
 import { hashPassword, generateSalt } from '../utils/auth';
 import { Button, Input, Select, Card, FileUploader, Modal } from '../components/ui';
-import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle, Plus } from 'lucide-react';
 import { defaultState } from '../App';
 
 interface SettingsProps {
@@ -20,7 +20,10 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   // Use current school name if director, else first school or generic
   const currentSchool = state.schools.find(s => s.id === user.schoolId);
   const [localName, setLocalName] = useState(currentSchool?.name || 'ЭлЖур');
-  const [localEduUrl, setLocalEduUrl] = useState(currentSchool?.educationalResourceUrl || '');
+  const [localEduResources, setLocalEduResources] = useState<EducationalResource[]>(() => {
+    const existing = H.getSchoolEducationalResources(state, currentSchool?.id);
+    return existing.length > 0 ? existing : [{ id: 'edu_init_1', title: '', url: '' }];
+  });
   const [eduUrlSaved, setEduUrlSaved] = useState(false);
   const [fontList, setFontList] = useState<any[]>([]);
   const [showSecretPass, setShowSecretPass] = useState(false);
@@ -43,12 +46,15 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 
+  const serializedSchoolEduResources = JSON.stringify(currentSchool?.educationalResources ?? currentSchool?.educationalResourceUrl ?? '');
+
   useEffect(() => {
     if (currentSchool) {
       setLocalName(currentSchool.name || 'ЭлЖур');
-      setLocalEduUrl(currentSchool.educationalResourceUrl || '');
+      const existing = H.getSchoolEducationalResources(state, currentSchool.id);
+      setLocalEduResources(existing.length > 0 ? existing : [{ id: 'edu_init_1', title: '', url: '' }]);
     }
-  }, [currentSchool?.id, currentSchool?.name, currentSchool?.educationalResourceUrl]);
+  }, [currentSchool?.id, currentSchool?.name, serializedSchoolEduResources]);
 
   const refreshFonts = async () => {
     const assets = await DB.getAllAssets();
@@ -92,34 +98,85 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
 
   const handleSaveName = () => {
     if (currentSchool) {
-        currentSchool.name = localName.trim() || 'ЭлЖур';
-        state.schools = state.schools.map(s => s.id === currentSchool.id ? { ...s, name: currentSchool.name } : s);
-        try { localStorage.setItem('eljur_last_school_name', currentSchool.name); } catch {}
-        DB.saveSchoolMetadata(currentSchool.id, { name: currentSchool.name }).catch(() => {});
-        DB.saveSchoolCache(currentSchool.id, state).catch(() => {});
-        onUpdate({ ...state });
+        const cleanName = localName.trim() || 'ЭлЖур';
+        currentSchool.name = cleanName;
+        const nextSchools = state.schools.map(s => s.id === currentSchool.id ? { ...s, name: cleanName } : s);
+        const nextState: AppState = {
+          ...state,
+          schools: nextSchools
+        };
+        try {
+          localStorage.setItem(`eljur_school_name_${currentSchool.id}`, cleanName);
+          localStorage.setItem('eljur_last_school_name', cleanName);
+        } catch {}
+        DB.saveSchoolMetadata(currentSchool.id, { name: cleanName }).catch(() => {});
+        DB.saveSchoolCache(currentSchool.id, nextState).catch(() => {});
+        if (currentSchool.id !== 'school_1') {
+          DB.saveSchoolCache('school_1', nextState).catch(() => {});
+        }
+        onUpdate(nextState);
         notify(t('school_name_saved'), 'success');
     } else {
         notify(t('school_not_found'), 'error');
     }
   };
 
+  const handleAddEduResourceRow = () => {
+    setLocalEduResources(prev => [...prev, { id: H.uid('edu'), title: '', url: '' }]);
+  };
+
+  const handleUpdateEduResourceRow = (id: string, field: 'title' | 'url', value: string) => {
+    setLocalEduResources(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const handleRemoveEduResourceRow = (id: string) => {
+    setLocalEduResources(prev => {
+      if (prev.length <= 1) {
+        return [{ id: prev[0]?.id || H.uid('edu'), title: '', url: '' }];
+      }
+      return prev.filter(r => r.id !== id);
+    });
+  };
+
   const handleSaveEduUrl = () => {
     if (currentSchool) {
-        const cleaned = localEduUrl.trim();
-        const formatted = cleaned ? H.formatExternalResourceUrl(cleaned) : '';
-        currentSchool.educationalResourceUrl = formatted;
-        setLocalEduUrl(formatted);
-        try {
-            localStorage.setItem(`eljur_edu_url_${currentSchool.id}`, formatted);
-        } catch {}
-        DB.saveSchoolMetadata(currentSchool.id, { educationalResourceUrl: formatted });
-        onUpdate({
-            ...state,
-            schools: state.schools.map(s => s.id === currentSchool.id ? { ...s, educationalResourceUrl: formatted } : s)
-        });
-        setEduUrlSaved(true);
-        setTimeout(() => setEduUrlSaved(false), 2500);
+      const normalizedList: EducationalResource[] = localEduResources
+        .map((r, idx) => {
+          const formattedUrl = H.formatExternalResourceUrl(r.url);
+          const cleanTitle = r.title.trim() || formattedUrl;
+          return {
+            id: r.id || `edu_${idx + 1}`,
+            title: cleanTitle,
+            url: formattedUrl
+          };
+        })
+        .filter(r => Boolean(r.url));
+
+      const primaryUrl = normalizedList[0]?.url || '';
+      currentSchool.educationalResources = normalizedList;
+      currentSchool.educationalResourceUrl = primaryUrl;
+      setLocalEduResources(normalizedList.length > 0 ? normalizedList : [{ id: H.uid('edu'), title: '', url: '' }]);
+
+      try {
+        localStorage.setItem(`eljur_edu_resources_${currentSchool.id}`, JSON.stringify(normalizedList));
+        localStorage.setItem(`eljur_edu_url_${currentSchool.id}`, primaryUrl);
+      } catch {}
+
+      const nextState: AppState = {
+        ...state,
+        schools: state.schools.map(s => s.id === currentSchool.id
+          ? { ...s, educationalResources: normalizedList, educationalResourceUrl: primaryUrl }
+          : s)
+      };
+
+      DB.saveSchoolMetadata(currentSchool.id, {
+        educationalResources: normalizedList,
+        educationalResourceUrl: primaryUrl
+      }).catch(() => {});
+      DB.saveSchoolCache(currentSchool.id, nextState).catch(() => {});
+      onUpdate(nextState);
+      setEduUrlSaved(true);
+      setTimeout(() => setEduUrlSaved(false), 2500);
     }
   };
 
@@ -284,7 +341,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
             gradeTypes: importedSchool.gradeTypes || state.schools[schoolIdx].gradeTypes,
             scheduleSettings: importedSchool.scheduleSettings || state.schools[schoolIdx].scheduleSettings,
             subjectRequirements: importedSchool.subjectRequirements || state.schools[schoolIdx].subjectRequirements,
-            educationalResourceUrl: importedSchool.educationalResourceUrl ?? state.schools[schoolIdx].educationalResourceUrl
+            educationalResourceUrl: importedSchool.educationalResourceUrl ?? state.schools[schoolIdx].educationalResourceUrl,
+            educationalResources: Array.isArray(importedSchool.educationalResources) ? importedSchool.educationalResources : state.schools[schoolIdx].educationalResources,
+            schoolInfo: importedSchool.schoolInfo ?? state.schools[schoolIdx].schoolInfo
           };
         }
 
@@ -621,18 +680,59 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                </div>
                <div>
                  <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('educational_resource_url')}</label>
-                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-                   <Input
-                     type="url"
-                     placeholder={t('educational_resource_placeholder')}
-                     value={localEduUrl}
-                     onChange={e => setLocalEduUrl(e.target.value)}
-                   />
-                   <Button variant="primary" size="sm" onClick={handleSaveEduUrl}>{t('save')}</Button>
+                 <div className="space-y-2.5">
+                   {localEduResources.map((res, idx) => (
+                     <div
+                       key={res.id || idx}
+                       className="flex items-center gap-2 sm:gap-2.5 p-2 sm:p-0 rounded-xl bg-slate-50/70 sm:bg-transparent border border-slate-200/70 sm:border-0 dark:bg-slate-800/40 dark:sm:bg-transparent dark:border-slate-700/60"
+                     >
+                       <div className="flex-1 flex flex-col sm:flex-row gap-2 min-w-0">
+                         <Input
+                           type="text"
+                           placeholder={t('educational_resource_title_placeholder')}
+                           value={res.title}
+                           onChange={e => handleUpdateEduResourceRow(res.id, 'title', e.target.value)}
+                           className="sm:flex-1"
+                         />
+                         <Input
+                           type="url"
+                           placeholder={t('educational_resource_placeholder')}
+                           value={res.url}
+                           onChange={e => handleUpdateEduResourceRow(res.id, 'url', e.target.value)}
+                           className="sm:flex-1"
+                         />
+                       </div>
+                       <Button
+                         type="button"
+                         variant="danger"
+                         size="sm"
+                         onClick={() => handleRemoveEduResourceRow(res.id)}
+                         title={t('delete')}
+                         className="shrink-0 !h-8 !w-8 !p-0 sm:!h-10 sm:!w-auto sm:!px-3 flex items-center justify-center rounded-lg sm:rounded-xl"
+                       >
+                         <Trash2 size={14} className="sm:w-[15px] sm:h-[15px]" />
+                       </Button>
+                     </div>
+                   ))}
+                   <div className="flex flex-wrap items-center gap-2 pt-1">
+                     <Button
+                       type="button"
+                       variant="secondary"
+                       size="sm"
+                       onClick={handleAddEduResourceRow}
+                       className="flex items-center gap-1.5"
+                     >
+                       <Plus size={15} />
+                       <span>{t('educational_resource_add')}</span>
+                     </Button>
+                     <Button type="button" variant="primary" size="sm" onClick={handleSaveEduUrl}>
+                       {t('save')}
+                     </Button>
+                   </div>
                  </div>
                  {eduUrlSaved && (
-                   <p className="text-[11px] sm:text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
-                     {t('educational_resource_saved')}
+                   <p className="text-[11px] sm:text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1.5">
+                     {t('educational_resources_saved')}
                    </p>
                  )}
                </div>

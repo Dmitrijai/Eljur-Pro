@@ -8,7 +8,9 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "directorId": { "type": "string" },
-        "classes": { "type": "array" }
+        "classes": { "type": "array" },
+        "educationalResources": { "type": "array" },
+        "schoolInfo": { "type": "string" }
       },
       "required": ["id", "name"]
     },

@@ -1153,7 +1153,7 @@ export const SideNavDrawer: React.FC<{
                 <div className="flex items-center gap-1.5 shrink-0">
                   {typeof item.badgeCount === 'number' && item.badgeCount > 0 && (
                     <span
-                      className={`inline-flex items-center justify-center min-w-[18px] h-4.5 px-1 text-[10px] font-bold rounded-full leading-none ${
+                      className={`inline-flex items-center justify-center min-w-[18px] h-[18px] ${item.badgeCount > 9 ? 'px-1' : 'w-[18px] px-0'} text-[10px] font-bold rounded-full leading-none shrink-0 ${
                         active ? 'bg-white text-blue-600' : 'bg-red-500 text-white'
                       }`}
                     >

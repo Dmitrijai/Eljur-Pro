@@ -1,6 +1,12 @@
 
 export type Role = 'director' | 'teacher' | 'student' | 'creator' | 'employee';
 
+export interface EducationalResource {
+  id: string;
+  title: string;
+  url: string;
+}
+
 export interface School {
   id: string;
   name: string;
@@ -12,7 +18,9 @@ export interface School {
   scheduleSettings?: ScheduleSettings;
   subjectRequirements?: Record<string, Record<string, SubjectRequirement>>;
   eljurInfo?: string;
+  schoolInfo?: string;
   educationalResourceUrl?: string;
+  educationalResources?: EducationalResource[];
   quarters?: {
     Q1: string[];
     Q2: string[];

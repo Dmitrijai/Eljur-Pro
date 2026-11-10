@@ -21,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { AppState, Asset, User } from '../types';
+import { DEFAULT_SCHOOL_1_INFO_HTML, normalizeLegacySchool1Info, applyLocalReadReceipts } from '../utils/helpers';
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
@@ -495,7 +496,7 @@ const BUILTIN_ATTACHMENTS: Record<string, { name: string; type: string; content:
       'ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ ОБЩЕОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ',
       '«Гимназия №1 им. А.С. Пушкина»',
       '====================================================================',
-      'СВОДНЫЙ ОТЧЕТ ДИРЕКТОРА О РЕЗУЛЬТАТАХ I УЧЕБНОЙ ЧЕТВЕРТИ 2026/2027',
+      'СВОДНЫЙ ОТЧЕТ ДИРЕКТОРА О РЕЗУЛЬТАХ I УЧЕБНОЙ ЧЕТВЕРТИ 2026/2027',
       'Дата формирования: 30.10.2026 г.',
       'Отправитель: Директор гимназии Иванов Иван Иванович',
       'Получатель: Создатель и Главный администратор платформы «ЭлЖур»',
@@ -862,14 +863,29 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 export const saveSchoolMetadata = async (schoolId: string, schoolData: any): Promise<void> => {
   const docPath = `schools/${schoolId}`;
   try {
+    if (typeof schoolData?.name === 'string' && schoolData.name.trim()) {
+      try {
+        localStorage.setItem(`eljur_school_name_${schoolId}`, schoolData.name.trim());
+      } catch {}
+    }
     if (typeof schoolData?.educationalResourceUrl === 'string') {
       try {
         localStorage.setItem(`eljur_edu_url_${schoolId}`, schoolData.educationalResourceUrl);
       } catch {}
     }
+    if (Array.isArray(schoolData?.educationalResources)) {
+      try {
+        localStorage.setItem(`eljur_edu_resources_${schoolId}`, JSON.stringify(schoolData.educationalResources));
+      } catch {}
+    }
+    if (typeof schoolData?.schoolInfo === 'string') {
+      try {
+        localStorage.setItem(`eljur_school_info_${schoolId}`, schoolData.schoolInfo);
+      } catch {}
+    }
     const clean = JSON.parse(JSON.stringify(schoolData));
+    docSnapshots.delete(docPath);
     await setDoc(doc(db, 'schools', schoolId), clean, { merge: true });
-    docSnapshots.set(docPath, stableSerialize(clean));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
   }
@@ -963,6 +979,9 @@ export const saveSchoolEntity = async (schoolId: string, collName: string, entit
   const targetSchoolId = (schoolId && schoolId !== 'global') ? schoolId : 'school_1';
   const docPath = `schools/${targetSchoolId}/${collName}/${entityId}`;
   try {
+    if (!auth.currentUser) {
+      await auth.authStateReady();
+    }
     const cleanData = JSON.parse(JSON.stringify(data));
     await setDoc(doc(db, 'schools', targetSchoolId, collName, entityId), cleanData, { merge: true });
     docSnapshots.set(docPath, stableSerialize(cleanData));
@@ -971,7 +990,58 @@ export const saveSchoolEntity = async (schoolId: string, collName: string, entit
       (synced as any)[collName].add(entityId);
     }
   } catch (error) {
+    docSnapshots.delete(docPath);
     handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+};
+
+/**
+ * Saves a message or announcement read receipt atomically to Firestore.
+ * Uses only the allowed read-receipt keys ('read', 'readBy', 'readBeforeEditBy', 'readAfterEditBy', 'schoolId')
+ * so that non-director recipients (students, teachers, employees) always pass Firestore security rules.
+ */
+export const saveReadReceipt = async (
+  schoolId: string,
+  collName: 'messages' | 'announcements',
+  item: any
+): Promise<void> => {
+  if (!item?.id) return;
+  const targetSchoolId = (schoolId && schoolId !== 'global') ? schoolId : 'school_1';
+  const docPath = `schools/${targetSchoolId}/${collName}/${item.id}`;
+  try {
+    if (!auth.currentUser) {
+      await auth.authStateReady();
+    }
+    const readByList = Array.from(new Set(Array.isArray(item.readBy) ? item.readBy : []));
+    const receiptPayload: Record<string, any> = {
+      read: Boolean(item.read || readByList.length > 0),
+      readBy: readByList,
+      schoolId: targetSchoolId
+    };
+    if (Array.isArray(item.readBeforeEditBy) && item.readBeforeEditBy.length > 0) {
+      receiptPayload.readBeforeEditBy = Array.from(new Set(item.readBeforeEditBy));
+    }
+    if (Array.isArray(item.readAfterEditBy) && item.readAfterEditBy.length > 0) {
+      receiptPayload.readAfterEditBy = Array.from(new Set(item.readAfterEditBy));
+    }
+    const synced = getOrCreateSyncedIds(targetSchoolId);
+    const existsInCloud = synced[collName].has(item.id);
+    if (existsInCloud) {
+      await setDoc(doc(db, 'schools', targetSchoolId, collName, item.id), receiptPayload, { merge: true });
+    } else {
+      try {
+        await setDoc(doc(db, 'schools', targetSchoolId, collName, item.id), receiptPayload, { merge: true });
+      } catch {
+        const fullClean = JSON.parse(JSON.stringify({ ...item, ...receiptPayload, schoolId: targetSchoolId }));
+        await setDoc(doc(db, 'schools', targetSchoolId, collName, item.id), fullClean, { merge: true });
+      }
+    }
+    const fullSnapshot = JSON.parse(JSON.stringify({ ...item, ...receiptPayload, schoolId: targetSchoolId }));
+    docSnapshots.set(docPath, stableSerialize(fullSnapshot));
+    synced[collName].add(item.id);
+  } catch (error) {
+    docSnapshots.delete(docPath);
+    console.warn(`saveReadReceipt warning on ${docPath}:`, error);
   }
 };
 
@@ -1142,7 +1212,24 @@ export const subscribeToSchool = (
         };
 
         let resolvedEduUrl = typeof data.educationalResourceUrl === 'string' ? data.educationalResourceUrl : '';
+        let resolvedEduResources: any[] | undefined = Array.isArray(data.educationalResources) ? data.educationalResources : undefined;
+        let resolvedSchoolInfo: string | undefined = typeof data.schoolInfo === 'string' ? data.schoolInfo : undefined;
+        if (schoolId === 'school_1' && resolvedSchoolInfo !== undefined) {
+          resolvedSchoolInfo = normalizeLegacySchool1Info(resolvedSchoolInfo);
+        }
+        let resolvedSchoolName = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '';
         try {
+          if (resolvedSchoolName) {
+            localStorage.setItem(`eljur_school_name_${schoolId}`, resolvedSchoolName);
+            if (currentSessionUser?.schoolId === schoolId) {
+              localStorage.setItem('eljur_last_school_name', resolvedSchoolName);
+            }
+          } else {
+            const cachedSchoolName = localStorage.getItem(`eljur_school_name_${schoolId}`);
+            if (cachedSchoolName && cachedSchoolName.trim()) {
+              resolvedSchoolName = cachedSchoolName.trim();
+            }
+          }
           if (resolvedEduUrl) {
             localStorage.setItem(`eljur_edu_url_${schoolId}`, resolvedEduUrl);
           } else {
@@ -1151,7 +1238,30 @@ export const subscribeToSchool = (
               resolvedEduUrl = cachedEduUrl;
             }
           }
+          if (resolvedEduResources !== undefined) {
+            localStorage.setItem(`eljur_edu_resources_${schoolId}`, JSON.stringify(resolvedEduResources));
+          } else {
+            const cachedEduRes = localStorage.getItem(`eljur_edu_resources_${schoolId}`);
+            if (cachedEduRes) {
+              const parsed = JSON.parse(cachedEduRes);
+              if (Array.isArray(parsed)) resolvedEduResources = parsed;
+            }
+          }
+          if (resolvedSchoolInfo !== undefined) {
+            localStorage.setItem(`eljur_school_info_${schoolId}`, resolvedSchoolInfo);
+          } else {
+            const cachedSchoolInfo = localStorage.getItem(`eljur_school_info_${schoolId}`);
+            if (cachedSchoolInfo !== null) {
+              resolvedSchoolInfo = schoolId === 'school_1' ? normalizeLegacySchool1Info(cachedSchoolInfo) : cachedSchoolInfo;
+            } else if (schoolId === 'school_1') {
+              resolvedSchoolInfo = DEFAULT_SCHOOL_1_INFO_HTML;
+              localStorage.setItem(`eljur_school_info_${schoolId}`, resolvedSchoolInfo);
+            }
+          }
         } catch {}
+        if (!resolvedSchoolName) {
+          resolvedSchoolName = schoolId === 'school_1' ? 'Гимназия №1 им. А.С. Пушкина' : 'Школа №1';
+        }
 
         const resolvedSchoolTz = data.timezone || data.settings?.schoolsSettings?.[schoolId]?.timezone || data.settings?.timezone || 'UTC+3';
         const schoolLevelSettings = data.settings ? { ...data.settings } : ({} as any);
@@ -1164,7 +1274,7 @@ export const subscribeToSchool = (
 
         docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
-          name: data.name || 'Школа №1',
+          name: resolvedSchoolName,
           directorId: data.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
           timezone: resolvedSchoolTz,
           classes: schoolClasses,
@@ -1175,13 +1285,15 @@ export const subscribeToSchool = (
           subjectRequirements: data.subjectRequirements,
           scheduleSettings: normalizedScheduleSettings,
           educationalResourceUrl: resolvedEduUrl,
+          ...(resolvedEduResources !== undefined ? { educationalResources: resolvedEduResources } : {}),
+          ...(resolvedSchoolInfo !== undefined ? { schoolInfo: resolvedSchoolInfo } : {}),
           settings: schoolLevelSettings
         }));
 
         onUpdate({
           schools: [{
             id: data.id || schoolId,
-            name: data.name || 'Школа №1',
+            name: resolvedSchoolName,
             directorId: data.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
             timezone: resolvedSchoolTz,
             classes: schoolClasses,
@@ -1192,6 +1304,8 @@ export const subscribeToSchool = (
             subjectRequirements: data.subjectRequirements,
             scheduleSettings: normalizedScheduleSettings,
             educationalResourceUrl: resolvedEduUrl,
+            ...(resolvedEduResources !== undefined ? { educationalResources: resolvedEduResources } : {}),
+            ...(resolvedSchoolInfo !== undefined ? { schoolInfo: resolvedSchoolInfo } : {}),
             eljurInfo: data.eljurInfo ?? data.settings?.eljurInfo
           } as any],
           classes: schoolClasses,
@@ -1306,8 +1420,12 @@ export const subscribeToSchool = (
           body: msgData.body || msgData.text || msgData.content || '',
           schoolId: msgData.schoolId || schoolId
         };
-        docSnapshots.set(`schools/${schoolId}/messages/${d.id}`, stableSerialize(normalized));
-        return normalized;
+        const { item: hydratedMsg, modified } = applyLocalReadReceipts(normalized);
+        docSnapshots.set(`schools/${schoolId}/messages/${d.id}`, stableSerialize(hydratedMsg));
+        if (modified) {
+          saveReadReceipt(schoolId, 'messages', hydratedMsg).catch(() => {});
+        }
+        return hydratedMsg;
       });
       onUpdate({ messages });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/messages`));
@@ -1325,8 +1443,12 @@ export const subscribeToSchool = (
           body: annData.body || annData.text || annData.content || '',
           schoolId: annData.schoolId || schoolId
         };
-        docSnapshots.set(`schools/${schoolId}/announcements/${d.id}`, stableSerialize(normalized));
-        return normalized;
+        const { item: hydratedAnn, modified } = applyLocalReadReceipts(normalized);
+        docSnapshots.set(`schools/${schoolId}/announcements/${d.id}`, stableSerialize(hydratedAnn));
+        if (modified) {
+          saveReadReceipt(schoolId, 'announcements', hydratedAnn).catch(() => {});
+        }
+        return hydratedAnn;
       });
       onUpdate({ announcements });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/announcements`));
@@ -1400,10 +1522,19 @@ export const subscribeToAllSchools = (callback: (schools: any[]) => void): (() =
         .filter(d => d.id !== 'global')
         .map(d => {
           const data = d.data() || {};
+          const sId = data.id || d.id;
+          if (typeof data.name === 'string' && data.name.trim()) {
+            try {
+              localStorage.setItem(`eljur_school_name_${sId}`, data.name.trim());
+            } catch {}
+          }
           const rawSched = data.scheduleSettings || {};
           return {
             ...data,
-            id: data.id || d.id,
+            id: sId,
+            ...(sId === 'school_1' && typeof data.schoolInfo === 'string'
+              ? { schoolInfo: normalizeLegacySchool1Info(data.schoolInfo) }
+              : {}),
             scheduleSettings: {
               ...rawSched,
               daysToAddBatch: typeof rawSched.daysToAddBatch === 'number' && rawSched.daysToAddBatch > 0 ? rawSched.daysToAddBatch : 1,
@@ -1500,15 +1631,37 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
           let resolvedEduUrl: string | undefined = typeof school.educationalResourceUrl === 'string'
             ? school.educationalResourceUrl
             : undefined;
-          if (resolvedEduUrl === undefined) {
-            try {
+          let resolvedEduResources: any[] | undefined = Array.isArray(school.educationalResources)
+            ? school.educationalResources
+            : undefined;
+          let resolvedSchoolInfo: string | undefined = typeof school.schoolInfo === 'string'
+            ? school.schoolInfo
+            : undefined;
+          try {
+            if (resolvedEduUrl === undefined) {
               const cachedEdu = localStorage.getItem(`eljur_edu_url_${schoolId}`);
               if (cachedEdu !== null) resolvedEduUrl = cachedEdu;
+            }
+            if (resolvedEduResources === undefined) {
+              const cachedRes = localStorage.getItem(`eljur_edu_resources_${schoolId}`);
+              if (cachedRes) {
+                const parsed = JSON.parse(cachedRes);
+                if (Array.isArray(parsed)) resolvedEduResources = parsed;
+              }
+            }
+            if (resolvedSchoolInfo === undefined) {
+              const cachedInfo = localStorage.getItem(`eljur_school_info_${schoolId}`);
+              if (cachedInfo !== null) resolvedSchoolInfo = cachedInfo;
+            }
+          } catch {}
+          if (typeof school.name === 'string' && school.name.trim()) {
+            try {
+              localStorage.setItem(`eljur_school_name_${schoolId}`, school.name.trim());
             } catch {}
           }
           const schoolPayload: any = {
             id: school.id || schoolId,
-            name: school.name || 'Школа №1',
+            name: school.name || (schoolId === 'school_1' ? 'Гимназия №1 им. А.С. Пушкина' : 'Школа №1'),
             directorId: school.directorId ?? (schoolId === 'school_1' ? 'u_dir' : ''),
             classes: Array.isArray(school.classes)
               ? school.classes
@@ -1544,6 +1697,12 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
           };
           if (resolvedEduUrl !== undefined) {
             schoolPayload.educationalResourceUrl = resolvedEduUrl;
+          }
+          if (resolvedEduResources !== undefined) {
+            schoolPayload.educationalResources = resolvedEduResources;
+          }
+          if (resolvedSchoolInfo !== undefined) {
+            schoolPayload.schoolInfo = resolvedSchoolInfo;
           }
           queueSetIfChanged(doc(db, 'schools', schoolId), `schools/${schoolId}`, schoolPayload, true);
         }
@@ -1707,12 +1866,30 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       // Students and Teachers can update read/readBy on existing announcements
       for (const ann of schoolAnnouncements) {
         if (synced.announcements.has(ann.id)) {
-          queueSetIfChanged(
-            doc(db, 'schools', schoolId, 'announcements', ann.id),
-            `schools/${schoolId}/announcements/${ann.id}`,
-            { ...ann, schoolId },
-            true
-          );
+          const docPath = `schools/${schoolId}/announcements/${ann.id}`;
+          const fullCleaned = JSON.parse(JSON.stringify({ ...ann, schoolId }));
+          const serialized = stableSerialize(fullCleaned);
+          if (docSnapshots.get(docPath) !== serialized) {
+            docSnapshots.set(docPath, serialized);
+            const readByList = Array.from(new Set(Array.isArray(ann.readBy) ? ann.readBy : []));
+            const receiptOnly: Record<string, any> = {
+              read: Boolean(ann.read || readByList.length > 0),
+              readBy: readByList,
+              schoolId
+            };
+            if (Array.isArray(ann.readBeforeEditBy) && ann.readBeforeEditBy.length > 0) {
+              receiptOnly.readBeforeEditBy = Array.from(new Set(ann.readBeforeEditBy));
+            }
+            if (Array.isArray(ann.readAfterEditBy) && ann.readAfterEditBy.length > 0) {
+              receiptOnly.readAfterEditBy = Array.from(new Set(ann.readAfterEditBy));
+            }
+            writeOps.push(
+              setDoc(doc(db, 'schools', schoolId, 'announcements', ann.id), receiptOnly, { merge: true }).catch((err) => {
+                docSnapshots.delete(docPath);
+                handleFirestoreError(err, OperationType.WRITE, docPath);
+              })
+            );
+          }
         }
       }
     }
@@ -1732,13 +1909,41 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
       }
     }
     for (const msg of schoolMessages) {
-      queueSetIfChanged(
-        doc(db, 'schools', schoolId, 'messages', msg.id),
-        `schools/${schoolId}/messages/${msg.id}`,
-        { ...msg, schoolId },
-        true
-      );
-      synced.messages.add(msg.id);
+      const docPath = `schools/${schoolId}/messages/${msg.id}`;
+      const isSenderOrAdmin = isDirectorOrCreator || msg.fromId === currentUserId || (isEmployee && currentSessionUser?.employeePermissions?.canSendAsDirector);
+      if (synced.messages.has(msg.id) && !isSenderOrAdmin) {
+        const fullCleaned = JSON.parse(JSON.stringify({ ...msg, schoolId }));
+        const serialized = stableSerialize(fullCleaned);
+        if (docSnapshots.get(docPath) !== serialized) {
+          docSnapshots.set(docPath, serialized);
+          const readByList = Array.from(new Set(Array.isArray(msg.readBy) ? msg.readBy : []));
+          const receiptOnly: Record<string, any> = {
+            read: Boolean(msg.read || readByList.length > 0),
+            readBy: readByList,
+            schoolId
+          };
+          if (Array.isArray(msg.readBeforeEditBy) && msg.readBeforeEditBy.length > 0) {
+            receiptOnly.readBeforeEditBy = Array.from(new Set(msg.readBeforeEditBy));
+          }
+          if (Array.isArray(msg.readAfterEditBy) && msg.readAfterEditBy.length > 0) {
+            receiptOnly.readAfterEditBy = Array.from(new Set(msg.readAfterEditBy));
+          }
+          writeOps.push(
+            setDoc(doc(db, 'schools', schoolId, 'messages', msg.id), receiptOnly, { merge: true }).catch((err) => {
+              docSnapshots.delete(docPath);
+              handleFirestoreError(err, OperationType.WRITE, docPath);
+            })
+          );
+        }
+      } else {
+        queueSetIfChanged(
+          doc(db, 'schools', schoolId, 'messages', msg.id),
+          docPath,
+          { ...msg, schoolId },
+          true
+        );
+        synced.messages.add(msg.id);
+      }
     }
 
     // 9. Teacher Assignments & Student Groups diff & sync

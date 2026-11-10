@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import DOMPurify from 'dompurify';
-import { Lesson, ScheduleSettings, Message, Announcement, AppState, User, School, GradingSystemSettings, GradeType, SubjectRequirement, Grade, FinalGradeEntry, ScheduleDay, TeacherAssignment, StudentGroup, Homework, COEFFICIENT_TYPES } from '../types';
+import { Lesson, ScheduleSettings, Message, Announcement, AppState, User, School, EducationalResource, GradingSystemSettings, GradeType, SubjectRequirement, Grade, FinalGradeEntry, ScheduleDay, TeacherAssignment, StudentGroup, Homework, COEFFICIENT_TYPES } from '../types';
 
 // --- TRANSLATION DICTIONARY ---
 export const DICT: Record<string, Record<string, string>> = {
@@ -41,6 +41,7 @@ export const DICT: Record<string, Record<string, string>> = {
     developer: 'Разработчик',
     creator_panel: 'Панель Создателя',
     info_eljur: 'Инфо ЭлЖур',
+    info_school: 'Инфо о школе',
     current_week: 'Текущая неделя',
     print: 'Печать',
     add: 'Добавить',
@@ -566,11 +567,16 @@ export const DICT: Record<string, Record<string, string>> = {
     holiday: 'Выходной',
     q_short: 'Ч.',
     my_schedule: 'Моё расписание',
-    educational_resource: 'Образовательный ресурс',
-    educational_resource_url: 'Ссылка на образовательный ресурс (курсы и др.)',
+    educational_resource: 'Образовательные ресурсы и инфо о школе',
+    educational_resources: 'Образовательные ресурсы',
+    educational_resource_url: 'Образовательные ресурсы (курсы, сайты и др.)',
+    educational_resource_title_placeholder: 'Название ресурса (например: Курсы, Сайт школы)',
     educational_resource_placeholder: 'https://...',
-    educational_resource_saved: 'Ссылка на образовательный ресурс сохранена',
+    educational_resource_add: 'Добавить ресурс',
+    educational_resource_saved: 'Образовательные ресурсы сохранены',
+    educational_resources_saved: 'Образовательные ресурсы сохранены',
     educational_resource_empty: 'Здесь ещё ничего нет',
+    school_info_section: 'Информация о школе',
     role_director: 'Директор',
     role_teacher: 'Учитель',
     role_student: 'Ученик',
@@ -614,6 +620,7 @@ export const DICT: Record<string, Record<string, string>> = {
     developer: 'Developer',
     creator_panel: 'Creator Panel',
     info_eljur: 'Eljur Info',
+    info_school: 'School Info',
     current_week: 'Current Week',
     print: 'Print',
     add: 'Add',
@@ -1138,11 +1145,16 @@ export const DICT: Record<string, Record<string, string>> = {
     holiday: 'Holiday',
     q_short: 'Q.',
     my_schedule: 'My Schedule',
-    educational_resource: 'Educational Resource',
-    educational_resource_url: 'Educational Resource Link (courses, etc.)',
+    educational_resource: 'Educational Resources & School Info',
+    educational_resources: 'Educational Resources',
+    educational_resource_url: 'Educational Resources (courses, websites, etc.)',
+    educational_resource_title_placeholder: 'Resource title (e.g. Courses, School Website)',
     educational_resource_placeholder: 'https://...',
-    educational_resource_saved: 'Educational resource link saved',
+    educational_resource_add: 'Add resource',
+    educational_resource_saved: 'Educational resources saved',
+    educational_resources_saved: 'Educational resources saved',
     educational_resource_empty: 'There is nothing here yet',
+    school_info_section: 'School Information',
     role_director: 'Director',
     role_teacher: 'Teacher',
     role_student: 'Student',
@@ -1484,6 +1496,114 @@ export const getQuarterFromDate = (dateStr: string): string => {
 
 // --- UNREAD MESSAGES & ANNOUNCEMENTS HELPERS ---
 
+const READ_RECEIPTS_STORAGE_KEY = 'eljur_read_receipts_v1';
+
+interface LocalReadReceiptEntry {
+    readBy: string[];
+    readAfterEdit?: Record<string, string[]>;
+}
+
+const getLocalReadReceiptsMap = (): Record<string, LocalReadReceiptEntry> => {
+    if (typeof window === 'undefined') return {};
+    try {
+        const raw = localStorage.getItem(READ_RECEIPTS_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+};
+
+export const recordLocalReadReceipt = (itemId: string, userId: string, editedAt?: string): void => {
+    if (typeof window === 'undefined' || !itemId || !userId) return;
+    try {
+        const map = getLocalReadReceiptsMap();
+        const entry: LocalReadReceiptEntry = map[itemId] || { readBy: [] };
+        if (!Array.isArray(entry.readBy)) entry.readBy = [];
+        if (!entry.readBy.includes(userId)) {
+            entry.readBy.push(userId);
+        }
+        if (editedAt) {
+            if (!entry.readAfterEdit || typeof entry.readAfterEdit !== 'object') {
+                entry.readAfterEdit = {};
+            }
+            const list = Array.isArray(entry.readAfterEdit[editedAt]) ? entry.readAfterEdit[editedAt] : [];
+            if (!list.includes(userId)) {
+                list.push(userId);
+            }
+            entry.readAfterEdit[editedAt] = list;
+        }
+        map[itemId] = entry;
+        localStorage.setItem(READ_RECEIPTS_STORAGE_KEY, JSON.stringify(map));
+    } catch {}
+};
+
+export const hasLocalReadReceipt = (itemId: string, userId: string): boolean => {
+    if (!itemId || !userId) return false;
+    const map = getLocalReadReceiptsMap();
+    const entry = map[itemId];
+    return Boolean(entry && Array.isArray(entry.readBy) && entry.readBy.includes(userId));
+};
+
+export const applyLocalReadReceipts = <T extends Message>(item: T): { item: T; modified: boolean } => {
+    if (!item || !item.id) return { item, modified: false };
+    const map = getLocalReadReceiptsMap();
+    const entry = map[item.id];
+    if (!entry) return { item, modified: false };
+
+    let modified = false;
+    const currentReadBy = Array.isArray(item.readBy) ? item.readBy : [];
+    const mergedReadBy = Array.from(new Set([...currentReadBy, ...(entry.readBy || [])]));
+    if (mergedReadBy.length !== currentReadBy.length) {
+        modified = true;
+    }
+
+    let mergedReadAfterEdit = Array.isArray(item.readAfterEditBy) ? item.readAfterEditBy : undefined;
+    if (item.editedAt && entry.readAfterEdit && Array.isArray(entry.readAfterEdit[item.editedAt])) {
+        const currentAfter = Array.isArray(item.readAfterEditBy) ? item.readAfterEditBy : [];
+        const combinedAfter = Array.from(new Set([...currentAfter, ...entry.readAfterEdit[item.editedAt]]));
+        if (combinedAfter.length !== currentAfter.length) {
+            modified = true;
+        }
+        mergedReadAfterEdit = combinedAfter;
+    }
+
+    if (!modified) return { item, modified: false };
+
+    return {
+        item: {
+            ...item,
+            read: Boolean(item.read || mergedReadBy.length > 0),
+            readBy: mergedReadBy,
+            ...(mergedReadAfterEdit !== undefined ? { readAfterEditBy: mergedReadAfterEdit } : {})
+        },
+        modified: true
+    };
+};
+
+export const mergeMessageReadState = <T extends Message>(older: T | undefined, newer: T): T => {
+    if (!older) {
+        return applyLocalReadReceipts(newer).item;
+    }
+    const combinedReadBy = Array.from(new Set([...(older.readBy || []), ...(newer.readBy || [])]));
+    const combinedBefore = Array.from(new Set([...(older.readBeforeEditBy || []), ...(newer.readBeforeEditBy || [])]));
+    const sameEditVersion = (older.editedAt || '') === (newer.editedAt || '');
+    const combinedAfter = sameEditVersion
+        ? Array.from(new Set([...(older.readAfterEditBy || []), ...(newer.readAfterEditBy || [])]))
+        : (newer.readAfterEditBy || []);
+
+    const merged: T = {
+        ...older,
+        ...newer,
+        read: Boolean(older.read || newer.read || combinedReadBy.length > 0),
+        readBy: combinedReadBy,
+        ...(combinedBefore.length > 0 ? { readBeforeEditBy: combinedBefore } : {}),
+        ...(combinedAfter.length > 0 || newer.editedAt ? { readAfterEditBy: combinedAfter } : {})
+    };
+    return applyLocalReadReceipts(merged).item;
+};
+
 export const isMessageUnreadByUser = (m: Message, userOrId: User | string, allUsers?: User[]): boolean => {
     if (!m) return false;
     const userId = typeof userOrId === 'string' ? userOrId : userOrId.id;
@@ -1507,8 +1627,8 @@ export const isMessageUnreadByUser = (m: Message, userOrId: User | string, allUs
         }
     }
 
-    // Check if user has read it
-    if (m.readBy && m.readBy.includes(userId)) return false;
+    // Check if user has read it (in message state or local read-receipt ledger)
+    if ((m.readBy && m.readBy.includes(userId)) || hasLocalReadReceipt(m.id, userId)) return false;
     return true;
 };
 
@@ -1524,8 +1644,8 @@ export const isAnnouncementUnreadByUser = (a: Announcement, user: User, allUsers
     } else {
         return false;
     }
-    // Check if user has read it
-    if (a.readBy && a.readBy.includes(user.id)) return false;
+    // Check if user has read it (in announcement state or local read-receipt ledger)
+    if ((a.readBy && a.readBy.includes(user.id)) || hasLocalReadReceipt(a.id, user.id)) return false;
     return true;
 };
 
@@ -2612,6 +2732,8 @@ export const formatExternalResourceUrl = (rawUrl?: string): string => {
 };
 
 export const getSchoolEducationalResourceUrl = (state: AppState, schoolId: string | undefined): string => {
+    const list = getSchoolEducationalResources(state, schoolId);
+    if (list.length > 0) return list[0].url;
     if (!schoolId) return '';
     const school = getSchool(state, schoolId);
     if (school && typeof school.educationalResourceUrl === 'string' && school.educationalResourceUrl.trim()) {
@@ -2622,6 +2744,178 @@ export const getSchoolEducationalResourceUrl = (state: AppState, schoolId: strin
         if (cached && cached.trim()) return cached.trim();
     } catch {}
     return '';
+};
+
+export const getSchoolEducationalResources = (state: AppState, schoolId: string | undefined): EducationalResource[] => {
+    if (!schoolId) return [];
+    const school = getSchool(state, schoolId);
+    const normalizeList = (arr: any[]): EducationalResource[] => {
+        return arr
+            .filter(item => item && typeof item.url === 'string' && item.url.trim())
+            .map((item, idx) => {
+                const formattedUrl = formatExternalResourceUrl(item.url);
+                const cleanTitle = (typeof item.title === 'string' && item.title.trim()) ? item.title.trim() : formattedUrl;
+                return {
+                    id: item.id || `edu_${idx + 1}`,
+                    title: cleanTitle,
+                    url: formattedUrl
+                };
+            })
+            .filter(item => Boolean(item.url));
+    };
+
+    if (school && Array.isArray(school.educationalResources)) {
+        return normalizeList(school.educationalResources);
+    }
+
+    try {
+        const cachedJson = localStorage.getItem(`eljur_edu_resources_${schoolId}`);
+        if (cachedJson) {
+            const parsed = JSON.parse(cachedJson);
+            if (Array.isArray(parsed)) {
+                return normalizeList(parsed);
+            }
+        }
+    } catch {}
+
+    // Fallback to legacy single educationalResourceUrl if educationalResources has never been initialized
+    const legacyUrl = (school && typeof school.educationalResourceUrl === 'string' && school.educationalResourceUrl.trim())
+        ? school.educationalResourceUrl.trim()
+        : (() => {
+            try {
+                return (localStorage.getItem(`eljur_edu_url_${schoolId}`) || '').trim();
+            } catch {
+                return '';
+            }
+        })();
+
+    if (legacyUrl) {
+        const formatted = formatExternalResourceUrl(legacyUrl);
+        if (formatted) {
+            return [{ id: 'edu_legacy_1', title: formatted, url: formatted }];
+        }
+    }
+
+    return [];
+};
+
+const SVG_SCHOOL_1_BANNER = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 250" width="860" height="250">
+  <defs>
+    <linearGradient id="schGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e40af"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.96"/>
+      <stop offset="100%" stop-color="#f8fafc" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+  <rect width="860" height="250" rx="22" fill="url(#schGrad)"/>
+  <circle cx="800" cy="30" r="105" fill="#38bdf8" opacity="0.16"/>
+  <circle cx="60" cy="230" r="120" fill="#60a5fa" opacity="0.14"/>
+  <rect x="40" y="32" width="210" height="28" rx="14" fill="#ffffff" fill-opacity="0.16"/>
+  <text x="145" y="50" font-family="Inter, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#e0f2fe" text-anchor="middle">ОФИЦИАЛЬНАЯ КАРТОЧКА ШКОЛЫ</text>
+  <text x="40" y="96" font-family="Inter, Arial, sans-serif" font-size="27" font-weight="800" fill="#ffffff">Гимназия №1</text>
+  <text x="40" y="130" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#93c5fd">им. А.С. Пушкина</text>
+  <text x="40" y="164" font-family="Inter, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#dbeafe">Углубленное изучение математики, физики, информатики,</text>
+  <text x="40" y="184" font-family="Inter, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#dbeafe">русской словесности и иностранных языков</text>
+  <rect x="40" y="202" width="164" height="30" rx="9" fill="#10b981"/>
+  <text x="122" y="221" font-family="Inter, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">Учебный год 2026 / 2027</text>
+  <rect x="480" y="28" width="344" height="194" rx="16" fill="url(#badgeGrad)"/>
+  <rect x="500" y="46" width="38" height="38" rx="10" fill="#1d4ed8"/>
+  <text x="519" y="71" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800" fill="#ffffff" text-anchor="middle">№1</text>
+  <text x="550" y="61" font-family="Inter, Arial, sans-serif" font-size="13.5" font-weight="800" fill="#0f172a">Директор гимназии</text>
+  <text x="550" y="78" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">Иванов Иван Иванович</text>
+  <rect x="500" y="98" width="304" height="50" rx="10" fill="#eff6ff"/>
+  <text x="514" y="118" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700" fill="#1e40af">Профили обучения:</text>
+  <text x="514" y="136" font-family="Inter, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#0f172a">Физико-математический • Филологический • ИТ</text>
+  <rect x="500" y="156" width="146" height="48" rx="10" fill="#ecfdf5"/>
+  <text x="512" y="175" font-family="Inter, Arial, sans-serif" font-size="10.5" font-weight="700" fill="#047857">Качество знаний</text>
+  <text x="512" y="193" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="800" fill="#0f172a">Ср. балл 4.78</text>
+  <rect x="658" y="156" width="146" height="48" rx="10" fill="#f1f5f9"/>
+  <text x="670" y="175" font-family="Inter, Arial, sans-serif" font-size="10.5" font-weight="700" fill="#475569">Режим работы</text>
+  <text x="670" y="193" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="800" fill="#0f172a">Пн–Пт • 08:30</text>
+</svg>`);
+
+export const DEFAULT_SCHOOL_1_INFO_HTML = `
+<p><img src="${SVG_SCHOOL_1_BANNER}" alt="Гимназия №1 им. А.С. Пушкина" /></p>
+<h2><strong>Добро пожаловать в Гимназию №1 им. А.С. Пушкина!</strong></h2>
+<p>Уважаемые учащиеся, родители и педагоги! Рад приветствовать вас в едином цифровом пространстве <strong>Гимназии №1 им. А.С. Пушкина</strong>. Наша гимназия сочетает классические академические традиции с передовыми образовательными технологиями, обеспечивая высокий уровень подготовки выпускников, победы на Всероссийской олимпиаде школьников и всестороннее развитие каждого ученика.</p>
+<h3><strong>Основные направления и профили подготовки</strong></h3>
+<ul>
+  <li><strong>Физико-математический и инженерный профиль:</strong> углубленное изучение алгебры, геометрии, математического анализа и экспериментальной физики, подготовка к профильным олимпиадам и турнирам юных физиков.</li>
+  <li><strong>Гуманитарно-филологический профиль:</strong> углубленный курс русского языка, отечественной и мировой литературы, риторики и английского языка с развитием навыков академического письма.</li>
+  <li><strong>Информационно-технологический и естественнонаучный блок:</strong> алгоритмизация, программирование, компьютерное моделирование, а также лабораторные практикумы по химии, биологии и экономической географии.</li>
+</ul>
+<h3><strong>Администрация и педагогический коллектив</strong></h3>
+<ul>
+  <li><strong>Директор гимназии:</strong> Иванов Иван Иванович — общее руководство образовательной организацией, стратегическое развитие и работа с управляющим советом.</li>
+  <li><strong>Заместитель директора по учебно-воспитательной работе (УВР):</strong> Сидоров Сидр — координация учебного расписания, контроль качества образования, организация олимпиад и промежуточной аттестации.</li>
+  <li><strong>Классный руководитель 10-А класса:</strong> Петров Пётр — преподаватель высшей категории по математике и физике.</li>
+  <li><strong>Классный руководитель 9-А класса:</strong> Смирнова Елена Викторовна — преподаватель русского языка, литературы и английского языка.</li>
+  <li><strong>Преподаватель профильных дисциплин:</strong> Морозов Андрей Сергеевич — учитель информатики, истории, химии, биологии, географии и физической культуры.</li>
+</ul>
+<h3><strong>Организация учебного процесса в 2026/2027 учебном году</strong></h3>
+<ul>
+  <li><strong>Режим учебной недели:</strong> 5-дневная учебная неделя (понедельник — пятница). Начало первого урока — в <strong>08:30</strong>.</li>
+  <li><strong>Календарный график I полугодия:</strong> I учебная четверть длится с 1 сентября по 15 ноября 2026 года; осенние каникулы — с 16 по 22 ноября 2026 года; начало II четверти — 23 ноября 2026 года.</li>
+  <li><strong>Система оценивания и контроль успеваемости:</strong> в гимназии действует средневзвешенная 5-балльная система оценивания с учетом коэффициентов важности работ (контрольные, самостоятельные, лабораторные, практические работы, диктанты, эссе и ответы на уроке).</li>
+  <li><strong>Связь с руководством:</strong> по всем учебным и организационным вопросам ученики и педагоги могут обратиться напрямую к директору или заместителю директора по УВР через раздел <em>«Сообщения»</em>.</li>
+</ul>
+<p><em>С уважением,<br>Директор Гимназии №1 им. А.С. Пушкина — <strong>Иванов Иван Иванович</strong></em></p>
+`.trim();
+
+export const normalizeLegacySchool1Info = (html?: string): string => {
+    if (!html || !html.trim()) return '';
+    return html;
+};
+
+export const getSchoolInfo = (state: AppState, schoolId: string | undefined): string => {
+    if (!schoolId) return '';
+    const school = getSchool(state, schoolId);
+    if (school && typeof school.schoolInfo === 'string' && school.schoolInfo.trim()) {
+        return schoolId === 'school_1' ? normalizeLegacySchool1Info(school.schoolInfo) : school.schoolInfo;
+    }
+    try {
+        const cached = localStorage.getItem(`eljur_school_info_${schoolId}`);
+        if (cached && cached.trim()) {
+            return schoolId === 'school_1' ? normalizeLegacySchool1Info(cached) : cached;
+        }
+    } catch {}
+    if (schoolId === 'school_1') {
+        return DEFAULT_SCHOOL_1_INFO_HTML;
+    }
+    return '';
+};
+
+export const setSchoolInfo = (state: AppState, schoolId: string | undefined, info: string): void => {
+    if (!schoolId) return;
+    const school = getSchool(state, schoolId);
+    if (school) {
+        school.schoolInfo = info;
+    }
+    try {
+        localStorage.setItem(`eljur_school_info_${schoolId}`, info);
+    } catch {}
+};
+
+export const hasRichInfoContent = (rawInfo?: string): boolean => {
+    if (!rawInfo || !rawInfo.trim()) return false;
+    try {
+        const parsed = JSON.parse(rawInfo);
+        if (parsed && parsed.isComplex) {
+            if (Array.isArray(parsed.elements) && parsed.elements.length > 0) return true;
+            if (parsed.backgroundImage && String(parsed.backgroundImage).trim()) return true;
+            const html = String(parsed.quillContent || '');
+            if (/<(img|iframe|video)\b/i.test(html)) return true;
+            const textOnly = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim();
+            return textOnly.length > 0;
+        }
+    } catch {}
+    if (/<(img|iframe|video)\b/i.test(rawInfo)) return true;
+    const textOnly = rawInfo.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim();
+    return textOnly.length > 0;
 };
 
 // ==========================================

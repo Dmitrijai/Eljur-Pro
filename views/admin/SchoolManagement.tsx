@@ -79,17 +79,19 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
         if (!state.userOrder) state.userOrder = [];
         state.userOrder = [...state.userOrder, directorId];
         try {
+            localStorage.setItem(`eljur_school_name_${schoolId}`, newSchool.name);
             const rawKnown = localStorage.getItem('eljur_known_school_ids');
             const parsedKnown = rawKnown ? JSON.parse(rawKnown) : ['school_1'];
             const nextKnown = Array.from(new Set([...(Array.isArray(parsedKnown) ? parsedKnown : []), schoolId]));
             localStorage.setItem('eljur_known_school_ids', JSON.stringify(nextKnown));
         } catch {}
-        onUpdate({ ...state });
+        const nextState = { ...state };
+        onUpdate(nextState);
         DB.saveSchoolMetadata(schoolId, newSchool).catch(() => {});
         DB.saveSchoolEntity(schoolId, 'users', newDirector.id, newDirector).catch(() => {});
-        DB.saveSchoolState(schoolId, state).catch(() => {});
-        DB.saveSchoolCache(schoolId, state).catch(() => {});
-        DB.saveSchoolCache('school_1', state).catch(() => {});
+        DB.saveSchoolState(schoolId, nextState).catch(() => {});
+        DB.saveSchoolCache(schoolId, nextState).catch(() => {});
+        DB.saveSchoolCache('school_1', nextState).catch(() => {});
         
         setNewName(''); setDirectorFio(''); setDirectorLogin(''); setDirectorPass('');
         setError(null);
@@ -167,6 +169,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
         // 11. Remove school itself
         state.schools = state.schools.filter(s => s.id !== schoolId);
         try {
+            localStorage.removeItem(`eljur_school_name_${schoolId}`);
             const rawKnown = localStorage.getItem('eljur_known_school_ids');
             if (rawKnown) {
                 const parsedKnown = JSON.parse(rawKnown);
@@ -176,9 +179,10 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
             }
         } catch {}
         
-        onUpdate({ ...state });
+        const nextState = { ...state };
+        onUpdate(nextState);
         DB.deleteSchoolFromFirestore(schoolId).catch(() => {});
-        DB.saveSchoolCache('school_1', state).catch(() => {});
+        DB.saveSchoolCache('school_1', nextState).catch(() => {});
     };
 
     const startEdit = (s: any) => {
@@ -321,6 +325,14 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                 const parsedKnown = rawKnown ? JSON.parse(rawKnown) : ['school_1'];
                 const nextKnown = Array.from(new Set([...(Array.isArray(parsedKnown) ? parsedKnown.filter((id: string) => id !== editSchoolId) : []), trimmedSchoolId]));
                 localStorage.setItem('eljur_known_school_ids', JSON.stringify(nextKnown));
+
+                ['eljur_edu_url_', 'eljur_edu_resources_', 'eljur_school_info_', 'eljur_school_name_'].forEach(prefix => {
+                    const oldVal = localStorage.getItem(`${prefix}${editSchoolId}`);
+                    if (oldVal !== null) {
+                        localStorage.setItem(`${prefix}${trimmedSchoolId}`, oldVal);
+                        localStorage.removeItem(`${prefix}${editSchoolId}`);
+                    }
+                });
             } catch {}
         }
 
@@ -331,6 +343,11 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
             directorId: editDirectorId
         };
         state.schools = state.schools.map((s, idx) => idx === schoolIndex ? updatedSchool : s);
+
+        try {
+            localStorage.setItem(`eljur_school_name_${trimmedSchoolId}`, trimmedName);
+            localStorage.setItem('eljur_last_school_name', trimmedName);
+        } catch {}
 
         // Demote any previous director of this school if director changed
         const demotedDirectors: User[] = [];
@@ -353,9 +370,10 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
         const oldIdToCleanup = trimmedSchoolId !== editSchoolId ? editSchoolId : null;
         const targetSaveId = trimmedSchoolId;
 
+        const nextState = { ...state };
         setEditSchoolId(null);
         setError(null);
-        onUpdate({ ...state });
+        onUpdate(nextState);
 
         DB.saveSchoolMetadata(targetSaveId, updatedSchool).catch(() => {});
         demotedDirectors.forEach(du => {
@@ -367,9 +385,9 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
             }
             DB.saveSchoolEntity(targetSaveId, 'users', targetDirUser.id, targetDirUser).catch(() => {});
         }
-        DB.saveSchoolState(targetSaveId, state).catch(() => {});
-        DB.saveSchoolCache(targetSaveId, state).catch(() => {});
-        DB.saveSchoolCache('school_1', state).catch(() => {});
+        DB.saveSchoolState(targetSaveId, nextState).catch(() => {});
+        DB.saveSchoolCache(targetSaveId, nextState).catch(() => {});
+        DB.saveSchoolCache('school_1', nextState).catch(() => {});
         if (oldIdToCleanup) {
             DB.deleteSchoolFromFirestore(oldIdToCleanup).catch(() => {});
         }
