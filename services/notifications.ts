@@ -1,5 +1,7 @@
 import { AppState, User } from '../types';
 import * as H from '../utils/helpers';
+import { auth } from './db';
+import firebaseConfig from '../firebase-applet-config.json';
 
 export interface EljurNotificationItem {
   id: string;
@@ -40,6 +42,9 @@ interface UserNotificationBaseline {
 const TARGET_USER_STORAGE_KEY = 'eljur_notify_target_user_v1';
 const NOTIFICATIONS_ENABLED_KEY = 'eljur_notifications_enabled_v1';
 const BASELINE_KEY_PREFIX = 'eljur_notify_baseline_v1_';
+const BG_CACHE_NAME = 'eljur-bg-watcher-v1';
+const WATCHER_STATE_URL = 'https://eljur.local/watcher-state';
+const PENDING_CLICK_URL = 'https://eljur.local/pending-click';
 
 export const areNotificationsEnabled = (): boolean => {
   try {
@@ -185,20 +190,25 @@ export const dispatchSystemNotification = async (item: EljurNotificationItem): P
     targetUserId: item.targetUserId,
     schoolId: item.schoolId,
     targetTab: item.targetTab,
-    category: item.category
+    category: item.category,
+    timestamp: Date.now()
   };
 
   try {
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration();
       if (reg && typeof reg.showNotification === 'function') {
-        await reg.showNotification(item.title, {
+        const swOptions: NotificationOptions & Record<string, unknown> = {
           body: item.body,
           tag: item.id,
           icon: iconUrl,
           badge: iconUrl,
+          vibrate: [200, 100, 200],
+          renotify: true,
+          requireInteraction: false,
           data: navData
-        });
+        };
+        await reg.showNotification(item.title, swOptions);
         return;
       }
       if (navigator.serviceWorker.controller) {
@@ -618,5 +628,287 @@ export const evaluateStateNotifications = (
     localStorage.setItem(storageKey, JSON.stringify(nextBaseline));
   } catch {}
 
+  syncServiceWorkerWatcher(state, targetUser, lang, nextBaseline).catch(() => {});
+
   return newNotifications;
 };
+
+/**
+ * Merges any baseline updates written by the Service Worker while the app was minimized/backgrounded
+ * into localStorage so the main thread does not re-notify for items already notified by the SW.
+ */
+export const consumeSwUpdatedBaseline = async (userId: string): Promise<void> => {
+  if (!userId || typeof window === 'undefined' || !('caches' in window)) return;
+  try {
+    const cache = await window.caches.open(BG_CACHE_NAME);
+    const swUrl = `https://eljur.local/sw-baseline-${userId}`;
+    const res = await cache.match(swUrl);
+    if (!res) return;
+    const swBaseline = (await res.json()) as UserNotificationBaseline;
+    await cache.delete(swUrl);
+    if (!swBaseline || swBaseline.userId !== userId) return;
+
+    const storageKey = `${BASELINE_KEY_PREFIX}${userId}`;
+    let existing: UserNotificationBaseline | null = null;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) existing = JSON.parse(raw);
+    } catch {}
+
+    const merged: UserNotificationBaseline = {
+      userId,
+      schoolId: swBaseline.schoolId || existing?.schoolId || 'school_1',
+      updatedAt: Math.max(swBaseline.updatedAt || 0, existing?.updatedAt || 0),
+      messages: { ...(existing?.messages || {}), ...(swBaseline.messages || {}) },
+      announcements: { ...(existing?.announcements || {}), ...(swBaseline.announcements || {}) },
+      homework: { ...(existing?.homework || {}), ...(swBaseline.homework || {}) },
+      grades: { ...(existing?.grades || {}), ...(swBaseline.grades || {}) },
+      finalGrades: { ...(existing?.finalGrades || {}), ...(swBaseline.finalGrades || {}) }
+    };
+    localStorage.setItem(storageKey, JSON.stringify(merged));
+  } catch {}
+};
+
+/**
+ * Syncs the current target user, Firebase auth token, and notification baseline with the Service Worker
+ * so the Service Worker can autonomously poll Firestore REST API when the app is minimized.
+ */
+export const syncServiceWorkerWatcher = async (
+  state: AppState,
+  targetUser: User | null,
+  lang: 'ru' | 'en' = 'ru',
+  explicitBaseline?: UserNotificationBaseline
+): Promise<void> => {
+  if (typeof window === 'undefined' || !targetUser || targetUser.role === 'creator') return;
+
+  try {
+    const storageKey = `${BASELINE_KEY_PREFIX}${targetUser.id}`;
+    let baseline = explicitBaseline || null;
+    if (!baseline) {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) baseline = JSON.parse(raw);
+      } catch {}
+    }
+    if (!baseline) {
+      baseline = buildCurrentSnapshot(state, targetUser).baseline;
+    }
+
+    let idToken = '';
+    let refreshToken = '';
+    if (auth.currentUser) {
+      try {
+        idToken = await auth.currentUser.getIdToken();
+      } catch {}
+      try {
+        refreshToken =
+          (auth.currentUser as unknown as { stsTokenManager?: { refreshToken?: string }; refreshToken?: string })
+            ?.stsTokenManager?.refreshToken ||
+          auth.currentUser.refreshToken ||
+          '';
+      } catch {}
+    }
+
+    const senderNames: Record<string, string> = {};
+    (state.users || []).forEach(u => {
+      if (u && u.id && u.fio) {
+        senderNames[u.id] = H.formatShortName(u.fio);
+      }
+    });
+
+    let localReceipts: Record<string, unknown> = {};
+    try {
+      const rawReceipts = localStorage.getItem(`eljur_read_receipts_v2_${targetUser.id}`);
+      if (rawReceipts) {
+        localReceipts = JSON.parse(rawReceipts) || {};
+      }
+    } catch {}
+
+    const studentGroupIds = (state.studentGroups || [])
+      .filter((g: any) => Array.isArray(g?.studentIds) && g.studentIds.includes(targetUser.id))
+      .map((g: any) => g.id);
+
+    const watcherPayload = {
+      projectId: firebaseConfig.projectId,
+      apiKey: firebaseConfig.apiKey,
+      idToken,
+      refreshToken,
+      enabled: areNotificationsEnabled(),
+      lang,
+      targetUser: {
+        id: targetUser.id,
+        fio: H.formatShortName(targetUser.fio || targetUser.login || ''),
+        role: targetUser.role,
+        schoolId: targetUser.schoolId && targetUser.schoolId !== 'global' ? targetUser.schoolId : 'school_1',
+        class: targetUser.class,
+        letter: targetUser.letter,
+        studentGroupIds
+      },
+      baseline,
+      senderNames,
+      localReceipts,
+      updatedAt: Date.now()
+    };
+
+    if ('caches' in window) {
+      try {
+        const cache = await window.caches.open(BG_CACHE_NAME);
+        await cache.put(
+          WATCHER_STATE_URL,
+          new Response(JSON.stringify(watcherPayload), {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+          })
+        );
+      } catch {}
+    }
+
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const activeSw = reg?.active || navigator.serviceWorker.controller;
+      if (activeSw) {
+        activeSw.postMessage({
+          type: 'SYNC_BG_WATCHER',
+          payload: watcherPayload
+        });
+      }
+    }
+  } catch {}
+};
+
+export interface PendingNotificationClick {
+  notificationId?: string;
+  targetUserId: string;
+  schoolId: string;
+  targetTab: string;
+  category?: string;
+}
+
+/**
+ * Checks if the user tapped a system notification (either via URL params on cold start
+ * or via Cache Storage written by the Service Worker notificationclick listener).
+ */
+export const consumePendingNotificationClick = async (): Promise<PendingNotificationClick | null> => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('eljur_notify_click') === '1') {
+      const uid = url.searchParams.get('uid') || '';
+      const tab = url.searchParams.get('tab') || 'messages';
+      const sid = url.searchParams.get('sid') || 'school_1';
+      url.searchParams.delete('eljur_notify_click');
+      url.searchParams.delete('uid');
+      url.searchParams.delete('tab');
+      url.searchParams.delete('sid');
+      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+      if (uid) {
+        return { targetUserId: uid, targetTab: tab, schoolId: sid };
+      }
+    }
+  } catch {}
+
+  if ('caches' in window) {
+    try {
+      const cache = await window.caches.open(BG_CACHE_NAME);
+      const res = await cache.match(PENDING_CLICK_URL);
+      if (res) {
+        const data = await res.json();
+        await cache.delete(PENDING_CLICK_URL);
+        if (data && data.targetUserId && (!data.timestamp || Date.now() - data.timestamp < 5 * 60 * 1000)) {
+          return {
+            notificationId: data.notificationId,
+            targetUserId: data.targetUserId,
+            schoolId: data.schoolId || 'school_1',
+            targetTab: data.targetTab || 'messages',
+            category: data.category
+          };
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+};
+
+export const notifyServiceWorkerBackgrounded = async (): Promise<void> => {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const activeSw = reg?.active || navigator.serviceWorker.controller;
+    if (activeSw) {
+      activeSw.postMessage({ type: 'APP_BACKGROUNDED' });
+    }
+    if (reg && 'sync' in reg) {
+      try {
+        await (reg as unknown as { sync: { register: (tag: string) => Promise<void> } }).sync.register('eljur-bg-sync');
+      } catch {}
+    }
+  } catch {}
+};
+
+/**
+ * Starts a dedicated Web Worker heartbeat that is not throttled like main-thread timers when the app
+ * is minimized, waking up the Service Worker to check Firestore in the background.
+ */
+export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): (() => void) => {
+  if (typeof window === 'undefined') return () => {};
+
+  let worker: Worker | null = null;
+  let workerUrl = '';
+
+  const pingSwCheck = () => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then(reg => {
+        const activeSw = reg?.active || navigator.serviceWorker.controller;
+        if (activeSw) {
+          activeSw.postMessage({ type: 'CHECK_NOW' });
+        }
+      }).catch(() => {});
+    }
+  };
+
+  try {
+    const workerCode = `
+      setInterval(function() {
+        postMessage('TICK');
+      }, 6000);
+    `;
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    workerUrl = URL.createObjectURL(blob);
+    worker = new Worker(workerUrl);
+    worker.onmessage = () => {
+      if (document.visibilityState === 'hidden') {
+        pingSwCheck();
+      }
+    };
+  } catch {}
+
+  const handleVisibility = () => {
+    if (document.visibilityState === 'hidden') {
+      notifyServiceWorkerBackgrounded();
+    } else if (document.visibilityState === 'visible') {
+      onForegroundWake();
+    }
+  };
+
+  const handlePageHide = () => {
+    notifyServiceWorkerBackgrounded();
+  };
+
+  document.addEventListener('visibilitychange', handleVisibility);
+  window.addEventListener('pagehide', handlePageHide);
+  window.addEventListener('focus', onForegroundWake);
+
+  return () => {
+    document.removeEventListener('visibilitychange', handleVisibility);
+    window.removeEventListener('pagehide', handlePageHide);
+    window.removeEventListener('focus', onForegroundWake);
+    if (worker) {
+      try { worker.terminate(); } catch {}
+    }
+    if (workerUrl) {
+      try { URL.revokeObjectURL(workerUrl); } catch {}
+    }
+  };
+};
+

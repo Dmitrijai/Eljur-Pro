@@ -1036,6 +1036,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                              const val = e.target.checked;
                              Notifications.setNotificationsEnabled(val);
                              setNotificationsEnabledState(val);
+                             Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
                              if (val && Notifications.getSystemNotificationPermission() === 'default') {
                                const perm = await Notifications.requestSystemNotificationPermission();
                                setSysNotificationPerm(perm);

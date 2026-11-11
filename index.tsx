@@ -23,7 +23,14 @@ if (typeof window !== 'undefined') {
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      navigator.serviceWorker
+        .register('./sw.js')
+        .then((reg) => {
+          try {
+            reg.update().catch(() => {});
+          } catch {}
+        })
+        .catch(() => {});
     });
   }
 }

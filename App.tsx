@@ -680,12 +680,19 @@ export default function App() {
   appStateRef.current = appState;
   const cloudSyncedSchoolsRef = useRef<Set<string>>(new Set());
   const cloudReadyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const cloudReadySetRef = useRef<Set<string>>(new Set());
+  const pendingNavRef = useRef<{ targetUserId: string; targetTab: string; schoolId?: string } | null>(null);
 
   const scheduleSchoolCloudReady = (sid: string) => {
-    if (!sid || cloudReadyTimersRef.current.has(sid)) return;
+    if (!sid) return;
+    if (cloudSyncedSchoolsRef.current.has(sid)) {
+      cloudReadySetRef.current.add(sid);
+    }
+    if (cloudReadyTimersRef.current.has(sid)) return;
     const timer = setTimeout(() => {
+      cloudReadySetRef.current.add(sid);
       setCloudReadySchools(prev => (prev[sid] ? prev : { ...prev, [sid]: true }));
-    }, 1200);
+    }, 600);
     cloudReadyTimersRef.current.set(sid, timer);
   };
 
@@ -1139,6 +1146,27 @@ export default function App() {
           DB.saveSchoolCache(targetSid, updated);
         }
 
+        // Immediate notification evaluation inside network callback so background/minimized PWAs
+        // dispatch OS notifications without waiting for throttled React render cycles
+        const targetNotifyUser = Notifications.getNotificationTargetUser(currentUserRef.current, updated);
+        if (targetNotifyUser) {
+          const notifySid = (targetNotifyUser.schoolId && targetNotifyUser.schoolId !== 'global')
+            ? targetNotifyUser.schoolId
+            : 'school_1';
+          const isReadyNow = cloudReadySetRef.current.has(notifySid) || cloudSyncedSchoolsRef.current.has(notifySid);
+          const activeLang = (userPrefs.language || updated.settings?.language || 'ru') as 'ru' | 'en';
+          const immediateItems = Notifications.evaluateStateNotifications(updated, targetNotifyUser, isReadyNow, activeLang);
+          if (immediateItems.length > 0 && Notifications.areNotificationsEnabled()) {
+            setTimeout(() => {
+              Notifications.playNotificationSound();
+              immediateItems.forEach(item => {
+                Notifications.dispatchSystemNotification(item);
+              });
+              pushInAppNotifications(immediateItems);
+            }, 0);
+          }
+        }
+
         return updated;
       });
     };
@@ -1169,6 +1197,13 @@ export default function App() {
         { schoolId: sId, userId: subscriptionUser.id, role: subscriptionUser.role }
       ).catch(() => {}).finally(() => {
         if (isCancelledEffect) return;
+
+        // Sync watcher token with Service Worker as soon as Firebase Auth is ready
+        const latestTarget = Notifications.getNotificationTargetUser(currentUserRef.current, appStateRef.current);
+        if (latestTarget) {
+          const langNow = (H.getUserPreferences(currentUserRef.current?.id, null).language || appStateRef.current?.settings?.language || 'ru') as 'ru' | 'en';
+          Notifications.syncServiceWorkerWatcher(appStateRef.current, latestTarget, langNow).catch(() => {});
+        }
 
         if (subscriptionUser.role === 'creator') {
           unsubAllSchools = DB.subscribeToAllSchools((schools) => {
@@ -1268,7 +1303,7 @@ export default function App() {
     const targetUser = Notifications.getNotificationTargetUser(currentUser, appState);
     if (!targetUser) return;
     const targetSid = (targetUser.schoolId && targetUser.schoolId !== 'global') ? targetUser.schoolId : 'school_1';
-    const isReady = Boolean(cloudReadySchools[targetSid]);
+    const isReady = Boolean(cloudReadySchools[targetSid] || cloudReadySetRef.current.has(targetSid));
     const activeLang = (H.getUserPreferences(currentUser?.id, null).language || appState?.settings?.language || 'ru') as 'ru' | 'en';
 
     const newNotifications = Notifications.evaluateStateNotifications(
@@ -1292,30 +1327,101 @@ export default function App() {
     appState?.finalGrades,
     appState?.homework,
     currentUser?.id,
-     currentUser?.role,
+    currentUser?.role,
     cloudReadySchools
   ]);
 
-  const handleNotificationNavigation = (payload?: { targetUserId?: string; schoolId?: string; targetTab?: string; id?: string }) => {
+  const handleNotificationNavigation = (payload?: { targetUserId?: string; schoolId?: string; targetTab?: string; id?: string; notificationId?: string }) => {
     if (!payload) return;
-    if (payload.id) {
-      setInAppNotifications(prev => prev.filter(n => n.id !== payload.id));
+    const dismissId = payload.id || payload.notificationId;
+    if (dismissId) {
+      setInAppNotifications(prev => prev.filter(n => n.id !== dismissId));
     }
     const targetUid = payload.targetUserId;
     const targetTab = payload.targetTab || 'messages';
+
+    setShowEljurInfo(false);
+    setShowEmptyEduResourceModal(false);
+    setShowLogoutConfirm(false);
+    setMobileMenuOpen(false);
+
     if (targetUid) {
       H.setSyncedStorageValue(`eljur_tab_${targetUid}`, targetTab);
+      H.setSyncedStorageValue(`eljur_view_mode_${targetUid}`, 'dashboard');
     }
+    setViewMode('dashboard');
+
     if (currentUserRef.current && targetUid && currentUserRef.current.id === targetUid) {
-      setViewMode('dashboard');
-      setMobileMenuOpen(false);
+      return;
+    }
+
+    if (targetUid) {
+      const candidateUser =
+        (appStateRef.current?.users || []).find(u => u.id === targetUid) ||
+        defaultState.users.find(u => u.id === targetUid) ||
+        Notifications.getNotificationTargetUser(null, appStateRef.current);
+
+      if (candidateUser && candidateUser.id === targetUid && candidateUser.role !== 'creator') {
+        handleLogin(candidateUser);
+        setTimeout(() => {
+          H.setSyncedStorageValue(`eljur_tab_${targetUid}`, targetTab);
+          H.setSyncedStorageValue(`eljur_view_mode_${targetUid}`, 'dashboard');
+          setViewMode('dashboard');
+        }, 50);
+      } else {
+        pendingNavRef.current = {
+          targetUserId: targetUid,
+          targetTab,
+          schoolId: payload.schoolId
+        };
+      }
     }
   };
 
-  // Listen for Service Worker notification clicks, browser notification clicks, and test notifications
+  // Resolve pending notification navigation once users list is populated
   useEffect(() => {
+    if (!pendingNavRef.current) return;
+    const { targetUserId, targetTab } = pendingNavRef.current;
+    const candidateUser =
+      (appState?.users || []).find(u => u.id === targetUserId) ||
+      defaultState.users.find(u => u.id === targetUserId) ||
+      Notifications.getNotificationTargetUser(null, appState);
+    if (candidateUser && candidateUser.id === targetUserId && candidateUser.role !== 'creator') {
+      pendingNavRef.current = null;
+      handleLogin(candidateUser);
+      setTimeout(() => {
+        H.setSyncedStorageValue(`eljur_tab_${targetUserId}`, targetTab);
+        H.setSyncedStorageValue(`eljur_view_mode_${targetUserId}`, 'dashboard');
+        setViewMode('dashboard');
+      }, 50);
+    }
+  }, [appState?.users]);
+
+  // Listen for Service Worker notification clicks, browser notification clicks, background wakeups, and test notifications
+  useEffect(() => {
+    const checkPendingClickAndWake = async () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration().then(reg => reg?.update().catch(() => {})).catch(() => {});
+      }
+      const targetUser = Notifications.getNotificationTargetUser(currentUserRef.current, appStateRef.current);
+      if (targetUser) {
+        await Notifications.consumeSwUpdatedBaseline(targetUser.id);
+      }
+      const pendingClick = await Notifications.consumePendingNotificationClick();
+      if (pendingClick) {
+        handleNotificationNavigation(pendingClick);
+      }
+    };
+
+    checkPendingClickAndWake();
+
+    const stopKeepAlive = Notifications.startBackgroundKeepAliveWorker(() => {
+      checkPendingClickAndWake();
+    });
+
     const onSwMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'ELJUR_NOTIFICATION_CLICK') {
+        Notifications.consumePendingNotificationClick().catch(() => {});
         handleNotificationNavigation(event.data.data);
       }
     };
@@ -1341,6 +1447,7 @@ export default function App() {
     window.addEventListener('eljur-test-notification', onTestNotification);
 
     return () => {
+      stopKeepAlive();
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', onSwMessage);
       }
