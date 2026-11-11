@@ -880,10 +880,60 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
   const modalIdRef = useRef<symbol>(Symbol('modal'));
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const sizerRef = useRef<HTMLDivElement>(null);
+  const zoomContentRef = useRef<HTMLDivElement>(null);
+  const zoomScaleRef = useRef<number>(1);
+  const baseSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const pinchStateRef = useRef<{
+    startDist: number;
+    startScale: number;
+    contentX: number;
+    contentY: number;
+    baseWidth: number;
+    baseHeight: number;
+  } | null>(null);
+  const [zoomPercent, setZoomPercent] = useState<number>(100);
   const [stackState, setStackState] = useState<{ index: number; isTop: boolean }>({ index: 0, isTop: true });
 
+  const applyZoomStyles = React.useCallback((scale: number, bw?: number, bh?: number) => {
+    const sizer = sizerRef.current;
+    const zoomEl = zoomContentRef.current;
+    if (!sizer || !zoomEl) return;
+    const width = bw || baseSizeRef.current.width || zoomEl.offsetWidth;
+    const height = bh || baseSizeRef.current.height || Math.max(zoomEl.scrollHeight, zoomEl.offsetHeight);
+    if (scale > 1.01 && width > 0 && height > 0) {
+      sizer.style.width = `${Math.round(width * scale)}px`;
+      sizer.style.height = `${Math.round(height * scale)}px`;
+      sizer.style.overflow = 'hidden';
+      zoomEl.style.width = `${width}px`;
+      zoomEl.style.transformOrigin = '0 0';
+      zoomEl.style.transform = `scale(${scale})`;
+    } else {
+      sizer.style.width = '100%';
+      sizer.style.height = 'auto';
+      sizer.style.overflow = '';
+      zoomEl.style.width = '100%';
+      zoomEl.style.transformOrigin = '0 0';
+      zoomEl.style.transform = 'none';
+    }
+  }, []);
+
+  const resetZoom = React.useCallback(() => {
+    zoomScaleRef.current = 1;
+    pinchStateRef.current = null;
+    setZoomPercent(100);
+    applyZoomStyles(1);
+  }, [applyZoomStyles]);
+
   React.useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      zoomScaleRef.current = 1;
+      pinchStateRef.current = null;
+      baseSizeRef.current = { width: 0, height: 0 };
+      setZoomPercent(100);
+      return;
+    }
     const id = modalIdRef.current;
     const updateStackState = () => {
       const idx = activeModalStack.indexOf(id);
@@ -917,6 +967,12 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
     const preventBackgroundScroll = (e: Event) => {
       // Only the topmost modal handles scroll containment
       if (activeModalStack[activeModalStack.length - 1] !== id) return;
+      // Never block multi-touch pinch-to-zoom or trackpad zoom gestures
+      if ('touches' in e && (e as TouchEvent).touches && (e as TouchEvent).touches.length > 1) return;
+      if ('ctrlKey' in e && (e as WheelEvent).ctrlKey) return;
+      if (typeof window !== 'undefined' && window.visualViewport && window.visualViewport.scale > 1.01) return;
+      if (zoomScaleRef.current > 1.01) return;
+
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (target.closest('[data-select-portal="true"]')) return;
@@ -944,6 +1000,116 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
     };
   }, [isOpen]);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const bodyEl = bodyScrollRef.current;
+    const zoomEl = zoomContentRef.current;
+    if (!bodyEl || !zoomEl) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        if (dist < 8) return;
+
+        const currentScale = zoomScaleRef.current;
+        if (currentScale <= 1.01 || baseSizeRef.current.width <= 0) {
+          baseSizeRef.current = {
+            width: zoomEl.offsetWidth || bodyEl.clientWidth,
+            height: Math.max(zoomEl.scrollHeight, zoomEl.offsetHeight)
+          };
+        } else {
+          baseSizeRef.current = {
+            width: baseSizeRef.current.width,
+            height: Math.max(baseSizeRef.current.height, zoomEl.scrollHeight, zoomEl.offsetHeight)
+          };
+        }
+
+        const rect = bodyEl.getBoundingClientRect();
+        const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+        const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+        const contentX = (bodyEl.scrollLeft + midX) / currentScale;
+        const contentY = (bodyEl.scrollTop + midY) / currentScale;
+
+        pinchStateRef.current = {
+          startDist: dist,
+          startScale: currentScale,
+          contentX,
+          contentY,
+          baseWidth: baseSizeRef.current.width,
+          baseHeight: baseSizeRef.current.height
+        };
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStateRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const { startDist, startScale, contentX, contentY, baseWidth, baseHeight } = pinchStateRef.current;
+        const nextScale = Math.min(4, Math.max(1, startScale * (dist / startDist)));
+        zoomScaleRef.current = nextScale;
+
+        applyZoomStyles(nextScale, baseWidth, baseHeight);
+
+        const rect = bodyEl.getBoundingClientRect();
+        const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+        const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+        bodyEl.scrollLeft = Math.max(0, contentX * nextScale - midX);
+        bodyEl.scrollTop = Math.max(0, contentY * nextScale - midY);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2 && pinchStateRef.current) {
+        pinchStateRef.current = null;
+        if (zoomScaleRef.current < 1.03) {
+          zoomScaleRef.current = 1;
+          setZoomPercent(100);
+          applyZoomStyles(1);
+        } else {
+          setZoomPercent(Math.round(zoomScaleRef.current * 100));
+        }
+      }
+    };
+
+    bodyEl.addEventListener('touchstart', handleTouchStart, { passive: true });
+    bodyEl.addEventListener('touchmove', handleTouchMove, { passive: false });
+    bodyEl.addEventListener('touchend', handleTouchEnd, { passive: true });
+    bodyEl.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        if (zoomScaleRef.current <= 1.01) {
+          baseSizeRef.current = {
+            width: zoomEl.offsetWidth || bodyEl.clientWidth,
+            height: Math.max(zoomEl.scrollHeight, zoomEl.offsetHeight)
+          };
+        } else if (sizerRef.current) {
+          const newBaseH = Math.max(zoomEl.scrollHeight, zoomEl.offsetHeight);
+          if (newBaseH > 0 && Math.abs(newBaseH - baseSizeRef.current.height) > 2) {
+            baseSizeRef.current.height = newBaseH;
+            sizerRef.current.style.height = `${Math.round(newBaseH * zoomScaleRef.current)}px`;
+          }
+        }
+      });
+      ro.observe(zoomEl);
+    }
+
+    return () => {
+      bodyEl.removeEventListener('touchstart', handleTouchStart);
+      bodyEl.removeEventListener('touchmove', handleTouchMove);
+      bodyEl.removeEventListener('touchend', handleTouchEnd);
+      bodyEl.removeEventListener('touchcancel', handleTouchEnd);
+      if (ro) ro.disconnect();
+    };
+  }, [isOpen, applyZoomStyles]);
+
   if (!isOpen) return null;
   const computedZIndex = 9000 + stackState.index * 20;
 
@@ -961,14 +1127,36 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
       <div
         ref={contentRef}
         className={`modal-print-content bg-white rounded-xl sm:rounded-2xl shadow-2xl w-full ${maxWidth} max-h-[90vh] sm:max-h-[92vh] ${
-          stackState.isTop ? 'overflow-y-auto pointer-events-auto' : 'overflow-hidden pointer-events-none select-none'
+          stackState.isTop ? 'overflow-hidden pointer-events-auto' : 'overflow-hidden pointer-events-none select-none'
         } overscroll-contain flex flex-col dark:bg-slate-900 dark:border dark:border-slate-700 relative print:max-w-none print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none`}
       >
-        <div className="flex justify-between items-center px-3 py-2.5 sm:p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-xl sm:rounded-t-2xl sticky top-0 z-10 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black gap-2">
+        <div className="flex justify-between items-center px-3 py-2.5 sm:p-5 border-b border-slate-100 bg-slate-50/50 rounded-t-xl sm:rounded-t-2xl shrink-0 z-20 dark:bg-slate-800 dark:border-slate-700 print:static print:bg-transparent print:border-b-2 print:border-black gap-2">
           <h3 className="text-sm sm:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{title}</h3>
-          <button type="button" onClick={onClose} className="text-xl sm:text-2xl leading-none text-slate-400 hover:text-slate-600 w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300 flex-shrink-0 no-print">&times;</button>
+          <div className="flex items-center gap-1.5 flex-shrink-0 no-print">
+            {zoomPercent > 102 && (
+              <button
+                type="button"
+                onClick={resetZoom}
+                className="px-2 py-0.5 text-[11px] font-bold rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300 transition"
+                title="Сбросить масштаб"
+              >
+                {zoomPercent}% ✕
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="text-xl sm:text-2xl leading-none text-slate-400 hover:text-slate-600 w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-slate-200 transition dark:hover:bg-slate-700 dark:hover:text-slate-300 flex-shrink-0">&times;</button>
+          </div>
         </div>
-        <div className="modal-print-body p-3 sm:p-6 dark:text-slate-300">{children}</div>
+        <div
+          ref={bodyScrollRef}
+          style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+          className="modal-print-body flex-1 min-h-0 overflow-auto overscroll-contain dark:text-slate-300"
+        >
+          <div ref={sizerRef} className="w-full">
+            <div ref={zoomContentRef} className="p-3 sm:p-6 w-full">
+              {children}
+            </div>
+          </div>
+        </div>
       </div>
     </div>,
     document.body

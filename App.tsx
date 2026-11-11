@@ -1606,15 +1606,23 @@ export default function App() {
         const safeBg = H.sanitizeSafeUrl(parsed.backgroundImage, 'background');
         const safeQuillHtml = H.sanitizeRichHtml(parsed.quillContent || fallbackHtml);
         const safeElements = Array.isArray(parsed.elements) ? parsed.elements : [];
+        const maxElementBottom = safeElements.reduce((max: number, el: any) => {
+          const top = typeof el?.y === 'number' ? el.y : parseFloat(el?.y) || 0;
+          const height = typeof el?.h === 'number' ? el.h : parseFloat(el?.h) || 200;
+          return Math.max(max, top + height + 32);
+        }, 0);
         return (
           <div 
             className="relative bg-white dark:bg-slate-900 text-black dark:text-white rounded-lg border border-slate-200 dark:border-slate-700 w-full max-w-3xl mx-auto flex flex-col min-h-[320px] sm:min-h-[600px]"
-            style={safeBg ? {
-              backgroundImage: `url(${safeBg})`,
-              backgroundRepeat: 'repeat-y',
-              backgroundSize: '100% auto',
-              backgroundPosition: 'top center'
-            } : {}}
+            style={{
+              ...(safeBg ? {
+                backgroundImage: `url(${safeBg})`,
+                backgroundRepeat: 'repeat-y',
+                backgroundSize: '100% auto',
+                backgroundPosition: 'top center'
+              } : {}),
+              ...(maxElementBottom > 320 ? { minHeight: `${maxElementBottom}px` } : {})
+            }}
           >
             <style>{responsiveInfoCss}</style>
             <ReactQuill 
