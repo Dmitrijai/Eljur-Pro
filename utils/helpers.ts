@@ -3038,6 +3038,25 @@ export const subscribeCrossTabSync = (listener: (msg: CrossTabMessage) => void):
     };
 };
 
+export const setSyncedStorageValue = (key: string, value: any) => {
+    if (typeof window === 'undefined') return;
+    try {
+        const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+        localStorage.setItem(key, serialized);
+        const msg: CrossTabMessage = {
+            type: 'KV_UPDATE',
+            key,
+            value,
+            senderTabId: TAB_ID,
+            timestamp: Date.now()
+        };
+        crossTabListeners.forEach(listener => {
+            try { listener(msg); } catch {}
+        });
+        emitCrossTabSync('KV_UPDATE', key, value);
+    } catch {}
+};
+
 const readStoredValue = <T,>(key: string, defaultVal: T | (() => T)): T => {
     const resolveDefault = () => (typeof defaultVal === 'function' ? (defaultVal as () => T)() : defaultVal);
     if (typeof window === 'undefined') return resolveDefault();

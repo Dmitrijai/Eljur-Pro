@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ejournal-pro-pwa-v3';
+const CACHE_NAME = 'ejournal-pro-pwa-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -28,6 +28,81 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+});
+
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || typeof data !== 'object') return;
+
+  if (data.type === 'SHOW_NOTIFICATION' && data.payload) {
+    const { title, body, tag, icon, badge, navData } = data.payload;
+    if (self.registration && typeof self.registration.showNotification === 'function') {
+      event.waitUntil(
+        self.registration.showNotification(title || 'ЭлЖур Про', {
+          body: body || '',
+          tag: tag || `eljur-${Date.now()}`,
+          icon: icon || './pwa-192x192.png',
+          badge: badge || './pwa-192x192.png',
+          vibrate: [200, 100, 200],
+          renotify: true,
+          requireInteraction: false,
+          data: navData || {}
+        }).catch(() => {})
+      );
+    }
+  }
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {
+    title: 'ЭлЖур Про',
+    body: 'Новое уведомление в электронном журнале',
+    tag: `eljur-push-${Date.now()}`,
+    data: {}
+  };
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      payload = { ...payload, ...parsed };
+    } catch {
+      payload.body = event.data.text() || payload.body;
+    }
+  }
+  if (self.registration && typeof self.registration.showNotification === 'function') {
+    event.waitUntil(
+      self.registration.showNotification(payload.title, {
+        body: payload.body,
+        tag: payload.tag,
+        icon: './pwa-192x192.png',
+        badge: './pwa-192x192.png',
+        vibrate: [200, 100, 200],
+        data: payload.data || {}
+      }).catch(() => {})
+    );
+  }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const navData = (event.notification && event.notification.data) || {};
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.focus();
+          try {
+            client.postMessage({ type: 'ELJUR_NOTIFICATION_CLICK', data: navData });
+          } catch {}
+          return;
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow('./');
+      }
+      return undefined;
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {

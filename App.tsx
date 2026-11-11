@@ -9,8 +9,9 @@ import StudentDashboard from './views/StudentDashboard';
 import CreatorDashboard from './views/CreatorDashboard';
 import EmployeeDashboard from './views/EmployeeDashboard';
 import Settings from './views/Settings';
-import { Settings as SettingsIcon, LogOut, Menu, GraduationCap, ExternalLink, Copy, Check } from 'lucide-react';
+import { Settings as SettingsIcon, LogOut, Menu, GraduationCap, ExternalLink, Copy, Check, Bell, MessageSquare, Megaphone, Award, BookOpen, X } from 'lucide-react';
 import * as H from './utils/helpers';
+import * as Notifications from './services/notifications';
 import { Modal, Button } from './components/ui';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
@@ -670,12 +671,23 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [customFonts, setCustomFonts] = useState<{name: string, displayName: string}[]>([]);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [inAppNotifications, setInAppNotifications] = useState<Notifications.EljurNotificationItem[]>([]);
+  const [cloudReadySchools, setCloudReadySchools] = useState<Record<string, boolean>>({});
 
   const currentUserRef = useRef<User | null>(null);
   currentUserRef.current = currentUser;
   const appStateRef = useRef<AppState>(appState);
   appStateRef.current = appState;
   const cloudSyncedSchoolsRef = useRef<Set<string>>(new Set());
+  const cloudReadyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const scheduleSchoolCloudReady = (sid: string) => {
+    if (!sid || cloudReadyTimersRef.current.has(sid)) return;
+    const timer = setTimeout(() => {
+      setCloudReadySchools(prev => (prev[sid] ? prev : { ...prev, [sid]: true }));
+    }, 1200);
+    cloudReadyTimersRef.current.set(sid, timer);
+  };
 
   // Cross-tab synchronization for login/logout and state updates
   useEffect(() => {
@@ -708,6 +720,9 @@ export default function App() {
           if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= H.getAccurateNow(appStateRef.current?.settings?.systemTimeOffset || 0))) {
             DB.setCurrentSessionUser(foundUser);
             setCurrentUser(foundUser);
+            if (foundUser.role !== 'creator') {
+              Notifications.saveLastNonCreatorTargetUser(foundUser);
+            }
             setShowLogoutConfirm(false);
           }
         }
@@ -730,6 +745,9 @@ export default function App() {
           if (foundUser) {
             DB.setCurrentSessionUser(foundUser);
             setCurrentUser(foundUser);
+            if (foundUser.role !== 'creator') {
+              Notifications.saveLastNonCreatorTargetUser(foundUser);
+            }
             setShowLogoutConfirm(false);
           }
         }
@@ -900,6 +918,9 @@ export default function App() {
                 if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= H.getAccurateNow(cached?.settings?.systemTimeOffset || 0))) {
                   DB.setCurrentSessionUser(foundUser);
                   setCurrentUser(foundUser);
+                  if (foundUser.role !== 'creator') {
+                    Notifications.saveLastNonCreatorTargetUser(foundUser);
+                  }
                   if (session.viewMode) setViewMode(session.viewMode);
                 }
               }
@@ -922,6 +943,9 @@ export default function App() {
             if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= H.getAccurateNow(appState?.settings?.systemTimeOffset || 0))) {
               DB.setCurrentSessionUser(u);
               setCurrentUser(u);
+              if (u.role !== 'creator') {
+                Notifications.saveLastNonCreatorTargetUser(u);
+              }
               if (session.viewMode) setViewMode(session.viewMode);
               if (DB.auth.currentUser) {
                 DB.syncUserAuthUidMap(u.schoolId || activeSchoolId, u.id, u.role, DB.auth.currentUser.uid).catch(() => {});
@@ -968,6 +992,7 @@ export default function App() {
 
     const mergeSchoolUpdate = (targetSid: string, schoolUpdate: Partial<AppState>, isPrimarySchool: boolean) => {
       clearTimeout(safetyTimer);
+      scheduleSchoolCloudReady(targetSid);
       setAppState(prev => {
         const cur = prev || defaultState;
 
@@ -1118,26 +1143,34 @@ export default function App() {
       });
     };
 
-    if (currentUser) {
-      // Ensure Firebase Auth session is active for this user even after page reload
-      const sId = currentUser.schoolId || activeSchoolId;
+    const subscriptionUser = currentUser || Notifications.getNotificationTargetUser(null, appStateRef.current);
+
+    if (subscriptionUser) {
+      // Ensure Firebase Auth session is active for this user (or last non-creator user when on Login screen)
+      const sId = (subscriptionUser.schoolId && subscriptionUser.schoolId !== 'global')
+        ? subscriptionUser.schoolId
+        : activeSchoolId;
       const domainSchool = sId.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase() || 'school1';
-      const userSafeId = currentUser.id.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
-      const virtualEmail = currentUser.role === 'creator'
+      const userSafeId = subscriptionUser.id.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
+      const virtualEmail = subscriptionUser.role === 'creator'
         ? 'creator@global.eljur.org'
         : `${userSafeId}@${domainSchool}.eljur.org`;
 
       let isCancelledEffect = false;
 
+      if (!currentUser) {
+        setLoading(false);
+      }
+
       DB.ensureFirebaseAuthSession(
         virtualEmail,
-        currentUser.password || 'eljur123456',
-        currentUser.password ? [currentUser.password] : [],
-        { schoolId: sId, userId: currentUser.id, role: currentUser.role }
+        subscriptionUser.password || 'eljur123456',
+        subscriptionUser.password ? [subscriptionUser.password] : [],
+        { schoolId: sId, userId: subscriptionUser.id, role: subscriptionUser.role }
       ).catch(() => {}).finally(() => {
         if (isCancelledEffect) return;
 
-        if (currentUser.role === 'creator') {
+        if (subscriptionUser.role === 'creator') {
           unsubAllSchools = DB.subscribeToAllSchools((schools) => {
             if (schools && schools.length > 0) {
               setAppState(prev => {
@@ -1164,14 +1197,14 @@ export default function App() {
                 };
               });
               const activeIdsSet = new Set(schools.map((s: any) => s.id));
-              extraSchoolUnsubs.forEach((unsubFn, sId) => {
-                if (!activeIdsSet.has(sId)) {
+              extraSchoolUnsubs.forEach((unsubFn, sIdKey) => {
+                if (!activeIdsSet.has(sIdKey)) {
                   try { unsubFn(); } catch {}
-                  extraSchoolUnsubs.delete(sId);
+                  extraSchoolUnsubs.delete(sIdKey);
                 }
               });
               schools.forEach((s: any) => {
-                if (s.id && s.id !== activeSchoolId && s.id !== 'global' && !extraSchoolUnsubs.has(s.id)) {
+                if (s.id && s.id !== sId && s.id !== 'global' && !extraSchoolUnsubs.has(s.id)) {
                   const uSub = DB.subscribeToSchool(s.id, (upd) => mergeSchoolUpdate(s.id, upd, false));
                   extraSchoolUnsubs.set(s.id, uSub);
                 }
@@ -1180,8 +1213,8 @@ export default function App() {
           });
         }
 
-        unsubSchool = DB.subscribeToSchool(activeSchoolId, (schoolUpdate) => {
-          mergeSchoolUpdate(activeSchoolId, schoolUpdate, true);
+        unsubSchool = DB.subscribeToSchool(sId, (schoolUpdate) => {
+          mergeSchoolUpdate(sId, schoolUpdate, true);
         });
       });
 
@@ -1206,6 +1239,115 @@ export default function App() {
       extraSchoolUnsubs.clear();
     };
   }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
+
+  // Keep last non-creator user target updated when user profile changes in appState
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'creator') {
+      const fresh = (appState?.users || []).find(u => u.id === currentUser.id) || currentUser;
+      Notifications.saveLastNonCreatorTargetUser(fresh);
+    }
+  }, [currentUser?.id, currentUser?.role, appState?.users]);
+
+  const pushInAppNotifications = (items: Notifications.EljurNotificationItem[]) => {
+    if (!items || items.length === 0) return;
+    setInAppNotifications(prev => {
+      const existingIds = new Set(prev.map(i => i.id));
+      const fresh = items.filter(i => !existingIds.has(i.id));
+      return [...fresh, ...prev].slice(0, 4);
+    });
+    items.forEach(item => {
+      setTimeout(() => {
+        setInAppNotifications(prev => prev.filter(p => p.id !== item.id));
+      }, 8000);
+    });
+  };
+
+  // Real-time and wake-up catch-up notification evaluation for the target non-creator user
+  useEffect(() => {
+    if (!appState) return;
+    const targetUser = Notifications.getNotificationTargetUser(currentUser, appState);
+    if (!targetUser) return;
+    const targetSid = (targetUser.schoolId && targetUser.schoolId !== 'global') ? targetUser.schoolId : 'school_1';
+    const isReady = Boolean(cloudReadySchools[targetSid]);
+    const activeLang = (H.getUserPreferences(currentUser?.id, null).language || appState?.settings?.language || 'ru') as 'ru' | 'en';
+
+    const newNotifications = Notifications.evaluateStateNotifications(
+      appState,
+      targetUser,
+      isReady,
+      activeLang
+    );
+
+    if (newNotifications.length > 0 && Notifications.areNotificationsEnabled()) {
+      Notifications.playNotificationSound();
+      newNotifications.forEach(item => {
+        Notifications.dispatchSystemNotification(item);
+      });
+      pushInAppNotifications(newNotifications);
+    }
+  }, [
+    appState?.messages,
+    appState?.announcements,
+    appState?.grades,
+    appState?.finalGrades,
+    appState?.homework,
+    currentUser?.id,
+     currentUser?.role,
+    cloudReadySchools
+  ]);
+
+  const handleNotificationNavigation = (payload?: { targetUserId?: string; schoolId?: string; targetTab?: string; id?: string }) => {
+    if (!payload) return;
+    if (payload.id) {
+      setInAppNotifications(prev => prev.filter(n => n.id !== payload.id));
+    }
+    const targetUid = payload.targetUserId;
+    const targetTab = payload.targetTab || 'messages';
+    if (targetUid) {
+      H.setSyncedStorageValue(`eljur_tab_${targetUid}`, targetTab);
+    }
+    if (currentUserRef.current && targetUid && currentUserRef.current.id === targetUid) {
+      setViewMode('dashboard');
+      setMobileMenuOpen(false);
+    }
+  };
+
+  // Listen for Service Worker notification clicks, browser notification clicks, and test notifications
+  useEffect(() => {
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'ELJUR_NOTIFICATION_CLICK') {
+        handleNotificationNavigation(event.data.data);
+      }
+    };
+    const onWindowClickEvent = (event: Event) => {
+      const custom = event as CustomEvent;
+      if (custom.detail) {
+        handleNotificationNavigation(custom.detail);
+      }
+    };
+    const onTestNotification = (event: Event) => {
+      const custom = event as CustomEvent<Notifications.EljurNotificationItem>;
+      if (custom.detail) {
+        Notifications.playNotificationSound();
+        Notifications.dispatchSystemNotification(custom.detail);
+        pushInAppNotifications([custom.detail]);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', onSwMessage);
+    }
+    window.addEventListener('eljur-notification-click', onWindowClickEvent);
+    window.addEventListener('eljur-test-notification', onTestNotification);
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', onSwMessage);
+      }
+      window.removeEventListener('eljur-notification-click', onWindowClickEvent);
+      window.removeEventListener('eljur-test-notification', onTestNotification);
+    };
+  }, []);
 
   // Synchronize device-local visual preferences (theme, language, seasonal animations, fonts) with appState.settings
   useEffect(() => {
@@ -1430,6 +1572,12 @@ export default function App() {
     DB.setCurrentSessionUser(enrichedUser);
     setCurrentUser(enrichedUser);
     setViewMode('dashboard');
+    if (enrichedUser.role !== 'creator') {
+      Notifications.saveLastNonCreatorTargetUser(enrichedUser);
+      if (Notifications.areNotificationsEnabled() && Notifications.getSystemNotificationPermission() === 'default') {
+        Notifications.requestSystemNotificationPermission().catch(() => {});
+      }
+    }
     if (enrichedUser.schoolId && enrichedUser.schoolId !== 'global') {
       try { localStorage.setItem('eljur_active_school_id', enrichedUser.schoolId); } catch {}
     }
@@ -1999,6 +2147,79 @@ export default function App() {
           </div>
         </div>
       </Modal>
+
+      {/* In-app real-time push notification banners */}
+      {inAppNotifications.length > 0 && (
+        <div className="fixed top-3 right-3 sm:top-5 sm:right-5 left-3 sm:left-auto sm:w-96 z-50 flex flex-col gap-2.5 pointer-events-none no-print">
+          {inAppNotifications.map((notif) => {
+            const IconComp =
+              notif.category === 'message'
+                ? MessageSquare
+                : notif.category === 'announcement'
+                ? Megaphone
+                : notif.category === 'grade' || notif.category === 'final_grade'
+                ? Award
+                : notif.category === 'homework'
+                ? BookOpen
+                : Bell;
+            const iconColors =
+              notif.category === 'message'
+                ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400'
+                : notif.category === 'announcement'
+                ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400'
+                : notif.category === 'grade' || notif.category === 'final_grade'
+                ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400'
+                : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400';
+
+            const showRecipientTag = currentUser?.id !== notif.targetUserId;
+
+            return (
+              <div
+                key={notif.id}
+                onClick={() =>
+                  handleNotificationNavigation({
+                    id: notif.id,
+                    targetUserId: notif.targetUserId,
+                    schoolId: notif.schoolId,
+                    targetTab: notif.targetTab
+                  })
+                }
+                className="pointer-events-auto cursor-pointer group bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-xl shadow-slate-900/10 dark:shadow-black/40 p-3.5 sm:p-4 flex items-start gap-3 transition-all hover:border-blue-400 dark:hover:border-blue-500 animate-in fade-in slide-in-from-top-2 duration-300"
+              >
+                <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 ${iconColors}`}>
+                  <IconComp size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                      {notif.title}
+                    </span>
+                    {showRecipientTag && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shrink-0">
+                        {H.formatShortName(notif.targetUserFio)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 mt-0.5 leading-snug">
+                    {notif.body}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInAppNotifications(prev => prev.filter(n => n.id !== notif.id));
+                  }}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors shrink-0"
+                  aria-label="Закрыть уведомление"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Visual error feedback for database save/read issues */}
       {dbError && (

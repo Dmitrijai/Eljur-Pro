@@ -4,9 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { AppState, User, EducationalResource } from '../types';
 import * as DB from '../services/db';
 import * as H from '../utils/helpers';
+import * as Notifications from '../services/notifications';
 import { hashPassword, generateSalt } from '../utils/auth';
 import { Button, Input, Select, Card, FileUploader, Modal } from '../components/ui';
-import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle, Plus } from 'lucide-react';
+import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle, Plus, Bell } from 'lucide-react';
 import { defaultState } from '../App';
 
 interface SettingsProps {
@@ -27,6 +28,8 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const [eduUrlSaved, setEduUrlSaved] = useState(false);
   const [fontList, setFontList] = useState<any[]>([]);
   const [showSecretPass, setShowSecretPass] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabledState] = useState<boolean>(() => Notifications.areNotificationsEnabled());
+  const [sysNotificationPerm, setSysNotificationPerm] = useState<string>(() => Notifications.getSystemNotificationPermission());
   
   // Time Machine State
   const [virtualDatePart, setVirtualDatePart] = useState('');
@@ -1004,6 +1007,125 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            <span className="block text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 leading-tight mt-0.5">{t('enable_seasonal')}</span>
                        </div>
                    </label>
+               </div>
+
+               <div className="col-span-1 md:col-span-2 space-y-2.5">
+                 {(() => {
+                   const targetNotifyUser = Notifications.getNotificationTargetUser(user, state);
+                   const targetRoleLabel = targetNotifyUser
+                     ? targetNotifyUser.role === 'student'
+                       ? `${lang === 'ru' ? 'Ученик' : 'Student'}${targetNotifyUser.class ? ` • ${targetNotifyUser.class}${targetNotifyUser.letter || ''}` : ''}`
+                       : targetNotifyUser.role === 'teacher'
+                       ? (lang === 'ru' ? 'Учитель' : 'Teacher')
+                       : targetNotifyUser.role === 'director'
+                       ? (lang === 'ru' ? 'Директор' : 'Director')
+                       : (targetNotifyUser.customRole || (lang === 'ru' ? 'Сотрудник' : 'Employee'))
+                     : '';
+
+                   return (
+                     <div className="rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2.5 sm:p-3.5 space-y-2.5">
+                       <label className="flex items-center gap-2 sm:gap-3 cursor-pointer w-full">
+                         <div className={`w-7 h-4 sm:w-10 sm:h-6 rounded-full p-0.5 sm:p-1 transition-colors shrink-0 ${notificationsEnabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                           <div className={`w-3 h-3 sm:w-4 sm:h-4 bg-white rounded-full shadow-sm transform transition-transform ${notificationsEnabled ? 'translate-x-3 sm:translate-x-4' : 'translate-x-0'}`}></div>
+                         </div>
+                         <input
+                           type="checkbox"
+                           className="hidden"
+                           checked={notificationsEnabled}
+                           onChange={async (e) => {
+                             const val = e.target.checked;
+                             Notifications.setNotificationsEnabled(val);
+                             setNotificationsEnabledState(val);
+                             if (val && Notifications.getSystemNotificationPermission() === 'default') {
+                               const perm = await Notifications.requestSystemNotificationPermission();
+                               setSysNotificationPerm(perm);
+                             }
+                           }}
+                         />
+                         <div className="min-w-0 flex-1">
+                           <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] sm:text-sm flex items-center gap-1.5 sm:gap-2 leading-tight">
+                             <Bell size={13} className="text-blue-600 dark:text-blue-400 shrink-0 sm:w-4 sm:h-4" />
+                             {lang === 'ru' ? 'Push-уведомления ЭлЖур' : 'ElZhur Push Notifications'}
+                           </span>
+                           <span className="block text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 leading-tight mt-0.5">
+                             {lang === 'ru'
+                               ? 'Уведомления о сообщениях, объявлениях, оценках и ДЗ на ПК, телефоне и планшете'
+                               : 'Notifications for messages, announcements, grades, and homework on PC, phone, and tablet'}
+                           </span>
+                         </div>
+                       </label>
+
+                       <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] sm:text-xs">
+                         <div className="text-slate-600 dark:text-slate-300">
+                           <span className="text-slate-400 dark:text-slate-500 font-medium">
+                             {lang === 'ru' ? 'Получатель на устройстве: ' : 'Recipient on device: '}
+                           </span>
+                           {targetNotifyUser ? (
+                             <span className="font-bold text-slate-800 dark:text-slate-100">
+                               {targetNotifyUser.fio} ({targetRoleLabel})
+                             </span>
+                           ) : (
+                             <span className="italic text-slate-400">
+                               {lang === 'ru' ? 'Войдите в аккаунт ученика, учителя или сотрудника' : 'Log into a student, teacher, or staff account'}
+                             </span>
+                           )}
+                         </div>
+
+                         <div className="flex flex-wrap items-center gap-2 shrink-0">
+                           {sysNotificationPerm !== 'granted' && sysNotificationPerm !== 'unsupported' && (
+                             <Button
+                               variant="secondary"
+                               className="text-[11px] sm:text-xs py-1 px-2.5 h-auto"
+                               onClick={async () => {
+                                 const perm = await Notifications.requestSystemNotificationPermission();
+                                 setSysNotificationPerm(perm);
+                                 if (perm === 'granted') {
+                                   notify(lang === 'ru' ? 'Системные уведомления разрешены!' : 'System notifications enabled!');
+                                 } else {
+                                   notify(lang === 'ru' ? 'Разрешите уведомления в настройках браузера' : 'Please allow notifications in browser settings', 'error');
+                                 }
+                               }}
+                             >
+                               {lang === 'ru' ? 'Разрешить в системе' : 'Allow OS Notifications'}
+                             </Button>
+                           )}
+                           <Button
+                             variant="secondary"
+                             className="text-[11px] sm:text-xs py-1 px-2.5 h-auto"
+                             onClick={async () => {
+                               if (Notifications.getSystemNotificationPermission() === 'default') {
+                                 const perm = await Notifications.requestSystemNotificationPermission();
+                                 setSysNotificationPerm(perm);
+                               }
+                               const recipient = targetNotifyUser || user;
+                               const testItem: Notifications.EljurNotificationItem = {
+                                 id: `test_notify_${Date.now()}`,
+                                 category: recipient.role === 'student' ? 'grade' : 'message',
+                                 title:
+                                   recipient.role === 'student'
+                                     ? (lang === 'ru' ? '⭐ Новая оценка: 5 (Математика)' : '⭐ New grade: 5 (Mathematics)')
+                                     : (lang === 'ru' ? '💬 Новое сообщение • ЭлЖур' : '💬 New message • ElZhur'),
+                                 body:
+                                   recipient.role === 'student'
+                                     ? (lang === 'ru' ? `Проверка уведомлений для ${H.formatShortName(recipient.fio)} • Ответ на уроке` : `Test notification for ${H.formatShortName(recipient.fio)}`)
+                                     : (lang === 'ru' ? `Проверка уведомлений для ${H.formatShortName(recipient.fio)}` : `Test notification for ${H.formatShortName(recipient.fio)}`),
+                                 targetTab: recipient.role === 'student' ? 'grades' : 'messages',
+                                 targetUserId: recipient.id,
+                                 targetUserFio: recipient.fio,
+                                 targetUserRole: recipient.role,
+                                 schoolId: recipient.schoolId || 'school_1',
+                                 createdAt: Date.now()
+                               };
+                               window.dispatchEvent(new CustomEvent('eljur-test-notification', { detail: testItem }));
+                             }}
+                           >
+                             {lang === 'ru' ? 'Проверить уведомление' : 'Test Notification'}
+                           </Button>
+                         </div>
+                       </div>
+                     </div>
+                   );
+                 })()}
                </div>
             </div>
           );
