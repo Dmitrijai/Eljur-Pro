@@ -1283,17 +1283,41 @@ export default function App() {
     }
   }, [currentUser?.id, currentUser?.role, appState?.users]);
 
+  const [notifSwipeMap, setNotifSwipeMap] = useState<Record<string, { dx: number; dy: number; swiping: boolean; dismissing?: 'left' | 'right' | 'up' }>>({});
+  const notifDragStartRef = useRef<Record<string, { x: number; y: number; moved: boolean }>>({});
+
+  const dismissNotificationWithSwipe = (id: string, dir: 'left' | 'right' | 'up') => {
+    setNotifSwipeMap(prev => ({
+      ...prev,
+      [id]: {
+        dx: dir === 'left' ? -360 : dir === 'right' ? 360 : 0,
+        dy: dir === 'up' ? -140 : 0,
+        swiping: false,
+        dismissing: dir
+      }
+    }));
+    setTimeout(() => {
+      setInAppNotifications(prev => prev.filter(n => n.id !== id));
+      setNotifSwipeMap(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }, 180);
+  };
+
   const pushInAppNotifications = (items: Notifications.EljurNotificationItem[]) => {
     if (!items || items.length === 0) return;
+    const latestBatch = items.slice(-2).reverse();
     setInAppNotifications(prev => {
-      const existingIds = new Set(prev.map(i => i.id));
-      const fresh = items.filter(i => !existingIds.has(i.id));
-      return [...fresh, ...prev].slice(0, 4);
+      const incomingIds = new Set(latestBatch.map(i => i.id));
+      const keptPrev = prev.filter(i => !incomingIds.has(i.id));
+      return [...latestBatch, ...keptPrev].slice(0, 2);
     });
-    items.forEach(item => {
+    latestBatch.forEach(item => {
       setTimeout(() => {
         setInAppNotifications(prev => prev.filter(p => p.id !== item.id));
-      }, 8000);
+      }, 4200);
     });
   };
 
@@ -1612,6 +1636,9 @@ export default function App() {
       DB.saveSchoolState(targetSchoolId, stateToFlush);
       DB.saveSchoolCache(targetSchoolId, stateToFlush);
     }
+    setTimeout(() => {
+      fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+    }, 500);
   };
 
   useEffect(() => {
@@ -2255,10 +2282,10 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* In-app real-time push notification banners */}
+      {/* In-app real-time push notification banners (max 2, swipeable up/left/right) */}
       {inAppNotifications.length > 0 && (
         <div className="fixed top-3 right-3 sm:top-5 sm:right-5 left-3 sm:left-auto sm:w-96 z-50 flex flex-col gap-2.5 pointer-events-none no-print">
-          {inAppNotifications.map((notif) => {
+          {inAppNotifications.slice(0, 2).map((notif) => {
             const IconComp =
               notif.category === 'message'
                 ? MessageSquare
@@ -2279,26 +2306,121 @@ export default function App() {
                 : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400';
 
             const showRecipientTag = currentUser?.id !== notif.targetUserId;
+            const swipe = notifSwipeMap[notif.id] || { dx: 0, dy: 0, swiping: false };
+            const translateX = swipe.dx;
+            const translateY = Math.min(0, swipe.dy);
+            const dragProgress = Math.max(Math.abs(translateX) / 180, Math.abs(translateY) / 100);
+            const opacity = swipe.dismissing ? 0 : Math.max(0.2, 1 - dragProgress * 0.7);
+
+            const handleStart = (clientX: number, clientY: number) => {
+              notifDragStartRef.current[notif.id] = { x: clientX, y: clientY, moved: false };
+              setNotifSwipeMap(prev => ({
+                ...prev,
+                [notif.id]: { dx: 0, dy: 0, swiping: true }
+              }));
+            };
+
+            const handleMove = (clientX: number, clientY: number) => {
+              const start = notifDragStartRef.current[notif.id];
+              if (!start) return;
+              const dx = clientX - start.x;
+              const dy = clientY - start.y;
+              if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+                start.moved = true;
+              }
+              setNotifSwipeMap(prev => ({
+                ...prev,
+                [notif.id]: {
+                  dx,
+                  dy: dy < 0 ? dy : 0,
+                  swiping: true
+                }
+              }));
+            };
+
+            const handleEnd = () => {
+              const start = notifDragStartRef.current[notif.id];
+              const current = notifSwipeMap[notif.id];
+              delete notifDragStartRef.current[notif.id];
+              if (!current) return;
+              if (current.dy < -36 && Math.abs(current.dy) >= Math.abs(current.dx) * 0.7) {
+                dismissNotificationWithSwipe(notif.id, 'up');
+              } else if (current.dx < -55) {
+                dismissNotificationWithSwipe(notif.id, 'left');
+              } else if (current.dx > 55) {
+                dismissNotificationWithSwipe(notif.id, 'right');
+              } else {
+                setNotifSwipeMap(prev => ({
+                  ...prev,
+                  [notif.id]: { dx: 0, dy: 0, swiping: false }
+                }));
+              }
+              if (start?.moved) {
+                setTimeout(() => {
+                  delete notifDragStartRef.current[` suppress_${notif.id}`];
+                }, 80);
+                notifDragStartRef.current[` suppress_${notif.id}`] = { x: 0, y: 0, moved: true };
+              }
+            };
 
             return (
               <div
                 key={notif.id}
-                onClick={() =>
+                style={{
+                  transform: `translate3d(${translateX}px, ${translateY}px, 0)`,
+                  opacity,
+                  transition: swipe.swiping ? 'none' : 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease-out',
+                  touchAction: 'none'
+                }}
+                onTouchStart={(e) => {
+                  const t0 = e.touches[0];
+                  if (t0) handleStart(t0.clientX, t0.clientY);
+                }}
+                onTouchMove={(e) => {
+                  const t0 = e.touches[0];
+                  if (t0) handleMove(t0.clientX, t0.clientY);
+                }}
+                onTouchEnd={() => handleEnd()}
+                onTouchCancel={() => handleEnd()}
+                onPointerDown={(e) => {
+                  if (e.pointerType === 'touch') return;
+                  if ((e.target as HTMLElement)?.closest('button')) return;
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                  handleStart(e.clientX, e.clientY);
+                }}
+                onPointerMove={(e) => {
+                  if (e.pointerType === 'touch') return;
+                  if (!notifDragStartRef.current[notif.id]) return;
+                  handleMove(e.clientX, e.clientY);
+                }}
+                onPointerUp={(e) => {
+                  if (e.pointerType === 'touch') return;
+                  handleEnd();
+                }}
+                onPointerCancel={(e) => {
+                  if (e.pointerType === 'touch') return;
+                  handleEnd();
+                }}
+                onClick={() => {
+                  if (notifDragStartRef.current[` suppress_${notif.id}`]?.moved) {
+                    delete notifDragStartRef.current[` suppress_${notif.id}`];
+                    return;
+                  }
                   handleNotificationNavigation({
                     id: notif.id,
                     targetUserId: notif.targetUserId,
                     schoolId: notif.schoolId,
                     targetTab: notif.targetTab
-                  })
-                }
-                className="pointer-events-auto cursor-pointer group bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-xl shadow-slate-900/10 dark:shadow-black/40 p-3.5 sm:p-4 flex items-start gap-3 transition-all hover:border-blue-400 dark:hover:border-blue-500 animate-in fade-in slide-in-from-top-2 duration-300"
+                  });
+                }}
+                className="pointer-events-auto cursor-pointer select-none group bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-xl shadow-slate-900/10 dark:shadow-black/40 p-3.5 sm:p-4 flex items-start gap-3 hover:border-blue-400 dark:hover:border-blue-500 animate-in fade-in slide-in-from-top-2 duration-200"
               >
                 <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 ${iconColors}`}>
                   <IconComp size={18} />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white break-words [overflow-wrap:anywhere] line-clamp-2 leading-snug">
                       {notif.title}
                     </span>
                     {showRecipientTag && (
@@ -2307,7 +2429,7 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 mt-0.5 leading-snug">
+                  <p className="text-xs text-slate-600 dark:text-slate-300 break-words [overflow-wrap:anywhere] line-clamp-2 mt-0.5 leading-snug">
                     {notif.body}
                   </p>
                 </div>

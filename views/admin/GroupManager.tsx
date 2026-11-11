@@ -118,7 +118,7 @@ export const GroupManager = ({ state, onUpdate, user }: { state: AppState, onUpd
                     {existingGroups.map((g, idx) => (
                         <div key={g.id} className="flex-1 min-w-[200px] sm:min-w-[280px] bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs flex flex-col dark:bg-slate-900 dark:border-slate-700 overflow-hidden">
                             <div className="p-2 sm:p-3 border-b border-slate-100 bg-slate-50/80 dark:bg-slate-800 dark:border-slate-700">
-                                <Input className="font-bold text-center h-7 sm:h-9 text-xs sm:text-sm bg-white border-slate-200 shadow-none focus:ring-2 focus:ring-blue-500/20" value={g.name} onChange={e => renameGroup(g.id, e.target.value)} />
+                                <Input maxLength={40} className="font-bold text-center h-7 sm:h-9 text-xs sm:text-sm bg-white border-slate-200 shadow-none focus:ring-2 focus:ring-blue-500/20" value={g.name} onChange={e => renameGroup(g.id, e.target.value.slice(0, 40))} />
                                 <div className="text-center text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 sm:mt-2">{g.studentIds.length} {t('students_count_suffix')}</div>
                             </div>
                             <div className="p-2 sm:p-3 flex-1 space-y-1 sm:space-y-1.5 max-h-[340px] sm:max-h-[500px] overflow-y-auto custom-scrollbar">

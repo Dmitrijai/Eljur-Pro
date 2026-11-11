@@ -586,11 +586,15 @@ self.addEventListener('push', (event) => {
           tag: payload.tag || 'eljur-push-' + Date.now(),
           icon: './pwa-192x192.png',
           badge: './pwa-192x192.png',
-          vibrate: [200, 100, 200],
+          vibrate: [250, 100, 250],
+          renotify: true,
+          silent: false,
+          requireInteraction: false,
           data: payload.data || {}
         }).catch(() => {});
+      } else {
+        await checkFirestoreInBackground();
       }
-      await checkFirestoreInBackground();
     })()
   );
 });

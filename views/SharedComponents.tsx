@@ -133,7 +133,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                 </div>
               )}
             </div>
-            <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-2 sm:mb-3 line-clamp-1">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
+            <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-2 sm:mb-3 line-clamp-2 break-words [overflow-wrap:anywhere]">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
 
             {/* Progress Bar */}
             <div className="space-y-1 sm:space-y-1.5">
@@ -233,8 +233,9 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
               <div className="relative">
                 <input
                   type="text"
+                  maxLength={80}
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => setSearch(e.target.value.slice(0, 80))}
                   placeholder={lang === 'ru' ? 'Поиск получателя...' : 'Search recipient...'}
                   className="w-full sm:w-44 text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
                 />
@@ -400,7 +401,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
               </div>
             )}
           </div>
-          <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-1.5 sm:mb-2 line-clamp-1">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
+          <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-1.5 sm:mb-2 line-clamp-2 break-words [overflow-wrap:anywhere]">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
           <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-1.5">
               <Eye size={14} />
@@ -465,8 +466,9 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
               <div className="relative flex-1">
                 <input
                   type="text"
+                  maxLength={80}
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => setSearch(e.target.value.slice(0, 80))}
                   placeholder={lang === 'ru' ? 'Поиск пользователя...' : 'Search user...'}
                   className="w-full text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
                 />
@@ -688,8 +690,8 @@ const MessageCard: React.FC<MessageCardProps> = ({
         }`}
       >
         <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-1.5 sm:gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h4 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white break-words leading-snug">{itemTitle}</h4>
+          <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+            <h4 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white break-words [overflow-wrap:anywhere] min-w-0 leading-snug">{itemTitle}</h4>
             {isUnread && activeTab === 'inbox' && (
               <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-blue-700 bg-blue-100 dark:bg-blue-900/60 dark:text-blue-300 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
@@ -872,7 +874,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
             )}
           </div>
         </div>
-        <p className="whitespace-pre-wrap text-xs sm:text-sm text-slate-700 leading-relaxed dark:text-slate-300">
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-hidden text-xs sm:text-sm text-slate-700 leading-relaxed dark:text-slate-300">
           {visibleTextLines.join('\n')}
           {isLarge && !expanded && visibleTextLines.length < textLines.length && '...'}
         </p>
@@ -1147,6 +1149,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         for (const sId of targetSchoolIds) {
           await DB.saveSchoolEntity(sId, collectionName, newItem.id, { ...newItem, schoolId: sId });
         }
+        fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
       }
 
       onUpdate({ ...state });
@@ -1543,14 +1546,15 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             )}
             <div>
               <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('theme')}</label>
-              <Input value={composeTitle} onChange={e => setComposeTitle(e.target.value)} />
+              <Input maxLength={120} value={composeTitle} onChange={e => setComposeTitle(e.target.value.slice(0, 120))} />
             </div>
             <div>
               <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('text')}</label>
               <textarea 
-                className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-36 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200"
+                maxLength={2000}
+                className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-36 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200 break-words"
                 value={composeBody}
-                onChange={e => setComposeBody(e.target.value)}
+                onChange={e => setComposeBody(e.target.value.slice(0, 2000))}
               />
             </div>
             {editId && existingAttachments.length > 0 && (

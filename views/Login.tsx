@@ -506,15 +506,16 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           </div>
           <div>
             <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('login')}</label>
-            <Input value={login} onChange={(e) => setLogin(e.target.value)} placeholder={t('enter_login')} className="h-9 sm:h-12 text-xs sm:text-base" />
+            <Input maxLength={50} value={login} onChange={(e) => setLogin(e.target.value.slice(0, 50))} placeholder={t('enter_login')} className="h-9 sm:h-12 text-xs sm:text-base" />
           </div>
           <div>
             <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('password')}</label>
             <div className="relative">
               <Input
                 type={showPassword ? 'text' : 'password'}
+                maxLength={64}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => setPassword(e.target.value.slice(0, 64))}
                 placeholder={t('enter_pass')}
                 className="h-9 sm:h-12 text-xs sm:text-base pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden"
               />
@@ -561,8 +562,9 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
               <div className="relative">
                 <Input 
                   type={showCreatorPassword ? 'text' : 'password'} 
+                  maxLength={64}
                   value={creatorPassword} 
-                  onChange={(e) => setCreatorPassword(e.target.value)} 
+                  onChange={(e) => setCreatorPassword(e.target.value.slice(0, 64))} 
                   placeholder="••••••••" 
                   className="h-9 sm:h-12 text-xs sm:text-base pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden" 
                   autoFocus

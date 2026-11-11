@@ -637,17 +637,68 @@ export const evaluateStateNotifications = (
  * Merges any baseline updates written by the Service Worker while the app was minimized/backgrounded
  * into localStorage so the main thread does not re-notify for items already notified by the SW.
  */
-export const consumeSwUpdatedBaseline = async (userId: string): Promise<void> => {
-  if (!userId || typeof window === 'undefined' || !('caches' in window)) return;
-  try {
-    const cache = await window.caches.open(BG_CACHE_NAME);
-    const swUrl = `https://eljur.local/sw-baseline-${userId}`;
-    const res = await cache.match(swUrl);
-    if (!res) return;
-    const swBaseline = (await res.json()) as UserNotificationBaseline;
-    await cache.delete(swUrl);
-    if (!swBaseline || swBaseline.userId !== userId) return;
+const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
 
+let cachedVapidPublicKey: string | null = null;
+
+const ensureWebPushSubscription = async (
+  reg: ServiceWorkerRegistration
+): Promise<PushSubscription | null> => {
+  if (!reg || !('pushManager' in reg)) return null;
+  if (getSystemNotificationPermission() !== 'granted') return null;
+
+  try {
+    if (!cachedVapidPublicKey) {
+      const res = await fetch('./api/push/vapid-public-key', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.publicKey) {
+          cachedVapidPublicKey = String(data.publicKey);
+        }
+      }
+    }
+    if (!cachedVapidPublicKey) return null;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const appServerKey = urlBase64ToUint8Array(cachedVapidPublicKey);
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appServerKey as unknown as BufferSource
+        });
+      } catch {
+        // If existing subscription had a different key, unsubscribe and retry
+        const oldSub = await reg.pushManager.getSubscription();
+        if (oldSub) {
+          await oldSub.unsubscribe().catch(() => {});
+        }
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appServerKey as unknown as BufferSource
+        });
+      }
+    }
+    return sub;
+  } catch {
+    return null;
+  }
+};
+
+export const consumeSwUpdatedBaseline = async (userId: string): Promise<void> => {
+  if (!userId || typeof window === 'undefined') return;
+
+  const mergeIntoLocal = (incoming: UserNotificationBaseline | null) => {
+    if (!incoming || incoming.userId !== userId) return;
     const storageKey = `${BASELINE_KEY_PREFIX}${userId}`;
     let existing: UserNotificationBaseline | null = null;
     try {
@@ -657,21 +708,46 @@ export const consumeSwUpdatedBaseline = async (userId: string): Promise<void> =>
 
     const merged: UserNotificationBaseline = {
       userId,
-      schoolId: swBaseline.schoolId || existing?.schoolId || 'school_1',
-      updatedAt: Math.max(swBaseline.updatedAt || 0, existing?.updatedAt || 0),
-      messages: { ...(existing?.messages || {}), ...(swBaseline.messages || {}) },
-      announcements: { ...(existing?.announcements || {}), ...(swBaseline.announcements || {}) },
-      homework: { ...(existing?.homework || {}), ...(swBaseline.homework || {}) },
-      grades: { ...(existing?.grades || {}), ...(swBaseline.grades || {}) },
-      finalGrades: { ...(existing?.finalGrades || {}), ...(swBaseline.finalGrades || {}) }
+      schoolId: incoming.schoolId || existing?.schoolId || 'school_1',
+      updatedAt: Math.max(incoming.updatedAt || 0, existing?.updatedAt || 0),
+      messages: { ...(existing?.messages || {}), ...(incoming.messages || {}) },
+      announcements: { ...(existing?.announcements || {}), ...(incoming.announcements || {}) },
+      homework: { ...(existing?.homework || {}), ...(incoming.homework || {}) },
+      grades: { ...(existing?.grades || {}), ...(incoming.grades || {}) },
+      finalGrades: { ...(existing?.finalGrades || {}), ...(incoming.finalGrades || {}) }
     };
-    localStorage.setItem(storageKey, JSON.stringify(merged));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(merged));
+    } catch {}
+  };
+
+  if ('caches' in window) {
+    try {
+      const cache = await window.caches.open(BG_CACHE_NAME);
+      const swUrl = `https://eljur.local/sw-baseline-${userId}`;
+      const res = await cache.match(swUrl);
+      if (res) {
+        const swBaseline = (await res.json()) as UserNotificationBaseline;
+        await cache.delete(swUrl);
+        mergeIntoLocal(swBaseline);
+      }
+    } catch {}
+  }
+
+  try {
+    const res = await fetch(`./api/push/baseline/${encodeURIComponent(userId)}`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.baseline) {
+        mergeIntoLocal(data.baseline as UserNotificationBaseline);
+      }
+    }
   } catch {}
 };
 
 /**
  * Syncs the current target user, Firebase auth token, and notification baseline with the Service Worker
- * so the Service Worker can autonomously poll Firestore REST API when the app is minimized.
+ * and the Web Push (VAPID) server so notifications work even when the app is closed or the phone screen is locked.
  */
 export const syncServiceWorkerWatcher = async (
   state: AppState,
@@ -771,6 +847,20 @@ export const syncServiceWorkerWatcher = async (
           payload: watcherPayload
         });
       }
+
+      if (reg) {
+        const pushSub = await ensureWebPushSubscription(reg);
+        if (pushSub) {
+          fetch('./api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription: pushSub.toJSON(),
+              ...watcherPayload
+            })
+          }).catch(() => {});
+        }
+      }
     }
   } catch {}
 };
@@ -846,15 +936,50 @@ export const notifyServiceWorkerBackgrounded = async (): Promise<void> => {
   } catch {}
 };
 
+// Silent 1-second PCM WAV data URI used to prevent mobile OS from suspending background/lock-screen JS
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
 /**
- * Starts a dedicated Web Worker heartbeat that is not throttled like main-thread timers when the app
- * is minimized, waking up the Service Worker to check Firestore in the background.
+ * Starts a dedicated Web Worker heartbeat + silent Lock-Screen audio keep-alive so mobile OSes
+ * do not suspend notifications when the phone screen is locked (sleep mode).
  */
 export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): (() => void) => {
   if (typeof window === 'undefined') return () => {};
 
   let worker: Worker | null = null;
   let workerUrl = '';
+  let silentAudio: HTMLAudioElement | null = null;
+  let wakeLockSentinel: any = null;
+
+  const ensureSilentKeepAlive = () => {
+    if (!areNotificationsEnabled()) return;
+    try {
+      if (!silentAudio) {
+        silentAudio = new Audio(SILENT_WAV_DATA_URI);
+        silentAudio.loop = true;
+        silentAudio.volume = 0.0001;
+        silentAudio.setAttribute('playsinline', 'true');
+      }
+      if (silentAudio.paused) {
+        silentAudio.play().catch(() => {});
+      }
+    } catch {}
+
+    try {
+      if ('wakeLock' in navigator && !wakeLockSentinel && document.visibilityState === 'visible') {
+        (navigator as any).wakeLock
+          .request('screen')
+          .then((sentinel: any) => {
+            wakeLockSentinel = sentinel;
+            sentinel.addEventListener('release', () => {
+              wakeLockSentinel = null;
+            });
+          })
+          .catch(() => {});
+      }
+    } catch {}
+  };
 
   const pingSwCheck = () => {
     if ('serviceWorker' in navigator) {
@@ -865,13 +990,14 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
         }
       }).catch(() => {});
     }
+    fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
   };
 
   try {
     const workerCode = `
       setInterval(function() {
         postMessage('TICK');
-      }, 6000);
+      }, 5000);
     `;
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     workerUrl = URL.createObjectURL(blob);
@@ -885,7 +1011,9 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
 
   const handleVisibility = () => {
     if (document.visibilityState === 'hidden') {
+      ensureSilentKeepAlive();
       notifyServiceWorkerBackgrounded();
+      fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
     } else if (document.visibilityState === 'visible') {
       onForegroundWake();
     }
@@ -893,16 +1021,33 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
 
   const handlePageHide = () => {
     notifyServiceWorkerBackgrounded();
+    fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+  };
+
+  const handleUserGesture = () => {
+    ensureSilentKeepAlive();
   };
 
   document.addEventListener('visibilitychange', handleVisibility);
   window.addEventListener('pagehide', handlePageHide);
   window.addEventListener('focus', onForegroundWake);
+  window.addEventListener('touchstart', handleUserGesture, { passive: true });
+  window.addEventListener('click', handleUserGesture, { passive: true });
 
   return () => {
     document.removeEventListener('visibilitychange', handleVisibility);
     window.removeEventListener('pagehide', handlePageHide);
     window.removeEventListener('focus', onForegroundWake);
+    window.removeEventListener('touchstart', handleUserGesture);
+    window.removeEventListener('click', handleUserGesture);
+    if (silentAudio) {
+      try { silentAudio.pause(); } catch {}
+      silentAudio = null;
+    }
+    if (wakeLockSentinel) {
+      try { wakeLockSentinel.release(); } catch {}
+      wakeLockSentinel = null;
+    }
     if (worker) {
       try { worker.terminate(); } catch {}
     }
@@ -911,4 +1056,5 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
     }
   };
 };
+
 

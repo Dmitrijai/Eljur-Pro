@@ -438,7 +438,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                         <div className="space-y-2.5 sm:space-y-6">
                             <div>
                                 <label className="block text-[10px] sm:text-xs font-bold text-slate-500 uppercase mb-1 sm:mb-2">{t('name_label')}</label>
-                                <Input value={typeName} onChange={e => setTypeName(e.target.value)} placeholder={t('example_essay')} className="h-7 sm:h-10 text-[11px] sm:text-sm !py-1 !px-2 sm:!py-2.5 sm:!px-3" />
+                                <Input maxLength={40} value={typeName} onChange={e => setTypeName(e.target.value.slice(0, 40))} placeholder={t('example_essay')} className="h-7 sm:h-10 text-[11px] sm:text-sm !py-1 !px-2 sm:!py-2.5 sm:!px-3" />
                             </div>
                             
                             {/* Conditionally render Weight inputs based on Global Setting */}
@@ -530,6 +530,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                                                     <div className="relative inline-block w-11 sm:w-20">
                                                         <Input 
                                                             key={`${gt.id}_${gt.weight}`}
+                                                            maxLength={4}
                                                             className={`h-6 sm:h-8 !py-0.5 !px-1 text-center font-bold text-slate-800 dark:text-white text-[11px] sm:text-sm ${weightCellError?.id === gt.id ? 'border-red-300 focus:border-red-500 bg-red-50 text-red-700' : 'border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 focus:bg-white focus:border-blue-500'}`}
                                                             defaultValue={gt.weight}
                                                             onBlur={(e) => handleCellWeightBlur(gt.id, e.target.value)}

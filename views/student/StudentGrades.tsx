@@ -460,7 +460,7 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                         {selectedGradeDetails.grade.comment && (
                             <div className="bg-blue-50 p-2.5 sm:p-3.5 rounded-xl border border-blue-100 dark:bg-blue-900/20 dark:border-blue-900/30">
                                 <div className="text-[10px] sm:text-xs font-bold text-blue-800 uppercase mb-1 dark:text-blue-300">{t('teacher_comment')}</div>
-                                <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 italic">{selectedGradeDetails.grade.comment}</p>
+                                <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 italic whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selectedGradeDetails.grade.comment}</p>
                             </div>
                         )}
                         <div className="flex justify-end pt-1">

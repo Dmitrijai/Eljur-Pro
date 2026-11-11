@@ -305,8 +305,9 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
           <Search size={14} className="absolute left-2.5 top-2 text-slate-400" />
           <input
             type="text"
+            maxLength={80}
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => setSearchQuery(e.target.value.slice(0, 80))}
             placeholder={lang === 'ru' ? 'Поиск ученика...' : 'Search student...'}
             className="w-full pl-8 pr-3 py-1.5 text-xs sm:text-sm border border-slate-200 dark:border-slate-700 rounded-lg sm:rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
           />
