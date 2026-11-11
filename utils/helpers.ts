@@ -2699,11 +2699,11 @@ export const getSchoolEljurInfo = (state: AppState, schoolId: string | undefined
 
     if (schoolId) {
         const school = getSchool(state, schoolId);
-        if (school && school.eljurInfo !== undefined && !isPlaceholderInfo(school.eljurInfo)) {
+        if (school && school.eljurInfo !== undefined && !isPlaceholderInfo(school.eljurInfo) && !school.eljurInfo.startsWith('{"__chunkedInfo":true')) {
             return upgradeLegacySvg(school.eljurInfo);
         }
     }
-    if (state?.settings?.eljurInfo && !isPlaceholderInfo(state.settings.eljurInfo)) {
+    if (state?.settings?.eljurInfo && !isPlaceholderInfo(state.settings.eljurInfo) && !state.settings.eljurInfo.startsWith('{"__chunkedInfo":true')) {
         return upgradeLegacySvg(state.settings.eljurInfo);
     }
     return DEFAULT_ELJUR_INFO_HTML;
@@ -2874,12 +2874,12 @@ export const normalizeLegacySchool1Info = (html?: string): string => {
 export const getSchoolInfo = (state: AppState, schoolId: string | undefined): string => {
     if (!schoolId) return '';
     const school = getSchool(state, schoolId);
-    if (school && typeof school.schoolInfo === 'string' && school.schoolInfo.trim()) {
+    if (school && typeof school.schoolInfo === 'string' && school.schoolInfo.trim() && !school.schoolInfo.startsWith('{"__chunkedInfo":true')) {
         return schoolId === 'school_1' ? normalizeLegacySchool1Info(school.schoolInfo) : school.schoolInfo;
     }
     try {
         const cached = localStorage.getItem(`eljur_school_info_${schoolId}`);
-        if (cached && cached.trim()) {
+        if (cached && cached.trim() && !cached.startsWith('{"__chunkedInfo":true')) {
             return schoolId === 'school_1' ? normalizeLegacySchool1Info(cached) : cached;
         }
     } catch {}
@@ -2896,12 +2896,16 @@ export const setSchoolInfo = (state: AppState, schoolId: string | undefined, inf
         school.schoolInfo = info;
     }
     try {
-        localStorage.setItem(`eljur_school_info_${schoolId}`, info);
+        if (info.length < 400000 && !info.startsWith('{"__chunkedInfo":true')) {
+            localStorage.setItem(`eljur_school_info_${schoolId}`, info);
+        } else {
+            localStorage.removeItem(`eljur_school_info_${schoolId}`);
+        }
     } catch {}
 };
 
 export const hasRichInfoContent = (rawInfo?: string): boolean => {
-    if (!rawInfo || !rawInfo.trim()) return false;
+    if (!rawInfo || !rawInfo.trim() || rawInfo.startsWith('{"__chunkedInfo":true')) return false;
     try {
         const parsed = JSON.parse(rawInfo);
         if (parsed && parsed.isComplex) {

@@ -38,6 +38,9 @@ interface Props {
   schoolId?: string;
 }
 
+const INLINE_FORMATS = ['font', 'size', 'bold', 'italic', 'underline', 'strike', 'color', 'background', 'script'] as const;
+const BLOCK_FORMATS = ['header', 'align', 'list', 'indent', 'blockquote', 'code-block', 'direction'] as const;
+
 export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, mode = 'eljur', schoolId }: Props) {
   const [quillContent, setQuillContent] = useState('');
   const [elements, setElements] = useState<FloatingElement[]>([]);
@@ -52,6 +55,12 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
   const [customFonts, setCustomFonts] = useState<{name: string, displayName: string}[]>([]);
   const quillRef = useRef<ReactQuill>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Active formatting preservation refs
+  const activeFormatsRef = useRef<Record<string, any>>({});
+  const explicitlyClearedRef = useRef<Set<string>>(new Set());
+  const isHandlingEnterRef = useRef(false);
+  const lastCursorIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     const loadFonts = async () => {
@@ -75,7 +84,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
           const fontFace = new FontFace(fontName, `url(${dataUrl})`);
           await fontFace.load();
           document.fonts.add(fontFace);
-          loadedFonts.push({ name: fontName, displayName: font.name.replace(/\\.[^/.]+$/, "") });
+          loadedFonts.push({ name: fontName, displayName: font.name.replace(/\.[^/.]+$/, "") });
         } catch (e) {
           console.error("Failed to load font", e);
         }
@@ -120,6 +129,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
       elements: elementsRef.current,
       backgroundImage: backgroundImageRef.current
     });
+    quillContentRef.current = previous.quillContent;
     setQuillContent(previous.quillContent);
     setElements(previous.elements);
     setBackgroundImage(previous.backgroundImage);
@@ -134,6 +144,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
       elements: elementsRef.current,
       backgroundImage: backgroundImageRef.current
     });
+    quillContentRef.current = next.quillContent;
     setQuillContent(next.quillContent);
     setElements(next.elements);
     setBackgroundImage(next.backgroundImage);
@@ -162,6 +173,7 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
       saveToPast();
       isTypingRef.current = true;
     }
+    quillContentRef.current = val;
     setQuillContent(val);
     if (setHasUnsavedChanges) setHasUnsavedChanges(true);
 
@@ -179,6 +191,9 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
     const info = mode === 'school'
       ? H.getSchoolInfo(state, schoolId)
       : H.getSchoolEljurInfo(state, undefined);
+    activeFormatsRef.current = {};
+    explicitlyClearedRef.current.clear();
+    lastCursorIndexRef.current = null;
     try {
       const parsed = JSON.parse(info);
       if (parsed && parsed.isComplex) {
@@ -246,6 +261,10 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
 
   const handleClear = () => {
     saveToPast();
+    quillContentRef.current = '';
+    activeFormatsRef.current = {};
+    explicitlyClearedRef.current.clear();
+    lastCursorIndexRef.current = null;
     setElements([]);
     setQuillContent('');
     setBackgroundImage(null);
@@ -331,7 +350,9 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
           try {
             const result = await mammoth.convertToHtml({ arrayBuffer });
             saveToPast();
-            setQuillContent(H.sanitizeRichHtml(result.value));
+            const cleanHtml = H.sanitizeRichHtml(result.value);
+            quillContentRef.current = cleanHtml;
+            setQuillContent(cleanHtml);
             if (setHasUnsavedChanges) setHasUnsavedChanges(true);
           } catch (err) {
             console.error('Error converting Word file:', err);
@@ -344,6 +365,47 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
     };
   };
 
+  const compressImageDataUrl = (dataUrl: string, maxDim = 1600, quality = 0.82): Promise<string> => {
+    return new Promise((resolve) => {
+      if (!dataUrl || !dataUrl.startsWith('data:image/') || dataUrl.startsWith('data:image/svg') || dataUrl.startsWith('data:image/gif')) {
+        resolve(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          const needsResize = width > maxDim || height > maxDim;
+          if (!needsResize && dataUrl.length < 350000) {
+            resolve(dataUrl);
+            return;
+          }
+          if (width > maxDim || height > maxDim) {
+            const ratio = Math.min(maxDim / width, maxDim / height);
+            width = Math.max(1, Math.round(width * ratio));
+            height = Math.max(1, Math.round(height * ratio));
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(dataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const isPng = dataUrl.startsWith('data:image/png');
+          const compressed = canvas.toDataURL(isPng && dataUrl.length < 600000 ? 'image/png' : 'image/webp', quality);
+          resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
   const handleBackgroundUpload = () => {
     const input = document.createElement('input');
     input.setAttribute('type', 'file');
@@ -353,9 +415,11 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
       const file = input.files?.[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
+          const rawDataUrl = e.target?.result as string;
+          const optimized = await compressImageDataUrl(rawDataUrl, 1600, 0.82);
           saveToPast();
-          setBackgroundImage(e.target?.result as string);
+          setBackgroundImage(optimized);
           if (setHasUnsavedChanges) setHasUnsavedChanges(true);
         };
         reader.readAsDataURL(file);
@@ -379,9 +443,10 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
       const file = input.files?.[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = (e) => {
-          const src = e.target?.result as string;
+        reader.onload = async (e) => {
+          const rawSrc = e.target?.result as string;
           const isVideo = file.type.startsWith('video/');
+          const src = isVideo ? rawSrc : await compressImageDataUrl(rawSrc, 1400, 0.82);
           const newEl: FloatingElement = {
             id: Date.now().toString(),
             type: isVideo ? 'video' : 'image',
@@ -459,6 +524,159 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
 
   const imageHandler = () => addMediaHandler('image/*,video/*');
 
+  const syncToolbarUI = useCallback((quill: any, rangeOverride?: any) => {
+    if (!quill) return;
+    const range = rangeOverride !== undefined ? rangeOverride : (quill.selection ? quill.selection.getRange()[0] : null);
+    const toolbar = quill.getModule('toolbar');
+    if (toolbar && typeof toolbar.update === 'function') {
+      toolbar.update(range);
+    }
+    if (quill.theme && Array.isArray(quill.theme.pickers)) {
+      quill.theme.pickers.forEach((picker: any) => picker.update());
+    }
+  }, []);
+
+  const applyInlineFormatsToCursor = useCallback((quill: any, formats: Record<string, any>) => {
+    if (!quill || !quill.selection) return;
+    const [range] = quill.selection.getRange();
+    if (!range || range.length > 0) return;
+    INLINE_FORMATS.forEach((fmt) => {
+      const val = formats[fmt];
+      if (val !== undefined && val !== false && val !== null && val !== '') {
+        quill.selection.format(fmt, val);
+      }
+    });
+    syncToolbarUI(quill, range);
+  }, [syncToolbarUI]);
+
+  const handleCleanFormatting = useCallback(() => {
+    if (!quillRef.current) return;
+    const quill = quillRef.current.getEditor() as any;
+    if (!quill) return;
+    activeFormatsRef.current = {};
+    explicitlyClearedRef.current.clear();
+    const range = quill.getSelection(true);
+    if (!range) return;
+    if (range.length === 0) {
+      INLINE_FORMATS.forEach((fmt) => {
+        quill.selection.format(fmt, false);
+      });
+      BLOCK_FORMATS.forEach((fmt) => {
+        quill.format(fmt, false, 'user');
+      });
+    } else {
+      quill.removeFormat(range.index, range.length, 'user');
+    }
+    syncToolbarUI(quill, range);
+  }, [syncToolbarUI]);
+
+  const handleCleanFormattingRef = useRef(handleCleanFormatting);
+  handleCleanFormattingRef.current = handleCleanFormatting;
+
+  const handleCustomEnter = useCallback((range: { index: number; length: number }, context: any) => {
+    if (!quillRef.current) return false;
+    const quill = quillRef.current.getEditor() as any;
+    if (!quill) return false;
+
+    isHandlingEnterRef.current = true;
+
+    try {
+      const curFormat = context?.format || quill.getFormat(range) || {};
+
+      // If pressing Enter on an empty list item or blockquote, exit the list/blockquote while keeping inline formats
+      if (context?.empty && (curFormat.list || curFormat.blockquote)) {
+        if (curFormat.list) {
+          const formatsToClear: Record<string, any> = { list: false };
+          if (curFormat.indent) formatsToClear.indent = false;
+          quill.formatLine(range.index, range.length, formatsToClear, 'user');
+          delete activeFormatsRef.current.list;
+          delete activeFormatsRef.current.indent;
+        } else if (curFormat.blockquote) {
+          quill.format('blockquote', false, 'user');
+          delete activeFormatsRef.current.blockquote;
+        }
+        applyInlineFormatsToCursor(quill, activeFormatsRef.current);
+        setTimeout(() => {
+          applyInlineFormatsToCursor(quill, activeFormatsRef.current);
+          isHandlingEnterRef.current = false;
+        }, 15);
+        return false;
+      }
+
+      // Compute all active inline and block formats to preserve across the newline
+      const preserved: Record<string, any> = { ...activeFormatsRef.current };
+
+      if (range.index > 0) {
+        const prevChar = quill.getText(range.index - 1, 1);
+        if (prevChar && prevChar !== '\n') {
+          const prevCharFmt = quill.getFormat(range.index - 1, 1) || {};
+          [...INLINE_FORMATS, ...BLOCK_FORMATS].forEach((fmt) => {
+            if (prevCharFmt[fmt] !== undefined && prevCharFmt[fmt] !== false && prevCharFmt[fmt] !== null && !explicitlyClearedRef.current.has(fmt)) {
+              preserved[fmt] = prevCharFmt[fmt];
+            }
+          });
+        }
+      }
+
+      [...INLINE_FORMATS, ...BLOCK_FORMATS].forEach((fmt) => {
+        if (curFormat[fmt] !== undefined && curFormat[fmt] !== false && curFormat[fmt] !== null && !explicitlyClearedRef.current.has(fmt)) {
+          preserved[fmt] = curFormat[fmt];
+        }
+      });
+
+      activeFormatsRef.current = { ...preserved };
+      explicitlyClearedRef.current.clear();
+
+      const lineFormats: Record<string, any> = {};
+      BLOCK_FORMATS.forEach((fmt) => {
+        if (preserved[fmt] !== undefined && preserved[fmt] !== false && preserved[fmt] !== null && !Array.isArray(preserved[fmt])) {
+          lineFormats[fmt] = preserved[fmt];
+        }
+      });
+
+      const Delta = ReactQuill.Quill.import('delta') as any;
+      const delta = new Delta()
+        .retain(range.index)
+        .delete(range.length)
+        .insert('\n', lineFormats);
+
+      quill.updateContents(delta, 'user');
+
+      const newIndex = range.index + 1;
+      if (Object.keys(lineFormats).length > 0) {
+        quill.formatLine(newIndex, 1, lineFormats, 'silent');
+      }
+
+      quill.setSelection(newIndex, 0, 'silent');
+      quill.focus();
+      lastCursorIndexRef.current = newIndex;
+
+      applyInlineFormatsToCursor(quill, preserved);
+
+      requestAnimationFrame(() => {
+        const [curRange] = quill.selection ? quill.selection.getRange() : [null];
+        if (curRange && curRange.index === newIndex && curRange.length === 0) {
+          applyInlineFormatsToCursor(quill, activeFormatsRef.current);
+        }
+      });
+
+      setTimeout(() => {
+        const [curRange] = quill.selection ? quill.selection.getRange() : [null];
+        if (curRange && curRange.index === newIndex && curRange.length === 0) {
+          applyInlineFormatsToCursor(quill, activeFormatsRef.current);
+        }
+        isHandlingEnterRef.current = false;
+      }, 15);
+    } catch (err) {
+      isHandlingEnterRef.current = false;
+    }
+
+    return false;
+  }, [applyInlineFormatsToCursor]);
+
+  const handleCustomEnterRef = useRef(handleCustomEnter);
+  handleCustomEnterRef.current = handleCustomEnter;
+
   const modules = useMemo(() => {
     const fontOptions = [false, 'serif', 'monospace', ...customFonts.map(f => f.name)];
     return {
@@ -484,11 +702,24 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
           addText: () => addTextShapeRef.current(),
           image: () => addMediaHandlerRef.current('image/*'),
           videoUpload: () => addMediaHandlerRef.current('video/*'),
-          video: () => addVideoLinkHandlerRef.current()
+          video: () => addVideoLinkHandlerRef.current(),
+          clean: () => handleCleanFormattingRef.current()
         }
       },
       keyboard: {
         bindings: {
+          'header enter': {
+            key: 'Enter',
+            collapsed: true,
+            format: ['header'],
+            suffix: /^$/,
+            handler: (range: any, context: any) => handleCustomEnterRef.current(range, context)
+          },
+          enter: {
+            key: 'Enter',
+            shiftKey: null,
+            handler: (range: any, context: any) => handleCustomEnterRef.current(range, context)
+          },
           undo: {
             key: 'Z',
             shortKey: true,
@@ -504,6 +735,128 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
       }
     };
   }, [customFonts]);
+
+  useEffect(() => {
+    if (!quillRef.current) return;
+    const quill = quillRef.current.getEditor() as any;
+    if (!quill) return;
+
+    // Ensure keyboard.handleEnter also delegates to our format-preserving Enter handler
+    if (quill.keyboard) {
+      quill.keyboard.handleEnter = (range: any, context: any) => {
+        handleCustomEnterRef.current(range, context);
+      };
+    }
+
+    // Wrap quill.selection.focus so returning focus from toolbar dropdowns on an empty line
+    // keeps the native selection inside the formatted cursor blot instead of resetting to <br>
+    if (quill.selection && !quill.selection.__focusWrapped) {
+      const origSelectionFocus = quill.selection.focus.bind(quill.selection);
+      quill.selection.focus = function () {
+        if (this.hasFocus()) return;
+        const cursorAttached = this.cursor && this.cursor.domNode && this.cursor.domNode.parentNode && this.root.contains(this.cursor.domNode);
+        if (cursorAttached && this.savedRange && this.savedRange.length === 0 && this.cursor.textNode) {
+          this.root.focus({ preventScroll: true });
+          this.setNativeRange(this.cursor.textNode, this.cursor.textNode.data.length);
+          this.update('silent');
+          return;
+        }
+        origSelectionFocus();
+      };
+      quill.selection.__focusWrapped = true;
+    }
+
+    // Wrap quill.format so multiple toolbar selections on an empty or formatted line accumulate without resetting each other
+    if (!quill.__formatWrapped) {
+      const origFormat = quill.format.bind(quill);
+      quill.format = function (name: string, value: any, source?: string) {
+        if (value === false || value === null || value === undefined || value === '') {
+          delete activeFormatsRef.current[name];
+          explicitlyClearedRef.current.add(name);
+          if ((INLINE_FORMATS as readonly string[]).includes(name) && this.selection) {
+            const [r] = this.selection.getRange();
+            if (r && r.length === 0) {
+              this.selection.format(name, false);
+            }
+          }
+        } else {
+          activeFormatsRef.current[name] = value;
+          explicitlyClearedRef.current.delete(name);
+        }
+
+        const res = origFormat(name, value, source);
+
+        const [range] = this.selection ? this.selection.getRange() : [null];
+        if (range && range.length === 0) {
+          applyInlineFormatsToCursor(this, activeFormatsRef.current);
+        } else {
+          syncToolbarUI(this, range);
+        }
+        return res;
+      };
+      quill.__formatWrapped = true;
+    }
+
+    const handleEditorChange = (eventName: string, rangeOrDelta: any, _old: any, source: string) => {
+      if (isHandlingEnterRef.current) return;
+
+      if (eventName === 'text-change' && source === 'user') {
+        explicitlyClearedRef.current.clear();
+        const [range] = quill.selection ? quill.selection.getRange() : [null];
+        if (range && range.length === 0) {
+          lastCursorIndexRef.current = range.index;
+          const [line] = quill.getLine(range.index);
+          const lineLen = line ? line.length() : 0;
+          if (lineLen <= 1) {
+            applyInlineFormatsToCursor(quill, activeFormatsRef.current);
+          } else {
+            const curFmt = quill.getFormat(Math.max(0, range.index - 1), 1) || {};
+            const nextActive: Record<string, any> = {};
+            [...INLINE_FORMATS, ...BLOCK_FORMATS].forEach((fmt) => {
+              if (curFmt[fmt] !== undefined && curFmt[fmt] !== false && curFmt[fmt] !== null) {
+                nextActive[fmt] = curFmt[fmt];
+              }
+            });
+            activeFormatsRef.current = nextActive;
+            syncToolbarUI(quill, range);
+          }
+        }
+      } else if (eventName === 'selection-change' && rangeOrDelta) {
+        const range = rangeOrDelta;
+        if (range.length === 0) {
+          const [line, offset] = quill.getLine(range.index);
+          const lineLen = line ? line.length() : 0;
+          if (lineLen <= 1) {
+            // Cursor is on an empty line: preserve active inline formats on the cursor blot and toolbar
+            applyInlineFormatsToCursor(quill, activeFormatsRef.current);
+          } else if (range.index !== lastCursorIndexRef.current) {
+            // Cursor moved to a non-empty line: sync activeFormatsRef with the formatting at the new cursor position
+            const sampleIndex = offset > 0 ? range.index - 1 : range.index;
+            const charFmt = quill.getFormat(sampleIndex, 1) || {};
+            const curFmt = quill.getFormat(range) || {};
+            const merged = { ...charFmt, ...curFmt };
+            const nextActive: Record<string, any> = {};
+            [...INLINE_FORMATS, ...BLOCK_FORMATS].forEach((fmt) => {
+              if (merged[fmt] !== undefined && merged[fmt] !== false && merged[fmt] !== null) {
+                nextActive[fmt] = merged[fmt];
+              }
+            });
+            activeFormatsRef.current = nextActive;
+            explicitlyClearedRef.current.clear();
+            syncToolbarUI(quill, range);
+          }
+          lastCursorIndexRef.current = range.index;
+        } else {
+          lastCursorIndexRef.current = range.index;
+        }
+      }
+    };
+
+    quill.on('editor-change', handleEditorChange);
+    return () => {
+      quill.off('editor-change', handleEditorChange);
+    };
+  }, [modules, applyInlineFormatsToCursor, syncToolbarUI]);
 
   useEffect(() => {
     const updateButtons = () => {

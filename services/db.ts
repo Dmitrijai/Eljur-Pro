@@ -860,6 +860,153 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // --- Scoped School Subcollections API ---
 
+const MAX_INLINE_INFO_BYTES = 550 * 1024; // 550 KB safe inline threshold (Firestore limit is 1,048,487 bytes)
+const INFO_CHUNK_CHAR_SIZE = 300000; // 300k chars per chunk document
+
+interface ChunkedInfoDescriptor {
+  __chunkedInfo: true;
+  fieldKey: 'schoolInfo' | 'eljurInfo';
+  schoolId: string;
+  chunkCount: number;
+  version: string;
+}
+
+const uploadedInfoVersions = new Map<string, string>();
+const resolvedInfoMemoryCache = new Map<string, string>();
+
+const getUtf8ByteSize = (str: string): number => {
+  try {
+    return new TextEncoder().encode(str).length;
+  } catch {
+    return str.length * 2;
+  }
+};
+
+const computeInfoVersionHash = (str: string): string => {
+  let h1 = 0xdeadbeef ^ str.length;
+  let h2 = 0x41c6ce57 ^ str.length;
+  const step = Math.max(1, Math.floor(str.length / 4096));
+  for (let i = 0; i < str.length; i += step) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${str.length}_${(h2 >>> 0).toString(36)}_${(h1 >>> 0).toString(36)}`;
+};
+
+const isChunkedInfoDescriptorString = (val: unknown): boolean => {
+  return typeof val === 'string' && val.trim().startsWith('{"__chunkedInfo":true');
+};
+
+const persistLargeFieldIfNeeded = async (
+  schoolId: string,
+  fieldKey: 'schoolInfo' | 'eljurInfo',
+  rawValue: string
+): Promise<string> => {
+  if (!rawValue || typeof rawValue !== 'string') return rawValue;
+  if (isChunkedInfoDescriptorString(rawValue)) return rawValue;
+
+  const byteSize = getUtf8ByteSize(rawValue);
+  if (byteSize <= MAX_INLINE_INFO_BYTES) {
+    return rawValue;
+  }
+
+  const targetSchoolId = schoolId && schoolId !== 'global' ? schoolId : 'school_1';
+  const version = computeInfoVersionHash(rawValue);
+  const cacheKey = `${targetSchoolId}__${fieldKey}`;
+
+  const chunks: string[] = [];
+  for (let i = 0; i < rawValue.length; i += INFO_CHUNK_CHAR_SIZE) {
+    chunks.push(rawValue.slice(i, i + INFO_CHUNK_CHAR_SIZE));
+  }
+
+  const descriptor: ChunkedInfoDescriptor = {
+    __chunkedInfo: true,
+    fieldKey,
+    schoolId: targetSchoolId,
+    chunkCount: chunks.length,
+    version
+  };
+  const descriptorStr = JSON.stringify(descriptor);
+  resolvedInfoMemoryCache.set(`${cacheKey}__${version}`, rawValue);
+
+  if (uploadedInfoVersions.get(cacheKey) !== version) {
+    if (!auth.currentUser) {
+      await auth.authStateReady();
+    }
+    await Promise.all(
+      chunks.map((chunkData, idx) => {
+        const chunkDocId = `info_${fieldKey}_chunk_${idx}`;
+        return setDoc(doc(db, 'schools', targetSchoolId, 'attachments', chunkDocId), {
+          id: chunkDocId,
+          schoolId: targetSchoolId,
+          fieldKey,
+          chunkIndex: idx,
+          chunkCount: chunks.length,
+          version,
+          data: chunkData,
+          updatedAt: new Date().toISOString()
+        });
+      })
+    );
+    uploadedInfoVersions.set(cacheKey, version);
+  }
+
+  return descriptorStr;
+};
+
+const resolvePossiblyChunkedField = async (
+  schoolId: string,
+  fieldKey: 'schoolInfo' | 'eljurInfo',
+  rawValue: string | undefined
+): Promise<string | undefined> => {
+  if (!rawValue || typeof rawValue !== 'string') return rawValue;
+  if (!isChunkedInfoDescriptorString(rawValue)) return rawValue;
+
+  try {
+    const parsed = JSON.parse(rawValue) as ChunkedInfoDescriptor;
+    if (!parsed || !parsed.__chunkedInfo || typeof parsed.chunkCount !== 'number' || parsed.chunkCount <= 0) {
+      return undefined;
+    }
+    const targetSchoolId = parsed.schoolId || (schoolId && schoolId !== 'global' ? schoolId : 'school_1');
+    const targetFieldKey = parsed.fieldKey || fieldKey;
+    const versionCacheKey = `${targetSchoolId}__${targetFieldKey}__${parsed.version}`;
+
+    const cachedInMemory = resolvedInfoMemoryCache.get(versionCacheKey);
+    if (cachedInMemory !== undefined) {
+      return cachedInMemory;
+    }
+
+    const chunkSnaps = await Promise.all(
+      Array.from({ length: parsed.chunkCount }, (_, idx) =>
+        getDoc(doc(db, 'schools', targetSchoolId, 'attachments', `info_${targetFieldKey}_chunk_${idx}`))
+      )
+    );
+
+    const parts: string[] = [];
+    for (const snap of chunkSnaps) {
+      if (!snap.exists()) {
+        return undefined;
+      }
+      const d = snap.data();
+      if (typeof d?.data !== 'string') {
+        return undefined;
+      }
+      parts.push(d.data);
+    }
+
+    const fullValue = parts.join('');
+    resolvedInfoMemoryCache.set(versionCacheKey, fullValue);
+    uploadedInfoVersions.set(`${targetSchoolId}__${targetFieldKey}`, parsed.version);
+    return fullValue;
+  } catch (err) {
+    console.warn(`[resolvePossiblyChunkedField] Failed to reassemble ${fieldKey} for ${schoolId}:`, err);
+    return undefined;
+  }
+};
+
 export const saveSchoolMetadata = async (schoolId: string, schoolData: any): Promise<void> => {
   const docPath = `schools/${schoolId}`;
   try {
@@ -878,12 +1025,25 @@ export const saveSchoolMetadata = async (schoolId: string, schoolData: any): Pro
         localStorage.setItem(`eljur_edu_resources_${schoolId}`, JSON.stringify(schoolData.educationalResources));
       } catch {}
     }
-    if (typeof schoolData?.schoolInfo === 'string') {
+    if (typeof schoolData?.schoolInfo === 'string' && !isChunkedInfoDescriptorString(schoolData.schoolInfo)) {
       try {
-        localStorage.setItem(`eljur_school_info_${schoolId}`, schoolData.schoolInfo);
+        if (schoolData.schoolInfo.length <= 400000) {
+          localStorage.setItem(`eljur_school_info_${schoolId}`, schoolData.schoolInfo);
+        } else {
+          localStorage.removeItem(`eljur_school_info_${schoolId}`);
+        }
       } catch {}
     }
     const clean = JSON.parse(JSON.stringify(schoolData));
+    if (typeof clean.schoolInfo === 'string') {
+      clean.schoolInfo = await persistLargeFieldIfNeeded(schoolId, 'schoolInfo', clean.schoolInfo);
+    }
+    if (typeof clean.eljurInfo === 'string') {
+      clean.eljurInfo = await persistLargeFieldIfNeeded(schoolId, 'eljurInfo', clean.eljurInfo);
+    }
+    if (clean.settings && typeof clean.settings.eljurInfo === 'string') {
+      clean.settings.eljurInfo = await persistLargeFieldIfNeeded(schoolId, 'eljurInfo', clean.settings.eljurInfo);
+    }
     docSnapshots.delete(docPath);
     await setDoc(doc(db, 'schools', schoolId), clean, { merge: true });
   } catch (error) {
@@ -909,8 +1069,19 @@ export const getPublicCreatorGate = async (schoolId: string = 'school_1'): Promi
     const snap = await getDoc(doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'));
     if (snap.exists()) {
       const data = snap.data() as PublicCreatorGateConfig;
+      if (typeof data.eljurInfo === 'string' && isChunkedInfoDescriptorString(data.eljurInfo)) {
+        const resolved = await resolvePossiblyChunkedField(schoolId, 'eljurInfo', data.eljurInfo);
+        if (resolved !== undefined) {
+          data.eljurInfo = resolved;
+        } else {
+          delete data.eljurInfo;
+        }
+      }
       try {
-        localStorage.setItem(`eljur_gate_${schoolId}`, JSON.stringify(data));
+        const serializedGate = JSON.stringify(data);
+        if (serializedGate.length <= 400000) {
+          localStorage.setItem(`eljur_gate_${schoolId}`, serializedGate);
+        }
       } catch {}
       return data;
     }
@@ -935,9 +1106,16 @@ export const savePublicCreatorGate = async (
       ...config,
       updatedAt: new Date().toISOString()
     }));
+    if (typeof payload.eljurInfo === 'string') {
+      payload.eljurInfo = await persistLargeFieldIfNeeded(targetSchoolId, 'eljurInfo', payload.eljurInfo);
+    }
     await setDoc(doc(db, 'schools', targetSchoolId, 'publicConfig', 'creatorGate'), payload, { merge: true });
     try {
-      localStorage.setItem(`eljur_gate_${targetSchoolId}`, JSON.stringify(payload));
+      const cacheCopy = { ...payload, ...(typeof config.eljurInfo === 'string' ? { eljurInfo: config.eljurInfo } : {}) };
+      const serializedGate = JSON.stringify(cacheCopy);
+      if (serializedGate.length <= 400000) {
+        localStorage.setItem(`eljur_gate_${targetSchoolId}`, serializedGate);
+      }
     } catch {}
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
@@ -1180,7 +1358,7 @@ export const subscribeToSchool = (
     if (isCancelled || !auth.currentUser) return;
 
     // 1. School Root Document
-    const unsubSchool = onSnapshot(doc(db, 'schools', schoolId), (snap) => {
+    const unsubSchool = onSnapshot(doc(db, 'schools', schoolId), async (snap) => {
       if (isCancelled) return;
       if (snap.exists()) {
         const data = snap.data();
@@ -1213,10 +1391,19 @@ export const subscribeToSchool = (
 
         let resolvedEduUrl = typeof data.educationalResourceUrl === 'string' ? data.educationalResourceUrl : '';
         let resolvedEduResources: any[] | undefined = Array.isArray(data.educationalResources) ? data.educationalResources : undefined;
-        let resolvedSchoolInfo: string | undefined = typeof data.schoolInfo === 'string' ? data.schoolInfo : undefined;
+        const rawSchoolInfoFromDoc: string | undefined = typeof data.schoolInfo === 'string' ? data.schoolInfo : undefined;
+        let resolvedSchoolInfo: string | undefined = await resolvePossiblyChunkedField(schoolId, 'schoolInfo', rawSchoolInfoFromDoc);
+        if (isCancelled) return;
         if (schoolId === 'school_1' && resolvedSchoolInfo !== undefined) {
           resolvedSchoolInfo = normalizeLegacySchool1Info(resolvedSchoolInfo);
         }
+
+        const rawEljurInfoFromDoc: string | undefined = typeof (data.eljurInfo ?? data.settings?.eljurInfo) === 'string'
+          ? (data.eljurInfo ?? data.settings?.eljurInfo)
+          : undefined;
+        const resolvedEljurInfo: string | undefined = await resolvePossiblyChunkedField(schoolId, 'eljurInfo', rawEljurInfoFromDoc);
+        if (isCancelled) return;
+
         let resolvedSchoolName = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '';
         try {
           if (resolvedSchoolName) {
@@ -1247,13 +1434,17 @@ export const subscribeToSchool = (
               if (Array.isArray(parsed)) resolvedEduResources = parsed;
             }
           }
-          if (resolvedSchoolInfo !== undefined) {
-            localStorage.setItem(`eljur_school_info_${schoolId}`, resolvedSchoolInfo);
+          if (resolvedSchoolInfo !== undefined && !isChunkedInfoDescriptorString(resolvedSchoolInfo)) {
+            if (resolvedSchoolInfo.length <= 400000) {
+              localStorage.setItem(`eljur_school_info_${schoolId}`, resolvedSchoolInfo);
+            } else {
+              localStorage.removeItem(`eljur_school_info_${schoolId}`);
+            }
           } else {
             const cachedSchoolInfo = localStorage.getItem(`eljur_school_info_${schoolId}`);
-            if (cachedSchoolInfo !== null) {
+            if (cachedSchoolInfo !== null && !isChunkedInfoDescriptorString(cachedSchoolInfo)) {
               resolvedSchoolInfo = schoolId === 'school_1' ? normalizeLegacySchool1Info(cachedSchoolInfo) : cachedSchoolInfo;
-            } else if (schoolId === 'school_1') {
+            } else if (schoolId === 'school_1' && !rawSchoolInfoFromDoc) {
               resolvedSchoolInfo = DEFAULT_SCHOOL_1_INFO_HTML;
               localStorage.setItem(`eljur_school_info_${schoolId}`, resolvedSchoolInfo);
             }
@@ -1271,6 +1462,17 @@ export const subscribeToSchool = (
         delete schoolLevelSettings.showSeasonalAnimations;
         delete schoolLevelSettings.bodyFontId;
         delete schoolLevelSettings.headingFontId;
+        delete schoolLevelSettings.schoolsSettings;
+        delete schoolLevelSettings.schoolInfo;
+
+        const snapshotSettings = { ...schoolLevelSettings };
+        if (resolvedEljurInfo !== undefined) {
+          schoolLevelSettings.eljurInfo = resolvedEljurInfo;
+        }
+
+        const snapshotSchoolInfo = isChunkedInfoDescriptorString(rawSchoolInfoFromDoc)
+          ? rawSchoolInfoFromDoc
+          : resolvedSchoolInfo;
 
         docSnapshots.set(`schools/${schoolId}`, stableSerialize({
           id: data.id || schoolId,
@@ -1286,8 +1488,8 @@ export const subscribeToSchool = (
           scheduleSettings: normalizedScheduleSettings,
           educationalResourceUrl: resolvedEduUrl,
           ...(resolvedEduResources !== undefined ? { educationalResources: resolvedEduResources } : {}),
-          ...(resolvedSchoolInfo !== undefined ? { schoolInfo: resolvedSchoolInfo } : {}),
-          settings: schoolLevelSettings
+          ...(snapshotSchoolInfo !== undefined ? { schoolInfo: snapshotSchoolInfo } : {}),
+          settings: snapshotSettings
         }));
 
         onUpdate({
@@ -1306,7 +1508,7 @@ export const subscribeToSchool = (
             educationalResourceUrl: resolvedEduUrl,
             ...(resolvedEduResources !== undefined ? { educationalResources: resolvedEduResources } : {}),
             ...(resolvedSchoolInfo !== undefined ? { schoolInfo: resolvedSchoolInfo } : {}),
-            eljurInfo: data.eljurInfo ?? data.settings?.eljurInfo
+            eljurInfo: resolvedEljurInfo ?? data.eljurInfo ?? data.settings?.eljurInfo
           } as any],
           classes: schoolClasses,
           subjects: schoolSubjects,
@@ -1517,40 +1719,53 @@ export const subscribeToAllSchools = (callback: (schools: any[]) => void): (() =
   let unsub: (() => void) | null = null;
   const start = () => {
     if (isCancelled || !auth.currentUser) return;
-    unsub = onSnapshot(collection(db, 'schools'), (snap) => {
-      const schools = snap.docs
-        .filter(d => d.id !== 'global')
-        .map(d => {
-          const data = d.data() || {};
-          const sId = data.id || d.id;
-          if (typeof data.name === 'string' && data.name.trim()) {
-            try {
-              localStorage.setItem(`eljur_school_name_${sId}`, data.name.trim());
-            } catch {}
-          }
-          const rawSched = data.scheduleSettings || {};
-          return {
-            ...data,
-            id: sId,
-            ...(sId === 'school_1' && typeof data.schoolInfo === 'string'
-              ? { schoolInfo: normalizeLegacySchool1Info(data.schoolInfo) }
-              : {}),
-            scheduleSettings: {
-              ...rawSched,
-              daysToAddBatch: typeof rawSched.daysToAddBatch === 'number' && rawSched.daysToAddBatch > 0 ? rawSched.daysToAddBatch : 1,
-              skippedWeekDays: Array.isArray(rawSched.skippedWeekDays) ? rawSched.skippedWeekDays : [0],
-              holidays: Array.isArray(rawSched.holidays) ? rawSched.holidays : [],
-              vacations: Array.isArray(rawSched.vacations) ? rawSched.vacations : [],
-              quarterDefinitions: {
-                'Q1': rawSched.quarterDefinitions?.['Q1'] || { start: '', end: '' },
-                'Q2': rawSched.quarterDefinitions?.['Q2'] || { start: '', end: '' },
-                'Q3': rawSched.quarterDefinitions?.['Q3'] || { start: '', end: '' },
-                'Q4': rawSched.quarterDefinitions?.['Q4'] || { start: '', end: '' },
-              }
+    unsub = onSnapshot(collection(db, 'schools'), async (snap) => {
+      if (isCancelled) return;
+      const schools = await Promise.all(
+        snap.docs
+          .filter(d => d.id !== 'global')
+          .map(async d => {
+            const data = d.data() || {};
+            const sId = data.id || d.id;
+            if (typeof data.name === 'string' && data.name.trim()) {
+              try {
+                localStorage.setItem(`eljur_school_name_${sId}`, data.name.trim());
+              } catch {}
             }
-          };
-        });
-      callback(schools);
+            const resolvedSchoolInfo = typeof data.schoolInfo === 'string'
+              ? await resolvePossiblyChunkedField(sId, 'schoolInfo', data.schoolInfo)
+              : undefined;
+            const rawEljur = data.eljurInfo ?? data.settings?.eljurInfo;
+            const resolvedEljurInfo = typeof rawEljur === 'string'
+              ? await resolvePossiblyChunkedField(sId, 'eljurInfo', rawEljur)
+              : undefined;
+            const rawSched = data.scheduleSettings || {};
+            return {
+              ...data,
+              id: sId,
+              ...(resolvedSchoolInfo !== undefined
+                ? { schoolInfo: sId === 'school_1' ? normalizeLegacySchool1Info(resolvedSchoolInfo) : resolvedSchoolInfo }
+                : {}),
+              ...(resolvedEljurInfo !== undefined ? { eljurInfo: resolvedEljurInfo } : {}),
+              scheduleSettings: {
+                ...rawSched,
+                daysToAddBatch: typeof rawSched.daysToAddBatch === 'number' && rawSched.daysToAddBatch > 0 ? rawSched.daysToAddBatch : 1,
+                skippedWeekDays: Array.isArray(rawSched.skippedWeekDays) ? rawSched.skippedWeekDays : [0],
+                holidays: Array.isArray(rawSched.holidays) ? rawSched.holidays : [],
+                vacations: Array.isArray(rawSched.vacations) ? rawSched.vacations : [],
+                quarterDefinitions: {
+                  'Q1': rawSched.quarterDefinitions?.['Q1'] || { start: '', end: '' },
+                  'Q2': rawSched.quarterDefinitions?.['Q2'] || { start: '', end: '' },
+                  'Q3': rawSched.quarterDefinitions?.['Q3'] || { start: '', end: '' },
+                  'Q4': rawSched.quarterDefinitions?.['Q4'] || { start: '', end: '' },
+                }
+              }
+            };
+          })
+      );
+      if (!isCancelled) {
+        callback(schools);
+      }
     }, (err) => console.warn('subscribeToAllSchools warning:', err));
   };
 
@@ -1651,7 +1866,9 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             }
             if (resolvedSchoolInfo === undefined) {
               const cachedInfo = localStorage.getItem(`eljur_school_info_${schoolId}`);
-              if (cachedInfo !== null) resolvedSchoolInfo = cachedInfo;
+              if (cachedInfo !== null && !isChunkedInfoDescriptorString(cachedInfo)) {
+                resolvedSchoolInfo = cachedInfo;
+              }
             }
           } catch {}
           if (typeof school.name === 'string' && school.name.trim()) {
@@ -1692,6 +1909,8 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
               delete cleaned.showSeasonalAnimations;
               delete cleaned.bodyFontId;
               delete cleaned.headingFontId;
+              delete cleaned.schoolsSettings;
+              delete cleaned.schoolInfo;
               return cleaned;
             })()
           };
@@ -1702,7 +1921,10 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             schoolPayload.educationalResources = resolvedEduResources;
           }
           if (resolvedSchoolInfo !== undefined) {
-            schoolPayload.schoolInfo = resolvedSchoolInfo;
+            schoolPayload.schoolInfo = await persistLargeFieldIfNeeded(schoolId, 'schoolInfo', resolvedSchoolInfo);
+          }
+          if (schoolPayload.settings && typeof schoolPayload.settings.eljurInfo === 'string') {
+            schoolPayload.settings.eljurInfo = await persistLargeFieldIfNeeded(schoolId, 'eljurInfo', schoolPayload.settings.eljurInfo);
           }
           queueSetIfChanged(doc(db, 'schools', schoolId), `schools/${schoolId}`, schoolPayload, true);
         }
@@ -1718,7 +1940,9 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             if (activeSettings.adminPassword) gatePayload.adminPassword = activeSettings.adminPassword;
             if (activeSettings.adminPasswordHash) gatePayload.adminPasswordHash = activeSettings.adminPasswordHash;
             if (activeSettings.adminPasswordSalt) gatePayload.adminPasswordSalt = activeSettings.adminPasswordSalt;
-            if (activeSettings.eljurInfo !== undefined) gatePayload.eljurInfo = activeSettings.eljurInfo;
+            if (typeof activeSettings.eljurInfo === 'string') {
+              gatePayload.eljurInfo = await persistLargeFieldIfNeeded(schoolId, 'eljurInfo', activeSettings.eljurInfo);
+            }
             queueSetIfChanged(
               doc(db, 'schools', schoolId, 'publicConfig', 'creatorGate'),
               `schools/${schoolId}/publicConfig/creatorGate`,
