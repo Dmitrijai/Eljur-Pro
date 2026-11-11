@@ -1,5 +1,6 @@
 import express from 'express';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as webpush from 'web-push';
@@ -7,8 +8,8 @@ import * as webpush from 'web-push';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VAPID_FILE = path.join(__dirname, '.push-vapid.json');
-const SUBS_FILE = path.join(__dirname, '.push-subscriptions.json');
+const VAPID_FILE = path.join(os.tmpdir(), 'eljur-push-vapid.json');
+const SUBS_FILE = path.join(os.tmpdir(), 'eljur-push-subscriptions.json');
 
 interface VapidKeys {
   publicKey: string;
@@ -656,7 +657,7 @@ async function startServer() {
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa'
     });
     app.use(vite.middlewares);

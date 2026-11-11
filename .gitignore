@@ -27,3 +27,4 @@ dev-dist
 # AI Studio temporary chat attachments
 public/assets/aistudio
 public/assets/aistudio/*
+.push-*.json

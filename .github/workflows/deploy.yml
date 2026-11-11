@@ -15,13 +15,14 @@ permissions:
 
 # Prevent concurrent deployments
 concurrency:
-  group: "pages"
+  group: "gh-pages-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
   # Build job
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,6 +53,7 @@ jobs:
       name: github-pages
       url: ${{ steps.dep1.outputs.page_url || steps.dep2.outputs.page_url || steps.dep3.outputs.page_url || steps.dep4.outputs.page_url || steps.dep5.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build
     steps:
       - name: Deploy to GitHub Pages (Attempt 1)
