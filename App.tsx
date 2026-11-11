@@ -681,18 +681,32 @@ export default function App() {
   const cloudSyncedSchoolsRef = useRef<Set<string>>(new Set());
   const cloudReadyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const cloudReadySetRef = useRef<Set<string>>(new Set());
+  const loadedSchoolCollectionsRef = useRef<Map<string, Set<string>>>(new Map());
   const pendingNavRef = useRef<{ targetUserId: string; targetTab: string; schoolId?: string } | null>(null);
 
-  const scheduleSchoolCloudReady = (sid: string) => {
+  const scheduleSchoolCloudReady = (sid: string, loadedKeys?: string[]) => {
     if (!sid) return;
-    if (cloudSyncedSchoolsRef.current.has(sid)) {
-      cloudReadySetRef.current.add(sid);
+    if (loadedKeys && loadedKeys.length > 0) {
+      let setForSchool = loadedSchoolCollectionsRef.current.get(sid);
+      if (!setForSchool) {
+        setForSchool = new Set<string>();
+        loadedSchoolCollectionsRef.current.set(sid, setForSchool);
+      }
+      loadedKeys.forEach(k => setForSchool!.add(k));
     }
+    const loadedSet = loadedSchoolCollectionsRef.current.get(sid);
+    const hasCoreCollections = Boolean(
+      loadedSet &&
+      loadedSet.has('messages') &&
+      loadedSet.has('announcements')
+    );
+    if (!hasCoreCollections) return;
+    if (cloudReadySetRef.current.has(sid)) return;
     if (cloudReadyTimersRef.current.has(sid)) return;
     const timer = setTimeout(() => {
       cloudReadySetRef.current.add(sid);
       setCloudReadySchools(prev => (prev[sid] ? prev : { ...prev, [sid]: true }));
-    }, 600);
+    }, 350);
     cloudReadyTimersRef.current.set(sid, timer);
   };
 
@@ -793,16 +807,10 @@ export default function App() {
     return () => DB.setDatabaseErrorListener(null);
   }, []);
 
-  // Ensure Firebase Auth session syncs UID mapping automatically
+  // Keep DB session user reference in sync with currentUser
   useEffect(() => {
     DB.setCurrentSessionUser(currentUser);
-    const unsubAuth = DB.auth.onAuthStateChanged((fbUser) => {
-      if (fbUser && currentUser) {
-        DB.syncUserAuthUidMap(currentUser.schoolId || 'school_1', currentUser.id, currentUser.role, fbUser.uid).catch(() => {});
-      }
-    });
-    return () => unsubAuth();
-  }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
+  }, [currentUser]);
 
   // Initialize Data with instant cache fast-path and Firestore real-time sync
   useEffect(() => {
@@ -999,7 +1007,14 @@ export default function App() {
 
     const mergeSchoolUpdate = (targetSid: string, schoolUpdate: Partial<AppState>, isPrimarySchool: boolean) => {
       clearTimeout(safetyTimer);
-      scheduleSchoolCloudReady(targetSid);
+      const updateKeys = Object.keys(schoolUpdate);
+      scheduleSchoolCloudReady(targetSid, updateKeys);
+      const hasNotificationRelevantUpdate =
+        schoolUpdate.messages !== undefined ||
+        schoolUpdate.announcements !== undefined ||
+        schoolUpdate.grades !== undefined ||
+        schoolUpdate.finalGrades !== undefined ||
+        schoolUpdate.homework !== undefined;
       setAppState(prev => {
         const cur = prev || defaultState;
 
@@ -1146,24 +1161,26 @@ export default function App() {
           DB.saveSchoolCache(targetSid, updated);
         }
 
-        // Immediate notification evaluation inside network callback so background/minimized PWAs
-        // dispatch OS notifications without waiting for throttled React render cycles
-        const targetNotifyUser = Notifications.getNotificationTargetUser(currentUserRef.current, updated);
-        if (targetNotifyUser) {
-          const notifySid = (targetNotifyUser.schoolId && targetNotifyUser.schoolId !== 'global')
-            ? targetNotifyUser.schoolId
-            : 'school_1';
-          const isReadyNow = cloudReadySetRef.current.has(notifySid) || cloudSyncedSchoolsRef.current.has(notifySid);
-          const activeLang = (userPrefs.language || updated.settings?.language || 'ru') as 'ru' | 'en';
-          const immediateItems = Notifications.evaluateStateNotifications(updated, targetNotifyUser, isReadyNow, activeLang);
-          if (immediateItems.length > 0 && Notifications.areNotificationsEnabled()) {
-            setTimeout(() => {
-              Notifications.playNotificationSound();
-              immediateItems.forEach(item => {
-                Notifications.dispatchSystemNotification(item);
-              });
-              pushInAppNotifications(immediateItems);
-            }, 0);
+        // Immediate notification evaluation inside network callback ONLY when notification-relevant
+        // collections (messages, announcements, grades, finalGrades, homework) changed
+        if (hasNotificationRelevantUpdate) {
+          const targetNotifyUser = Notifications.getNotificationTargetUser(currentUserRef.current, updated);
+          if (targetNotifyUser) {
+            const notifySid = (targetNotifyUser.schoolId && targetNotifyUser.schoolId !== 'global')
+              ? targetNotifyUser.schoolId
+              : 'school_1';
+            const isReadyNow = cloudReadySetRef.current.has(notifySid);
+            const activeLang = (userPrefs.language || updated.settings?.language || 'ru') as 'ru' | 'en';
+            const immediateItems = Notifications.evaluateStateNotifications(updated, targetNotifyUser, isReadyNow, activeLang);
+            if (immediateItems.length > 0 && Notifications.areNotificationsEnabled()) {
+              setTimeout(() => {
+                Notifications.playNotificationSound();
+                immediateItems.forEach(item => {
+                  Notifications.dispatchSystemNotification(item);
+                });
+                pushInAppNotifications(immediateItems);
+              }, 0);
+            }
           }
         }
 
@@ -1637,7 +1654,7 @@ export default function App() {
       DB.saveSchoolCache(targetSchoolId, stateToFlush);
     }
     setTimeout(() => {
-      fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+      Notifications.triggerServerPushCheck().catch(() => {});
     }, 500);
   };
 

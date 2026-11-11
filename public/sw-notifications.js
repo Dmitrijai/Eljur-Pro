@@ -3,10 +3,10 @@ const WATCHER_STATE_URL = 'https://eljur.local/watcher-state';
 const PENDING_CLICK_URL = 'https://eljur.local/pending-click';
 
 const PERIOD_LABELS_RU = {
-  q1: '1 четверть',
-  q2: '2 четверть',
-  q3: '3 четверть',
-  q4: '4 четверть',
+  q1: 'I четверть',
+  q2: 'II четверть',
+  q3: 'III четверть',
+  q4: 'IV четверть',
   year: 'Годовая',
   exam: 'Экзамен',
   final: 'Итоговая'
@@ -35,6 +35,22 @@ async function writeJsonToCache(urlKey, data) {
       })
     );
   } catch {}
+}
+
+function mergeBaselineObjects(a, b) {
+  if (!a || !b || a.userId !== b.userId) return b || a || null;
+  return {
+    userId: b.userId,
+    schoolId: b.schoolId || a.schoolId || 'school_1',
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),
+    cloudSeeded: Boolean(a.cloudSeeded || b.cloudSeeded),
+    swFirestoreSeeded: Boolean(a.swFirestoreSeeded || b.swFirestoreSeeded),
+    messages: Object.assign({}, a.messages || {}, b.messages || {}),
+    announcements: Object.assign({}, a.announcements || {}, b.announcements || {}),
+    homework: Object.assign({}, a.homework || {}, b.homework || {}),
+    grades: Object.assign({}, a.grades || {}, b.grades || {}),
+    finalGrades: Object.assign({}, a.finalGrades || {}, b.finalGrades || {})
+  };
 }
 
 function stripCleanText(raw, maxLen = 140) {
@@ -173,9 +189,21 @@ function isUnreadByUserSw(item, userId, localReceipts) {
   return true;
 }
 
+async function hasVisibleFocusedClient() {
+  try {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of clients) {
+      if (c.visibilityState === 'visible' && c.focused) {
+        return true;
+      }
+    }
+  } catch {}
+  return false;
+}
+
 let isCheckingBg = false;
 
-async function checkFirestoreInBackground() {
+async function checkFirestoreInBackground(forceNotifyEvenIfVisible = false) {
   if (isCheckingBg) return;
   isCheckingBg = true;
   try {
@@ -186,6 +214,8 @@ async function checkFirestoreInBackground() {
 
     const targetUser = state.targetUser;
     if (!targetUser.id || targetUser.role === 'creator') return;
+
+    const isForegroundActive = !forceNotifyEvenIfVisible && (await hasVisibleFocusedClient());
 
     const schoolId = targetUser.schoolId && targetUser.schoolId !== 'global' ? targetUser.schoolId : 'school_1';
     const lang = state.lang === 'en' ? 'en' : 'ru';
@@ -250,6 +280,8 @@ async function checkFirestoreInBackground() {
 
     const prev = state.baseline;
     if (!prev || prev.userId !== targetUser.id) return;
+
+    const notifiedIdsSet = new Set(Array.isArray(state.notifiedIds) ? state.notifiedIds : []);
 
     const currentMessages = {};
     const messagesById = {};
@@ -342,6 +374,30 @@ async function checkFirestoreInBackground() {
       }
     }
 
+    // If this is the very first SW Firestore snapshot or a foreground window is active,
+    // merge the baseline silently so historical Firestore items never trigger false notifications.
+    if (!prev.swFirestoreSeeded || isForegroundActive) {
+      const seededBaseline = mergeBaselineObjects(prev, {
+        userId: targetUser.id,
+        schoolId,
+        updatedAt: Date.now(),
+        cloudSeeded: true,
+        swFirestoreSeeded: true,
+        messages: currentMessages,
+        announcements: currentAnnouncements,
+        homework: currentHomework,
+        grades: currentGrades,
+        finalGrades: currentFinalGrades
+      });
+      state.baseline = seededBaseline;
+      await writeJsonToCache(WATCHER_STATE_URL, state);
+      await writeJsonToCache('https://eljur.local/sw-baseline-' + targetUser.id, {
+        baseline: seededBaseline,
+        notifiedIds: Array.from(notifiedIdsSet)
+      });
+      return;
+    }
+
     const resolveSender = (fromId) => {
       if (fromId === 'u_creator') return lang === 'ru' ? 'Создатель платформы' : 'Platform Creator';
       return senderNames[fromId] || (lang === 'ru' ? 'Администрация' : 'Administration');
@@ -352,6 +408,8 @@ async function checkFirestoreInBackground() {
     for (const msgId of Object.keys(currentMessages)) {
       const sig = currentMessages[msgId];
       if (prev.messages && prev.messages[msgId] === sig) continue;
+      const notifId = 'notif_msg_' + msgId + '_' + sig;
+      if (notifiedIdsSet.has(notifId)) continue;
       const msg = messagesById[msgId];
       if (!msg || msg.fromId === targetUser.id || !isUnreadByUserSw(msg, targetUser.id, localReceipts)) continue;
       const isEdit = Boolean(prev.messages && prev.messages[msgId]);
@@ -362,7 +420,7 @@ async function checkFirestoreInBackground() {
       const prefix = msg.title ? msg.title + ': ' : '';
       const body = stripCleanText(prefix + (msg.body || '')) || (lang === 'ru' ? 'Откройте раздел «Сообщения»' : 'Open Messages');
       newNotifications.push({
-        id: 'notif_msg_' + msgId + '_' + sig,
+        id: notifId,
         category: 'message',
         title,
         body,
@@ -377,6 +435,8 @@ async function checkFirestoreInBackground() {
     for (const annId of Object.keys(currentAnnouncements)) {
       const sig = currentAnnouncements[annId];
       if (prev.announcements && prev.announcements[annId] === sig) continue;
+      const notifId = 'notif_ann_' + annId + '_' + sig;
+      if (notifiedIdsSet.has(notifId)) continue;
       const ann = announcementsById[annId];
       if (!ann || ann.fromId === targetUser.id || !isUnreadByUserSw(ann, targetUser.id, localReceipts)) continue;
       const isEdit = Boolean(prev.announcements && prev.announcements[annId]);
@@ -387,7 +447,7 @@ async function checkFirestoreInBackground() {
       const prefix = ann.title ? ann.title + ': ' : '';
       const body = stripCleanText(prefix + (ann.body || '')) || (lang === 'ru' ? 'Откройте раздел «Объявления»' : 'Open Announcements');
       newNotifications.push({
-        id: 'notif_ann_' + annId + '_' + sig,
+        id: notifId,
         category: 'announcement',
         title,
         body,
@@ -403,6 +463,8 @@ async function checkFirestoreInBackground() {
       for (const gradeId of Object.keys(currentGrades)) {
         const sig = currentGrades[gradeId];
         if (prev.grades && prev.grades[gradeId] === sig) continue;
+        const notifId = 'notif_grade_' + gradeId + '_' + sig;
+        if (notifiedIdsSet.has(notifId)) continue;
         const gInfo = gradesById[gradeId];
         if (!gInfo) continue;
         const isEdit = Boolean(prev.grades && prev.grades[gradeId]);
@@ -413,7 +475,7 @@ async function checkFirestoreInBackground() {
         const commentPart = gInfo.entry.comment ? stripCleanText(gInfo.entry.comment, 90) + ' • ' : '';
         const body = (commentPart + (dateStr ? (lang === 'ru' ? 'Урок ' + dateStr : 'Date ' + dateStr) : '')).trim() || gInfo.subject;
         newNotifications.push({
-          id: 'notif_grade_' + gradeId + '_' + sig,
+          id: notifId,
           category: 'grade',
           title,
           body,
@@ -428,6 +490,8 @@ async function checkFirestoreInBackground() {
       for (const fgKey of Object.keys(currentFinalGrades)) {
         const val = currentFinalGrades[fgKey];
         if (prev.finalGrades && prev.finalGrades[fgKey] === val) continue;
+        const notifId = 'notif_fgrade_' + fgKey + '_' + val;
+        if (notifiedIdsSet.has(notifId)) continue;
         const fgInfo = finalGradesByKey[fgKey];
         if (!fgInfo) continue;
         const periodLabel = PERIOD_LABELS_RU[fgInfo.periodKey] || String(fgInfo.periodKey).toUpperCase();
@@ -438,7 +502,7 @@ async function checkFirestoreInBackground() {
           ? 'Выставлена оценка за период: ' + periodLabel
           : 'Period grade posted: ' + periodLabel;
         newNotifications.push({
-          id: 'notif_fgrade_' + fgKey + '_' + val,
+          id: notifId,
           category: 'final_grade',
           title,
           body,
@@ -453,6 +517,8 @@ async function checkFirestoreInBackground() {
       for (const hwId of Object.keys(currentHomework)) {
         const sig = currentHomework[hwId];
         if (prev.homework && prev.homework[hwId] === sig) continue;
+        const notifId = 'notif_hw_' + hwId + '_' + sig;
+        if (notifiedIdsSet.has(notifId)) continue;
         const hw = homeworkById[hwId];
         if (!hw) continue;
         const isEdit = Boolean(prev.homework && prev.homework[hwId]);
@@ -462,7 +528,7 @@ async function checkFirestoreInBackground() {
           : (isEdit ? '📚 Homework updated: ' : '📚 New homework: ') + hw.subject;
         const body = (dateStr ? (lang === 'ru' ? 'На ' + dateStr + ': ' : 'For ' + dateStr + ': ') : '') + stripCleanText(hw.text, 120);
         newNotifications.push({
-          id: 'notif_hw_' + hwId + '_' + sig,
+          id: notifId,
           category: 'homework',
           title,
           body,
@@ -475,20 +541,31 @@ async function checkFirestoreInBackground() {
       }
     }
 
+    const updatedBaseline = mergeBaselineObjects(prev, {
+      userId: targetUser.id,
+      schoolId,
+      updatedAt: Date.now(),
+      cloudSeeded: true,
+      swFirestoreSeeded: true,
+      messages: currentMessages,
+      announcements: currentAnnouncements,
+      homework: currentHomework,
+      grades: currentGrades,
+      finalGrades: currentFinalGrades
+    });
+
     if (newNotifications.length > 0) {
-      const updatedBaseline = {
-        userId: targetUser.id,
-        schoolId,
-        updatedAt: Date.now(),
-        messages: Object.assign({}, prev.messages || {}, currentMessages),
-        announcements: Object.assign({}, prev.announcements || {}, currentAnnouncements),
-        homework: Object.assign({}, prev.homework || {}, currentHomework),
-        grades: Object.assign({}, prev.grades || {}, currentGrades),
-        finalGrades: Object.assign({}, prev.finalGrades || {}, currentFinalGrades)
-      };
+      for (const item of newNotifications) {
+        notifiedIdsSet.add(item.id);
+      }
+      const updatedNotifiedList = Array.from(notifiedIdsSet).slice(-600);
       state.baseline = updatedBaseline;
+      state.notifiedIds = updatedNotifiedList;
       await writeJsonToCache(WATCHER_STATE_URL, state);
-      await writeJsonToCache('https://eljur.local/sw-baseline-' + targetUser.id, updatedBaseline);
+      await writeJsonToCache('https://eljur.local/sw-baseline-' + targetUser.id, {
+        baseline: updatedBaseline,
+        notifiedIds: updatedNotifiedList
+      });
 
       if (self.registration && typeof self.registration.showNotification === 'function') {
         for (const item of newNotifications) {
@@ -523,7 +600,7 @@ async function checkFirestoreInBackground() {
 function ensureBgLoopRunning() {
   if (bgIntervalId !== null) return;
   bgIntervalId = setInterval(() => {
-    checkFirestoreInBackground();
+    checkFirestoreInBackground(false);
   }, 8000);
 }
 
@@ -552,7 +629,21 @@ self.addEventListener('message', (event) => {
 
   if (data.type === 'SYNC_BG_WATCHER' && data.payload) {
     ensureBgLoopRunning();
-    event.waitUntil(writeJsonToCache(WATCHER_STATE_URL, data.payload));
+    event.waitUntil(
+      (async () => {
+        const existing = await readJsonFromCache(WATCHER_STATE_URL);
+        const incoming = data.payload;
+        if (existing && existing.baseline && incoming.baseline && existing.baseline.userId === incoming.baseline.userId) {
+          incoming.baseline = mergeBaselineObjects(existing.baseline, incoming.baseline);
+          const mergedNotified = new Set([
+            ...(Array.isArray(existing.notifiedIds) ? existing.notifiedIds : []),
+            ...(Array.isArray(incoming.notifiedIds) ? incoming.notifiedIds : [])
+          ]);
+          incoming.notifiedIds = Array.from(mergedNotified).slice(-600);
+        }
+        await writeJsonToCache(WATCHER_STATE_URL, incoming);
+      })()
+    );
     return;
   }
 
@@ -560,9 +651,9 @@ self.addEventListener('message', (event) => {
     ensureBgLoopRunning();
     event.waitUntil(
       (async () => {
-        await checkFirestoreInBackground();
+        await checkFirestoreInBackground(false);
         await new Promise((r) => setTimeout(r, 4500));
-        await checkFirestoreInBackground();
+        await checkFirestoreInBackground(false);
       })()
     );
   }
@@ -581,9 +672,22 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       if (payload && payload.title && self.registration && typeof self.registration.showNotification === 'function') {
+        const tag = payload.tag || 'eljur-push-' + Date.now();
+        const existing = await readJsonFromCache(WATCHER_STATE_URL);
+        if (existing) {
+          const notifiedSet = new Set(Array.isArray(existing.notifiedIds) ? existing.notifiedIds : []);
+          if (payload.tag && notifiedSet.has(payload.tag)) {
+            return;
+          }
+          if (payload.tag) {
+            notifiedSet.add(payload.tag);
+            existing.notifiedIds = Array.from(notifiedSet).slice(-600);
+            await writeJsonToCache(WATCHER_STATE_URL, existing);
+          }
+        }
         await self.registration.showNotification(payload.title, {
           body: payload.body || '',
-          tag: payload.tag || 'eljur-push-' + Date.now(),
+          tag,
           icon: './pwa-192x192.png',
           badge: './pwa-192x192.png',
           vibrate: [250, 100, 250],
@@ -593,7 +697,7 @@ self.addEventListener('push', (event) => {
           data: payload.data || {}
         }).catch(() => {});
       } else {
-        await checkFirestoreInBackground();
+        await checkFirestoreInBackground(true);
       }
     })()
   );
@@ -601,12 +705,12 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('sync', (event) => {
   ensureBgLoopRunning();
-  event.waitUntil(checkFirestoreInBackground());
+  event.waitUntil(checkFirestoreInBackground(false));
 });
 
 self.addEventListener('periodicsync', (event) => {
   ensureBgLoopRunning();
-  event.waitUntil(checkFirestoreInBackground());
+  event.waitUntil(checkFirestoreInBackground(false));
 });
 
 self.addEventListener('notificationclick', (event) => {

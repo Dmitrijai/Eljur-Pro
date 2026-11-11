@@ -28,10 +28,11 @@ interface StoredTargetUser {
   password?: string;
 }
 
-interface UserNotificationBaseline {
+export interface UserNotificationBaseline {
   userId: string;
   schoolId: string;
   updatedAt: number;
+  cloudSeeded?: boolean;
   messages: Record<string, string>;
   announcements: Record<string, string>;
   homework: Record<string, string>;
@@ -41,10 +42,125 @@ interface UserNotificationBaseline {
 
 const TARGET_USER_STORAGE_KEY = 'eljur_notify_target_user_v1';
 const NOTIFICATIONS_ENABLED_KEY = 'eljur_notifications_enabled_v1';
-const BASELINE_KEY_PREFIX = 'eljur_notify_baseline_v1_';
+const BASELINE_KEY_PREFIX = 'eljur_notify_baseline_v2_';
+const NOTIFIED_IDS_KEY_PREFIX = 'eljur_notified_ids_v2_';
 const BG_CACHE_NAME = 'eljur-bg-watcher-v1';
 const WATCHER_STATE_URL = 'https://eljur.local/watcher-state';
 const PENDING_CLICK_URL = 'https://eljur.local/pending-click';
+
+// In-memory fallbacks so QuotaExceededError in localStorage can never cause repeated notifications
+const memoryBaselines = new Map<string, UserNotificationBaseline>();
+const memoryNotifiedIds = new Map<string, Set<string>>();
+let lastSyncedBaselineHash = '';
+
+// Detect whether backend Web Push API (/api/push/*) is available (skip on static GitHub Pages)
+let pushBackendState: 'unknown' | 'available' | 'unavailable' =
+  typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')
+    ? 'unavailable'
+    : 'unknown';
+
+export const checkPushBackendAvailable = async (): Promise<boolean> => {
+  if (typeof window === 'undefined') return false;
+  if (window.location.hostname.endsWith('github.io')) {
+    pushBackendState = 'unavailable';
+    return false;
+  }
+  if (pushBackendState === 'available') return true;
+  if (pushBackendState === 'unavailable') return false;
+
+  try {
+    const res = await fetch('./api/push/vapid-public-key', { cache: 'no-store' });
+    if (!res.ok) {
+      pushBackendState = 'unavailable';
+      return false;
+    }
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      pushBackendState = 'unavailable';
+      return false;
+    }
+    const data = await res.json();
+    if (data && typeof data.publicKey === 'string' && data.publicKey.length > 10) {
+      cachedVapidPublicKey = data.publicKey;
+      pushBackendState = 'available';
+      return true;
+    }
+    pushBackendState = 'unavailable';
+    return false;
+  } catch {
+    pushBackendState = 'unavailable';
+    return false;
+  }
+};
+
+export const triggerServerPushCheck = async (): Promise<void> => {
+  if (pushBackendState !== 'available') return;
+  await fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+};
+
+export const sendServerTestPush = async (item: EljurNotificationItem): Promise<void> => {
+  if (pushBackendState === 'unavailable') return;
+  const ok = await checkPushBackendAvailable().catch(() => false);
+  if (!ok) return;
+  await fetch('./api/push/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item })
+  }).catch(() => {});
+};
+
+const safeSetLocalStorage = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+    return;
+  } catch {
+    // Prune bulky cache entries if localStorage quota is full
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('eljur_school_info_') || k.startsWith('eljur_gate_') || k.startsWith('eljur_notify_baseline_v1_'))) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+      localStorage.setItem(key, value);
+    } catch {}
+  }
+};
+
+const getNotifiedSetForUser = (userId: string): Set<string> => {
+  let set = memoryNotifiedIds.get(userId);
+  if (set) return set;
+  set = new Set<string>();
+  try {
+    const raw = localStorage.getItem(`${NOTIFIED_IDS_KEY_PREFIX}${userId}`);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        arr.forEach((id: unknown) => {
+          if (typeof id === 'string') set!.add(id);
+        });
+      }
+    }
+  } catch {}
+  memoryNotifiedIds.set(userId, set);
+  return set;
+};
+
+const recordNotifiedIdsForUser = (userId: string, ids: string[]): void => {
+  if (!ids.length) return;
+  const set = getNotifiedSetForUser(userId);
+  ids.forEach(id => set.add(id));
+  // Keep latest 600 IDs
+  const arr = Array.from(set).slice(-600);
+  if (set.size > 600) {
+    memoryNotifiedIds.set(userId, new Set(arr));
+  }
+  safeSetLocalStorage(`${NOTIFIED_IDS_KEY_PREFIX}${userId}`, JSON.stringify(arr));
+};
 
 export const areNotificationsEnabled = (): boolean => {
   try {
@@ -57,9 +173,7 @@ export const areNotificationsEnabled = (): boolean => {
 };
 
 export const setNotificationsEnabled = (enabled: boolean): void => {
-  try {
-    localStorage.setItem(NOTIFICATIONS_ENABLED_KEY, enabled ? 'true' : 'false');
-  } catch {}
+  safeSetLocalStorage(NOTIFICATIONS_ENABLED_KEY, enabled ? 'true' : 'false');
 };
 
 export const getSystemNotificationPermission = (): NotificationPermission | 'unsupported' => {
@@ -69,15 +183,32 @@ export const getSystemNotificationPermission = (): NotificationPermission | 'uns
   return window.Notification.permission;
 };
 
-export const requestSystemNotificationPermission = async (): Promise<NotificationPermission | 'unsupported'> => {
+/**
+ * Requests OS/browser notification permission synchronously inside the user gesture
+ * (handling both Promise-based and legacy callback-based implementations).
+ */
+export const requestSystemNotificationPermission = (): Promise<NotificationPermission | 'unsupported'> => {
   if (typeof window === 'undefined' || !('Notification' in window)) {
-    return 'unsupported';
+    return Promise.resolve('unsupported');
   }
   try {
-    const result = await window.Notification.requestPermission();
-    return result;
+    let callbackResolved = false;
+    return new Promise<NotificationPermission>((resolve) => {
+      const finish = (perm: NotificationPermission) => {
+        if (!callbackResolved) {
+          callbackResolved = true;
+          resolve(perm || window.Notification.permission);
+        }
+      };
+      const maybePromise = window.Notification.requestPermission((perm) => {
+        finish(perm);
+      });
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        maybePromise.then(finish).catch(() => finish(window.Notification.permission));
+      }
+    });
   } catch {
-    return window.Notification.permission;
+    return Promise.resolve(window.Notification.permission);
   }
 };
 
@@ -99,7 +230,7 @@ export const saveLastNonCreatorTargetUser = (user: User | null | undefined): voi
       login: user.login,
       password: user.password
     };
-    localStorage.setItem(TARGET_USER_STORAGE_KEY, JSON.stringify(record));
+    safeSetLocalStorage(TARGET_USER_STORAGE_KEY, JSON.stringify(record));
   } catch {}
 };
 
@@ -114,7 +245,9 @@ export const getNotificationTargetUser = (
 ): User | null => {
   if (currentUser && currentUser.role !== 'creator') {
     const latestFromState = (state?.users || []).find(u => u.id === currentUser.id);
-    const merged: User = latestFromState ? { ...currentUser, ...latestFromState, password: currentUser.password || latestFromState.password } : currentUser;
+    const merged: User = latestFromState
+      ? { ...currentUser, ...latestFromState, password: currentUser.password || latestFromState.password }
+      : currentUser;
     saveLastNonCreatorTargetUser(merged);
     return merged;
   }
@@ -389,6 +522,7 @@ const buildCurrentSnapshot = (
       userId: targetUser.id,
       schoolId,
       updatedAt: Date.now(),
+      cloudSeeded: true,
       messages,
       announcements,
       homework,
@@ -415,8 +549,51 @@ const PERIOD_LABELS_RU: Record<string, string> = {
   final: 'Итоговая'
 };
 
+const readStoredBaseline = (userId: string): UserNotificationBaseline | null => {
+  const fromMem = memoryBaselines.get(userId);
+  if (fromMem && fromMem.userId === userId) {
+    return fromMem;
+  }
+  const storageKey = `${BASELINE_KEY_PREFIX}${userId}`;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as UserNotificationBaseline;
+      if (parsed && parsed.userId === userId) {
+        memoryBaselines.set(userId, parsed);
+        return parsed;
+      }
+    }
+  } catch {}
+  return null;
+};
+
+const writeStoredBaseline = (userId: string, baseline: UserNotificationBaseline): void => {
+  memoryBaselines.set(userId, baseline);
+  const storageKey = `${BASELINE_KEY_PREFIX}${userId}`;
+  safeSetLocalStorage(storageKey, JSON.stringify(baseline));
+};
+
+const mergeBaselines = (
+  a: UserNotificationBaseline | null | undefined,
+  b: UserNotificationBaseline
+): UserNotificationBaseline => {
+  if (!a || a.userId !== b.userId) return b;
+  return {
+    userId: b.userId,
+    schoolId: b.schoolId || a.schoolId || 'school_1',
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),
+    cloudSeeded: Boolean(a.cloudSeeded || b.cloudSeeded),
+    messages: { ...(a.messages || {}), ...(b.messages || {}) },
+    announcements: { ...(a.announcements || {}), ...(b.announcements || {}) },
+    homework: { ...(a.homework || {}), ...(b.homework || {}) },
+    grades: { ...(a.grades || {}), ...(b.grades || {}) },
+    finalGrades: { ...(a.finalGrades || {}), ...(b.finalGrades || {}) }
+  };
+};
+
 /**
- * Compares the current AppState for targetUser against the persisted baseline in localStorage.
+ * Compares the current AppState for targetUser against the persisted baseline.
  * Returns any newly detected notifications and updates the stored baseline.
  */
 export const evaluateStateNotifications = (
@@ -432,25 +609,18 @@ export const evaluateStateNotifications = (
     return [];
   }
 
-  const storageKey = `${BASELINE_KEY_PREFIX}${targetUser.id}`;
   const { baseline: current, meta } = buildCurrentSnapshot(state, targetUser);
+  const prev = readStoredBaseline(targetUser.id);
 
-  let prev: UserNotificationBaseline | null = null;
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      prev = JSON.parse(raw) as UserNotificationBaseline;
-    }
-  } catch {}
-
-  // First time initializing baseline for this user on this device: save silently
-  if (!prev || prev.userId !== targetUser.id) {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(current));
-    } catch {}
+  // First time initializing cloud-ready baseline for this user on this device: seed silently
+  if (!prev || prev.userId !== targetUser.id || !prev.cloudSeeded) {
+    const seeded = mergeBaselines(prev, { ...current, cloudSeeded: true });
+    writeStoredBaseline(targetUser.id, seeded);
+    syncServiceWorkerWatcher(state, targetUser, lang, seeded).catch(() => {});
     return [];
   }
 
+  const notifiedSet = getNotifiedSetForUser(targetUser.id);
   const newNotifications: EljurNotificationItem[] = [];
   const schoolId = current.schoolId;
   const userShortName = H.formatShortName(targetUser.fio || targetUser.login || '');
@@ -464,14 +634,16 @@ export const evaluateStateNotifications = (
 
   // 1. Check new or edited unread messages
   Object.entries(current.messages).forEach(([msgId, sig]) => {
-    if (prev!.messages?.[msgId] === sig) return;
+    if (prev.messages?.[msgId] === sig) return;
+    const notifId = `notif_msg_${msgId}_${sig}`;
+    if (notifiedSet.has(notifId)) return;
     const msg = meta.messagesById.get(msgId);
     if (!msg) return;
     if (msg.fromId === targetUser.id) return;
     if (!H.isMessageUnreadByUser(msg, targetUser.id)) return;
 
     const senderName = resolveSenderName(msg.fromId);
-    const isEdit = Boolean(prev!.messages?.[msgId]);
+    const isEdit = Boolean(prev.messages?.[msgId]);
     const title = lang === 'ru'
       ? `${isEdit ? '💬 Сообщение изменено' : '💬 Новое сообщение'} • ${senderName}`
       : `${isEdit ? '💬 Message updated' : '💬 New message'} • ${senderName}`;
@@ -479,7 +651,7 @@ export const evaluateStateNotifications = (
     const body = stripCleanText(`${subjectPrefix}${msg.body || ''}`) || (lang === 'ru' ? 'Откройте раздел «Сообщения»' : 'Open Messages');
 
     newNotifications.push({
-      id: `notif_msg_${msgId}_${sig}`,
+      id: notifId,
       category: 'message',
       title,
       body,
@@ -494,14 +666,16 @@ export const evaluateStateNotifications = (
 
   // 2. Check new or edited unread announcements
   Object.entries(current.announcements).forEach(([annId, sig]) => {
-    if (prev!.announcements?.[annId] === sig) return;
+    if (prev.announcements?.[annId] === sig) return;
+    const notifId = `notif_ann_${annId}_${sig}`;
+    if (notifiedSet.has(notifId)) return;
     const ann = meta.announcementsById.get(annId);
     if (!ann) return;
     if (ann.fromId === targetUser.id) return;
     if (!H.isMessageUnreadByUser(ann, targetUser.id)) return;
 
     const senderName = resolveSenderName(ann.fromId);
-    const isEdit = Boolean(prev!.announcements?.[annId]);
+    const isEdit = Boolean(prev.announcements?.[annId]);
     const title = lang === 'ru'
       ? `${isEdit ? '📢 Объявление обновлено' : '📢 Новое объявление'} • ${senderName}`
       : `${isEdit ? '📢 Announcement updated' : '📢 New announcement'} • ${senderName}`;
@@ -509,7 +683,7 @@ export const evaluateStateNotifications = (
     const body = stripCleanText(`${subjectPrefix}${ann.body || ''}`) || (lang === 'ru' ? 'Откройте раздел «Объявления»' : 'Open Announcements');
 
     newNotifications.push({
-      id: `notif_ann_${annId}_${sig}`,
+      id: notifId,
       category: 'announcement',
       title,
       body,
@@ -534,11 +708,13 @@ export const evaluateStateNotifications = (
   // 3. Student-only: Grades, Final Grades, Homework
   if (targetUser.role === 'student') {
     Object.entries(current.grades).forEach(([gradeId, sig]) => {
-      if (prev!.grades?.[gradeId] === sig) return;
+      if (prev.grades?.[gradeId] === sig) return;
+      const notifId = `notif_grade_${gradeId}_${sig}`;
+      if (notifiedSet.has(notifId)) return;
       const gInfo = meta.gradesById.get(gradeId);
       if (!gInfo) return;
       const { subject, entry } = gInfo;
-      const isEdit = Boolean(prev!.grades?.[gradeId]);
+      const isEdit = Boolean(prev.grades?.[gradeId]);
       const title = lang === 'ru'
         ? `${isEdit ? '✏️ Изменена оценка' : '⭐ Новая оценка'}: ${entry.value} (${subject})`
         : `${isEdit ? '✏️ Grade updated' : '⭐ New grade'}: ${entry.value} (${subject})`;
@@ -547,7 +723,7 @@ export const evaluateStateNotifications = (
       const body = `${commentPart}${dateStr ? (lang === 'ru' ? `Урок ${dateStr}` : `Date ${dateStr}`) : ''}`.trim() || subject;
 
       newNotifications.push({
-        id: `notif_grade_${gradeId}_${sig}`,
+        id: notifId,
         category: 'grade',
         title,
         body,
@@ -561,7 +737,9 @@ export const evaluateStateNotifications = (
     });
 
     Object.entries(current.finalGrades).forEach(([fgKey, val]) => {
-      if (prev!.finalGrades?.[fgKey] === val) return;
+      if (prev.finalGrades?.[fgKey] === val) return;
+      const notifId = `notif_fgrade_${fgKey}_${val}`;
+      if (notifiedSet.has(notifId)) return;
       const fgInfo = meta.finalGradesByKey.get(fgKey);
       if (!fgInfo) return;
       const periodLabel = PERIOD_LABELS_RU[fgInfo.periodKey] || fgInfo.periodKey.toUpperCase();
@@ -573,7 +751,7 @@ export const evaluateStateNotifications = (
         : `Period grade posted: ${periodLabel}`;
 
       newNotifications.push({
-        id: `notif_fgrade_${fgKey}_${val}`,
+        id: notifId,
         category: 'final_grade',
         title,
         body,
@@ -587,10 +765,12 @@ export const evaluateStateNotifications = (
     });
 
     Object.entries(current.homework).forEach(([hwId, sig]) => {
-      if (prev!.homework?.[hwId] === sig) return;
+      if (prev.homework?.[hwId] === sig) return;
+      const notifId = `notif_hw_${hwId}_${sig}`;
+      if (notifiedSet.has(notifId)) return;
       const hw = meta.homeworkById.get(hwId);
       if (!hw) return;
-      const isEdit = Boolean(prev!.homework?.[hwId]);
+      const isEdit = Boolean(prev.homework?.[hwId]);
       const dateStr = formatShortDateLabel(hw.date);
       const title = lang === 'ru'
         ? `${isEdit ? '📚 Обновлено ДЗ' : '📚 Новое ДЗ'}: ${hw.subject}`
@@ -598,7 +778,7 @@ export const evaluateStateNotifications = (
       const body = `${dateStr ? (lang === 'ru' ? `На ${dateStr}: ` : `For ${dateStr}: `) : ''}${stripCleanText(hw.text, 120)}`;
 
       newNotifications.push({
-        id: `notif_hw_${hwId}_${sig}`,
+        id: notifId,
         category: 'homework',
         title,
         body,
@@ -612,31 +792,31 @@ export const evaluateStateNotifications = (
     });
   }
 
-  // Merge baseline so temporary empty states never wipe seen history, while updated signatures overwrite
-  const nextBaseline: UserNotificationBaseline = {
-    userId: targetUser.id,
-    schoolId,
-    updatedAt: Date.now(),
-    messages: { ...(prev.messages || {}), ...current.messages },
-    announcements: { ...(prev.announcements || {}), ...current.announcements },
-    homework: { ...(prev.homework || {}), ...current.homework },
-    grades: { ...(prev.grades || {}), ...current.grades },
-    finalGrades: { ...(prev.finalGrades || {}), ...current.finalGrades }
-  };
+  const nextBaseline = mergeBaselines(prev, { ...current, cloudSeeded: true });
+  writeStoredBaseline(targetUser.id, nextBaseline);
 
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(nextBaseline));
-  } catch {}
+  if (newNotifications.length > 0) {
+    recordNotifiedIdsForUser(targetUser.id, newNotifications.map(n => n.id));
+  }
 
-  syncServiceWorkerWatcher(state, targetUser, lang, nextBaseline).catch(() => {});
+  // Only sync to Service Worker if the baseline content actually changed
+  const baselineContentHash = JSON.stringify({
+    u: nextBaseline.userId,
+    s: nextBaseline.schoolId,
+    m: nextBaseline.messages,
+    a: nextBaseline.announcements,
+    h: nextBaseline.homework,
+    g: nextBaseline.grades,
+    fg: nextBaseline.finalGrades
+  });
+  if (baselineContentHash !== lastSyncedBaselineHash) {
+    lastSyncedBaselineHash = baselineContentHash;
+    syncServiceWorkerWatcher(state, targetUser, lang, nextBaseline).catch(() => {});
+  }
 
   return newNotifications;
 };
 
-/**
- * Merges any baseline updates written by the Service Worker while the app was minimized/backgrounded
- * into localStorage so the main thread does not re-notify for items already notified by the SW.
- */
 const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -656,18 +836,10 @@ const ensureWebPushSubscription = async (
   if (!reg || !('pushManager' in reg)) return null;
   if (getSystemNotificationPermission() !== 'granted') return null;
 
-  try {
-    if (!cachedVapidPublicKey) {
-      const res = await fetch('./api/push/vapid-public-key', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.publicKey) {
-          cachedVapidPublicKey = String(data.publicKey);
-        }
-      }
-    }
-    if (!cachedVapidPublicKey) return null;
+  const backendAvailable = await checkPushBackendAvailable();
+  if (!backendAvailable || !cachedVapidPublicKey) return null;
 
+  try {
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       const appServerKey = urlBase64ToUint8Array(cachedVapidPublicKey);
@@ -677,7 +849,6 @@ const ensureWebPushSubscription = async (
           applicationServerKey: appServerKey as unknown as BufferSource
         });
       } catch {
-        // If existing subscription had a different key, unsubscribe and retry
         const oldSub = await reg.pushManager.getSubscription();
         if (oldSub) {
           await oldSub.unsubscribe().catch(() => {});
@@ -697,28 +868,15 @@ const ensureWebPushSubscription = async (
 export const consumeSwUpdatedBaseline = async (userId: string): Promise<void> => {
   if (!userId || typeof window === 'undefined') return;
 
-  const mergeIntoLocal = (incoming: UserNotificationBaseline | null) => {
-    if (!incoming || incoming.userId !== userId) return;
-    const storageKey = `${BASELINE_KEY_PREFIX}${userId}`;
-    let existing: UserNotificationBaseline | null = null;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) existing = JSON.parse(raw);
-    } catch {}
-
-    const merged: UserNotificationBaseline = {
-      userId,
-      schoolId: incoming.schoolId || existing?.schoolId || 'school_1',
-      updatedAt: Math.max(incoming.updatedAt || 0, existing?.updatedAt || 0),
-      messages: { ...(existing?.messages || {}), ...(incoming.messages || {}) },
-      announcements: { ...(existing?.announcements || {}), ...(incoming.announcements || {}) },
-      homework: { ...(existing?.homework || {}), ...(incoming.homework || {}) },
-      grades: { ...(existing?.grades || {}), ...(incoming.grades || {}) },
-      finalGrades: { ...(existing?.finalGrades || {}), ...(incoming.finalGrades || {}) }
-    };
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(merged));
-    } catch {}
+  const mergeIntoLocal = (incoming: UserNotificationBaseline | null, incomingNotifiedIds?: string[]) => {
+    if (incoming && incoming.userId === userId) {
+      const existing = readStoredBaseline(userId);
+      const merged = mergeBaselines(existing, incoming);
+      writeStoredBaseline(userId, merged);
+    }
+    if (Array.isArray(incomingNotifiedIds) && incomingNotifiedIds.length > 0) {
+      recordNotifiedIdsForUser(userId, incomingNotifiedIds);
+    }
   };
 
   if ('caches' in window) {
@@ -727,22 +885,31 @@ export const consumeSwUpdatedBaseline = async (userId: string): Promise<void> =>
       const swUrl = `https://eljur.local/sw-baseline-${userId}`;
       const res = await cache.match(swUrl);
       if (res) {
-        const swBaseline = (await res.json()) as UserNotificationBaseline;
+        const swData = await res.json();
         await cache.delete(swUrl);
-        mergeIntoLocal(swBaseline);
+        if (swData) {
+          const swBaseline = (swData.baseline || swData) as UserNotificationBaseline;
+          const swNotified = Array.isArray(swData.notifiedIds) ? swData.notifiedIds : [];
+          mergeIntoLocal(swBaseline, swNotified);
+        }
       }
     } catch {}
   }
 
-  try {
-    const res = await fetch(`./api/push/baseline/${encodeURIComponent(userId)}`, { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.baseline) {
-        mergeIntoLocal(data.baseline as UserNotificationBaseline);
+  if (pushBackendState === 'available') {
+    try {
+      const res = await fetch(`./api/push/baseline/${encodeURIComponent(userId)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data?.baseline) {
+            mergeIntoLocal(data.baseline as UserNotificationBaseline);
+          }
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 };
 
 /**
@@ -758,17 +925,15 @@ export const syncServiceWorkerWatcher = async (
   if (typeof window === 'undefined' || !targetUser || targetUser.role === 'creator') return;
 
   try {
-    const storageKey = `${BASELINE_KEY_PREFIX}${targetUser.id}`;
-    let baseline = explicitBaseline || null;
-    if (!baseline) {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (raw) baseline = JSON.parse(raw);
-      } catch {}
-    }
-    if (!baseline) {
-      baseline = buildCurrentSnapshot(state, targetUser).baseline;
-    }
+    // First absorb any baseline updates recorded by the Service Worker so we never overwrite them
+    await consumeSwUpdatedBaseline(targetUser.id);
+
+    const existingStored = readStoredBaseline(targetUser.id);
+    let baseline = explicitBaseline
+      ? mergeBaselines(existingStored, explicitBaseline)
+      : existingStored || buildCurrentSnapshot(state, targetUser).baseline;
+
+    writeStoredBaseline(targetUser.id, baseline);
 
     let idToken = '';
     let refreshToken = '';
@@ -804,6 +969,8 @@ export const syncServiceWorkerWatcher = async (
       .filter((g: any) => Array.isArray(g?.studentIds) && g.studentIds.includes(targetUser.id))
       .map((g: any) => g.id);
 
+    const notifiedIds = Array.from(getNotifiedSetForUser(targetUser.id));
+
     const watcherPayload = {
       projectId: firebaseConfig.projectId,
       apiKey: firebaseConfig.apiKey,
@@ -821,6 +988,7 @@ export const syncServiceWorkerWatcher = async (
         studentGroupIds
       },
       baseline,
+      notifiedIds,
       senderNames,
       localReceipts,
       updatedAt: Date.now()
@@ -829,6 +997,18 @@ export const syncServiceWorkerWatcher = async (
     if ('caches' in window) {
       try {
         const cache = await window.caches.open(BG_CACHE_NAME);
+        const prevRes = await cache.match(WATCHER_STATE_URL);
+        if (prevRes) {
+          try {
+            const prevWatcher = await prevRes.json();
+            if (prevWatcher?.baseline && prevWatcher.baseline.userId === targetUser.id) {
+              watcherPayload.baseline = mergeBaselines(prevWatcher.baseline, watcherPayload.baseline);
+            }
+            if (Array.isArray(prevWatcher?.notifiedIds)) {
+              watcherPayload.notifiedIds = Array.from(new Set([...prevWatcher.notifiedIds, ...watcherPayload.notifiedIds])).slice(-600);
+            }
+          } catch {}
+        }
         await cache.put(
           WATCHER_STATE_URL,
           new Response(JSON.stringify(watcherPayload), {
@@ -848,9 +1028,9 @@ export const syncServiceWorkerWatcher = async (
         });
       }
 
-      if (reg) {
+      if (reg && getSystemNotificationPermission() === 'granted') {
         const pushSub = await ensureWebPushSubscription(reg);
-        if (pushSub) {
+        if (pushSub && pushBackendState === 'available') {
           fetch('./api/push/subscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -947,6 +1127,8 @@ const SILENT_WAV_DATA_URI =
 export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): (() => void) => {
   if (typeof window === 'undefined') return () => {};
 
+  checkPushBackendAvailable().catch(() => {});
+
   let worker: Worker | null = null;
   let workerUrl = '';
   let silentAudio: HTMLAudioElement | null = null;
@@ -990,7 +1172,7 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
         }
       }).catch(() => {});
     }
-    fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+    triggerServerPushCheck();
   };
 
   try {
@@ -1013,7 +1195,7 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
     if (document.visibilityState === 'hidden') {
       ensureSilentKeepAlive();
       notifyServiceWorkerBackgrounded();
-      fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+      triggerServerPushCheck();
     } else if (document.visibilityState === 'visible') {
       onForegroundWake();
     }
@@ -1021,7 +1203,7 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
 
   const handlePageHide = () => {
     notifyServiceWorkerBackgrounded();
-    fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+    triggerServerPushCheck();
   };
 
   const handleUserGesture = () => {
@@ -1056,5 +1238,3 @@ export const startBackgroundKeepAliveWorker = (onForegroundWake: () => void): ((
     }
   };
 };
-
-

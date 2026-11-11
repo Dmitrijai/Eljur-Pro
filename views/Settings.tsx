@@ -30,6 +30,10 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const [showSecretPass, setShowSecretPass] = useState(false);
   const [notificationsEnabled, setNotificationsEnabledState] = useState<boolean>(() => Notifications.areNotificationsEnabled());
   const [sysNotificationPerm, setSysNotificationPerm] = useState<string>(() => Notifications.getSystemNotificationPermission());
+  const [allowBtnStage, setAllowBtnStage] = useState<'visible' | 'check' | 'hidden'>(() => {
+    const initialPerm = Notifications.getSystemNotificationPermission();
+    return initialPerm === 'granted' || initialPerm === 'unsupported' ? 'hidden' : 'visible';
+  });
   
   // Time Machine State
   const [virtualDatePart, setVirtualDatePart] = useState('');
@@ -79,6 +83,62 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       updateInputsFromWorldTime();
     });
   }, []);
+
+  // Real-time system notification permission detector + animated checkmark morph
+  useEffect(() => {
+    let permStatusObj: PermissionStatus | null = null;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    const triggerGrantedAnimation = () => {
+      setAllowBtnStage(prev => {
+        if (prev === 'hidden' || prev === 'check') return prev;
+        const targetNotifyUser = Notifications.getNotificationTargetUser(user, state);
+        Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, (state.settings.language || 'ru') as 'ru' | 'en').catch(() => {});
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          setAllowBtnStage('hidden');
+        }, 850);
+        return 'check';
+      });
+    };
+
+    const syncPermissionNow = () => {
+      const currentPerm = Notifications.getSystemNotificationPermission();
+      setSysNotificationPerm(prev => (prev === currentPerm ? prev : currentPerm));
+      if (currentPerm === 'granted') {
+        triggerGrantedAnimation();
+      } else if (currentPerm === 'unsupported') {
+        setAllowBtnStage('hidden');
+      }
+    };
+
+    syncPermissionNow();
+
+    if (typeof navigator !== 'undefined' && 'permissions' in navigator && typeof navigator.permissions?.query === 'function') {
+      navigator.permissions
+        .query({ name: 'notifications' as PermissionName })
+        .then(status => {
+          permStatusObj = status;
+          status.onchange = () => {
+            syncPermissionNow();
+          };
+        })
+        .catch(() => {});
+    }
+
+    window.addEventListener('focus', syncPermissionNow);
+    document.addEventListener('visibilitychange', syncPermissionNow);
+    pollInterval = setInterval(syncPermissionNow, 400);
+
+    return () => {
+      if (permStatusObj) permStatusObj.onchange = null;
+      if (hideTimer) clearTimeout(hideTimer);
+      if (pollInterval) clearInterval(pollInterval);
+      window.removeEventListener('focus', syncPermissionNow);
+      document.removeEventListener('visibilitychange', syncPermissionNow);
+    };
+  }, [user?.id, state.settings.language]);
 
   // Validation Effect
   useEffect(() => {
@@ -1027,14 +1087,18 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            type="checkbox"
                            className="hidden"
                            checked={notificationsEnabled}
-                           onChange={async (e) => {
+                           onChange={(e) => {
                              const val = e.target.checked;
+                             const permPromise = val && Notifications.getSystemNotificationPermission() === 'default'
+                               ? Notifications.requestSystemNotificationPermission()
+                               : null;
                              Notifications.setNotificationsEnabled(val);
                              setNotificationsEnabledState(val);
                              Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
-                             if (val && Notifications.getSystemNotificationPermission() === 'default') {
-                               const perm = await Notifications.requestSystemNotificationPermission();
-                               setSysNotificationPerm(perm);
+                             if (permPromise) {
+                               permPromise.then((perm) => {
+                                 setSysNotificationPerm(perm);
+                               });
                              }
                            }}
                          />
@@ -1046,32 +1110,54 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                          </div>
                        </label>
 
-                       <div className="flex flex-wrap items-center gap-2 shrink-0">
-                         {sysNotificationPerm !== 'granted' && sysNotificationPerm !== 'unsupported' && (
-                           <Button
-                             variant="secondary"
-                             className="text-[11px] sm:text-xs py-1 px-2.5 h-auto"
-                             onClick={async () => {
-                               const perm = await Notifications.requestSystemNotificationPermission();
-                               setSysNotificationPerm(perm);
-                               if (perm === 'granted') {
-                                 Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
-                                 notify(lang === 'ru' ? 'Системные уведомления разрешены!' : 'System notifications enabled!');
-                               } else {
-                                 notify(lang === 'ru' ? 'Разрешите уведомления в настройках браузера' : 'Please allow notifications in browser settings', 'error');
-                               }
+                       <div className="flex flex-row flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0 w-full sm:w-auto overflow-x-auto no-scrollbar">
+                         {allowBtnStage !== 'hidden' && sysNotificationPerm !== 'unsupported' && (
+                           <button
+                             type="button"
+                             disabled={allowBtnStage === 'check'}
+                             onClick={() => {
+                               // Trigger native OS/Browser permission prompt synchronously in user gesture
+                               const permPromise = Notifications.requestSystemNotificationPermission();
+                               permPromise.then((perm) => {
+                                 setSysNotificationPerm(perm);
+                                 if (perm === 'granted') {
+                                   setAllowBtnStage('check');
+                                   Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
+                                   setTimeout(() => {
+                                     setAllowBtnStage('hidden');
+                                   }, 850);
+                                 } else if (perm === 'denied') {
+                                   notify(
+                                     lang === 'ru'
+                                       ? 'Уведомления заблокированы в браузере — разрешите их в значке замка в адресной строке или настройках сайта'
+                                       : 'Notifications are blocked in browser settings — please allow them in site permissions',
+                                     'error'
+                                   );
+                                 }
+                               });
                              }}
+                             className={`inline-flex items-center justify-center font-semibold rounded-xl border transition-all duration-500 ease-out whitespace-nowrap shrink-0 cursor-pointer select-none ${
+                               allowBtnStage === 'check'
+                                 ? 'bg-emerald-500 border-emerald-500 text-white w-8 h-7 sm:w-9 sm:h-8 px-0 scale-105 shadow-md shadow-emerald-500/25'
+                                 : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700 text-[11px] sm:text-xs py-1 px-2 sm:px-2.5 h-7 sm:h-8 shadow-xs'
+                             }`}
                            >
-                             {lang === 'ru' ? 'Разрешить в системе' : 'Allow OS Notifications'}
-                           </Button>
+                             {allowBtnStage === 'check' ? (
+                               <Check size={15} className="stroke-[2.75] animate-in zoom-in duration-200" />
+                             ) : (
+                               <span>{lang === 'ru' ? 'Разрешить в системе' : 'Allow in OS'}</span>
+                             )}
+                           </button>
                          )}
                          <Button
                            variant="secondary"
-                           className="text-[11px] sm:text-xs py-1 px-2.5 h-auto"
-                           onClick={async () => {
-                             if (Notifications.getSystemNotificationPermission() === 'default') {
-                               const perm = await Notifications.requestSystemNotificationPermission();
-                               setSysNotificationPerm(perm);
+                           className="text-[11px] sm:text-xs py-1 px-2 sm:px-2.5 h-7 sm:h-8 whitespace-nowrap shrink-0"
+                           onClick={() => {
+                             const permPromise = Notifications.getSystemNotificationPermission() === 'default'
+                               ? Notifications.requestSystemNotificationPermission()
+                               : null;
+                             if (permPromise) {
+                               permPromise.then(perm => setSysNotificationPerm(perm));
                              }
                              Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
                              const recipient = targetNotifyUser || user;
@@ -1094,11 +1180,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                                createdAt: Date.now()
                              };
                              window.dispatchEvent(new CustomEvent('eljur-test-notification', { detail: testItem }));
-                             fetch('./api/push/send', {
-                               method: 'POST',
-                               headers: { 'Content-Type': 'application/json' },
-                               body: JSON.stringify({ item: testItem }),
-                             }).catch(() => {});
+                             Notifications.sendServerTestPush(testItem).catch(() => {});
                            }}
                          >
                            {lang === 'ru' ? 'Проверить уведомление' : 'Test Notification'}

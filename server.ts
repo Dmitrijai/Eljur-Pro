@@ -1,5 +1,6 @@
 import express from 'express';
 import fs from 'fs';
+import http from 'http';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -653,11 +654,13 @@ async function startServer() {
     res.json({ ok: true });
   });
 
+  const httpServer = http.createServer(app);
+
   const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(path.join(__dirname, 'dist', 'index.html'));
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: { server: httpServer } },
       appType: 'spa'
     });
     app.use(vite.middlewares);
@@ -670,7 +673,7 @@ async function startServer() {
   }
 
   const PORT = Number(process.env.PORT) || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
   });
 }

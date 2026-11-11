@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AppState, User, Attachment, ScheduleDay } from '../../types';
 import * as H from '../../utils/helpers';
 import * as DB from '../../services/db';
+import * as Notifications from '../../services/notifications';
 import { Button, Select, Card, MultiFileUploader, FileDisplay } from '../../components/ui';
 import { Edit, Trash2, X } from 'lucide-react';
 
@@ -122,7 +123,7 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
         const newHW = { id: H.uid('hw'), schoolId: targetSchoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: newAttachments, fromId: user.id, lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
         state.homework.push(newHW);
         await DB.saveSchoolEntity(targetSchoolId, 'homework', newHW.id, newHW);
-        fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+        Notifications.triggerServerPushCheck().catch(() => {});
      }
      onUpdate({ ...state }); alert(t('saved')); setText(''); setFiles([]); setExistingAttachments([]);
    };

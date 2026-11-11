@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppState, User, Message, Attachment } from '../types';
 import * as H from '../utils/helpers';
 import * as DB from '../services/db';
+import * as Notifications from '../services/notifications';
 import { Button, Input, Card, Modal, FileDisplay, MultiFileUploader, SearchableSelect, Select } from '../components/ui';
 import { Trash2, Edit, Shield, CheckCheck, Clock, Eye, Users, Search, Info, X } from 'lucide-react';
 
@@ -1149,7 +1150,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         for (const sId of targetSchoolIds) {
           await DB.saveSchoolEntity(sId, collectionName, newItem.id, { ...newItem, schoolId: sId });
         }
-        fetch('./api/push/trigger-check', { method: 'POST' }).catch(() => {});
+        Notifications.triggerServerPushCheck().catch(() => {});
       }
 
       onUpdate({ ...state });

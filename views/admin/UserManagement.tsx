@@ -94,6 +94,17 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const handleDragLeave = (e: React.DragEvent) => { e.currentTarget.classList.remove('dragging-over'); };
     const handleDrop = (e: React.DragEvent, targetId: string) => { e.preventDefault(); e.currentTarget.classList.remove('dragging-over'); if (!draggedItemId || draggedItemId === targetId) return; const oldIdx = state.userOrder.indexOf(draggedItemId); const newIdx = state.userOrder.indexOf(targetId); if (oldIdx !== -1 && newIdx !== -1) { const newOrder = [...state.userOrder]; newOrder.splice(oldIdx, 1); newOrder.splice(newIdx, 0, draggedItemId); state.userOrder = newOrder; setSortField('default'); onUpdate(state); } };
     const toggleRow = (id: string) => setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+    const userSaveTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+    const scheduleUserEntitySave = (sid: string, usr: User) => {
+        const key = `${sid}__${usr.id}`;
+        if (userSaveTimersRef.current[key]) {
+            clearTimeout(userSaveTimersRef.current[key]);
+        }
+        userSaveTimersRef.current[key] = setTimeout(() => {
+            delete userSaveTimersRef.current[key];
+            DB.saveSchoolEntity(sid, 'users', usr.id, usr).catch(() => {});
+        }, 350);
+    };
     const updateField = async (userId: string, field: keyof User, val: any) => { 
         const uIndex = state.users.findIndex(u => u.id === userId); 
         if (uIndex > -1) { 
@@ -200,15 +211,24 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                 (state.users[uIndex] as any)[field] = val; 
             } 
             state.users = [...state.users];
-            const updatedUsr = state.users[uIndex];
+            const updatedUsr = { ...state.users[uIndex] };
+            state.users[uIndex] = updatedUsr;
             const sid = updatedUsr?.schoolId && updatedUsr.schoolId !== 'global' ? updatedUsr.schoolId : 'school_1';
             onUpdate(state); 
-            DB.saveSchoolEntity(sid, 'users', updatedUsr.id, updatedUsr).catch(() => {});
-            DB.saveSchoolCache(sid, state).catch(() => {});
-            if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
+            scheduleUserEntitySave(sid, updatedUsr);
         } 
     };
-    const updateCustomRole = (userId: string, val: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { state.users[uIndex].customRole = val; onUpdate(state); } };
+    const updateCustomRole = (userId: string, val: string) => {
+        const uIndex = state.users.findIndex(u => u.id === userId);
+        if (uIndex > -1) {
+            state.users[uIndex] = { ...state.users[uIndex], customRole: val };
+            state.users = [...state.users];
+            const updatedUsr = state.users[uIndex];
+            const sid = updatedUsr?.schoolId && updatedUsr.schoolId !== 'global' ? updatedUsr.schoolId : 'school_1';
+            onUpdate(state);
+            scheduleUserEntitySave(sid, updatedUsr);
+        }
+    };
     const addClassToTeacher = (userId: string, classKey: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { const u = state.users[uIndex]; if (!u.classes) u.classes = []; if (!u.classes.includes(classKey)) { u.classes.push(classKey); onUpdate(state); } } };
     
     // UPDATED REMOVE LOGIC WITH MODAL TRIGGER

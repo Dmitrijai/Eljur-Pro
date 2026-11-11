@@ -116,94 +116,102 @@ export const syncUserAuthUidMap = async (schoolId: string, userId: string, role:
   }
 };
 
+const KNOWN_FB_EMAILS_KEY = 'eljur_fb_known_emails_v2';
+
+const computeShortPwdTag = (pwd: string): string => {
+  let h = 2166136261;
+  for (let i = 0; i < pwd.length; i++) {
+    h ^= pwd.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+};
+
+let authSessionQueue: Promise<any> = Promise.resolve();
+
 /**
- * Reliably establishes a Firebase Auth session for internal ABAC token enforcement.
- * Tries multiple fallback passwords and creates an alternative alias credential if previous password is unknown.
+ * Reliably establishes a Firebase Auth session for internal ABAC token enforcement
+ * without triggering repeated 400 Bad Request password-guessing loops.
  */
-export const ensureFirebaseAuthSession = async (
+export const ensureFirebaseAuthSession = (
   virtualEmail: string,
   preferredPassword: string,
-  candidatePasswords: string[] = [],
+  _candidatePasswords: string[] = [],
   metadata?: { schoolId: string; userId: string; role: string }
 ): Promise<UserCredential> => {
-  let cred: UserCredential;
-
-  // If already signed in with this exact email, reuse existing session
-  if (auth.currentUser && auth.currentUser.email?.toLowerCase() === virtualEmail.toLowerCase()) {
-    cred = { user: auth.currentUser } as UserCredential;
-  } else {
+  const run = async (): Promise<UserCredential> => {
     const formatPwd = (p: string) => (p && p.length >= 6 ? p : `${p || 'eljur'}__eljur123`);
+    const targetPwd = formatPwd(preferredPassword);
+    const pwdTag = computeShortPwdTag(targetPwd);
+    const taggedEmail = virtualEmail.toLowerCase().replace('@', `_p${pwdTag}@`);
 
-    const passwordsToTry = Array.from(new Set([
-      formatPwd(preferredPassword),
-      preferredPassword,
-      `${preferredPassword}__eljur123`,
-      ...candidatePasswords.flatMap(p => [formatPwd(p), p, `${p}__eljur123`]),
-      'dir123',
-      'dir123__eljur123',
-      'teach123',
-      'teach123__eljur123',
-      'pass123',
-      'pass123__eljur123',
-      'emp123',
-      'emp123__eljur123',
-      'admin123',
-      'admin__eljur123',
-      'admin12345',
-      'eljur123456',
-      'creator123456',
-      'pass1__eljur123',
-      '123__eljur123'
-    ])).filter(p => p && p.length >= 6);
+    let cred: UserCredential;
 
-    let signedIn = false;
-    // 1. Try signing in with all known candidate passwords
-    for (const pwd of passwordsToTry) {
+    if (auth.currentUser && auth.currentUser.email?.toLowerCase() === taggedEmail) {
+      cred = { user: auth.currentUser } as UserCredential;
+    } else {
+      let knownEmails: Record<string, boolean> = {};
       try {
-        const userCred = await signInWithEmailAndPassword(auth, virtualEmail, pwd);
-        if (pwd !== formatPwd(preferredPassword) && auth.currentUser) {
+        const raw = localStorage.getItem(KNOWN_FB_EMAILS_KEY);
+        if (raw) knownEmails = JSON.parse(raw) || {};
+      } catch {}
+
+      const markEmailKnown = (emailKey: string) => {
+        try {
+          knownEmails[emailKey] = true;
+          localStorage.setItem(KNOWN_FB_EMAILS_KEY, JSON.stringify(knownEmails));
+        } catch {}
+      };
+
+      if (knownEmails[taggedEmail]) {
+        try {
+          cred = await signInWithEmailAndPassword(auth, taggedEmail, targetPwd);
+        } catch {
           try {
-            await updatePassword(auth.currentUser, formatPwd(preferredPassword));
+            cred = await createUserWithEmailAndPassword(auth, taggedEmail, targetPwd);
+            markEmailKnown(taggedEmail);
           } catch {
-            // ignore if re-auth required
+            const uniqueSuffix = Math.random().toString(36).substring(2, 7);
+            const aliasEmail = taggedEmail.replace('@', `_${uniqueSuffix}@`);
+            cred = await createUserWithEmailAndPassword(auth, aliasEmail, targetPwd);
+            markEmailKnown(aliasEmail);
           }
         }
-        cred = userCred;
-        signedIn = true;
-        break;
-      } catch (err: any) {
-        if (err.code === 'auth/user-not-found') {
-          break;
+      } else {
+        try {
+          cred = await createUserWithEmailAndPassword(auth, taggedEmail, targetPwd);
+          markEmailKnown(taggedEmail);
+        } catch (createErr: any) {
+          if (createErr?.code === 'auth/email-already-in-use') {
+            markEmailKnown(taggedEmail);
+            try {
+              cred = await signInWithEmailAndPassword(auth, taggedEmail, targetPwd);
+            } catch {
+              const uniqueSuffix = Math.random().toString(36).substring(2, 7);
+              const aliasEmail = taggedEmail.replace('@', `_${uniqueSuffix}@`);
+              cred = await createUserWithEmailAndPassword(auth, aliasEmail, targetPwd);
+              markEmailKnown(aliasEmail);
+            }
+          } else {
+            throw createErr;
+          }
         }
       }
     }
 
-    if (!signedIn) {
-      // 2. Try creating the user if not found
+    if (metadata && cred!.user?.uid) {
+      await syncUserAuthUidMap(metadata.schoolId, metadata.userId, metadata.role, cred!.user.uid);
       try {
-        cred = await createUserWithEmailAndPassword(auth, virtualEmail, formatPwd(preferredPassword));
-      } catch (createErr: any) {
-        // 3. If email is already in use with an unrecoverable password, create an alternative alias email
-        if (createErr.code === 'auth/email-already-in-use') {
-          const uniqueSuffix = Math.random().toString(36).substring(2, 7);
-          const aliasEmail = virtualEmail.replace('@', `_${uniqueSuffix}@`);
-          cred = await createUserWithEmailAndPassword(auth, aliasEmail, formatPwd(preferredPassword));
-        } else {
-          throw createErr;
-        }
-      }
+        await cred!.user.getIdToken();
+      } catch {}
     }
-  }
 
-  // Atomically guarantee authUidMap exists before returning credential
-  if (metadata && cred!.user?.uid) {
-    await syncUserAuthUidMap(metadata.schoolId, metadata.userId, metadata.role, cred!.user.uid);
-    try {
-      await cred!.user.getIdToken(true);
-    } catch {}
-  }
+    return cred!;
+  };
 
-  return cred!;
+  const next = authSessionQueue.then(run, run);
+  authSessionQueue = next.catch(() => {});
+  return next;
 };
 
 /**
@@ -212,9 +220,13 @@ export const ensureFirebaseAuthSession = async (
  */
 export const fetchUsersForLoginLookup = async (): Promise<User[]> => {
   try {
-    const currentEmail = auth.currentUser?.email?.toLowerCase();
-    if (currentEmail !== 'login_lookup@school1.eljur.org') {
-      await ensureFirebaseAuthSession('login_lookup@school1.eljur.org', 'eljur_lookup_123456');
+    if (!auth.currentUser) {
+      await ensureFirebaseAuthSession(
+        'login_lookup@school1.eljur.org',
+        'eljur_lookup_123456',
+        [],
+        { schoolId: 'school_1', userId: 'u_creator', role: 'creator' }
+      );
     }
     const schoolIds = new Set<string>(['school_1']);
     const lastSchoolId = localStorage.getItem('eljur_active_school_id');
