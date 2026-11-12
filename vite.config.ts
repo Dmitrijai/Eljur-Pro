@@ -10,7 +10,6 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
-        hmr: false,
       },
       plugins: [
         react(),
@@ -18,22 +17,19 @@ export default defineConfig(({ mode }) => {
           registerType: 'autoUpdate',
           includeAssets: [
             'favicon.ico',
-            'tab-favicon.png',
+            'favicon.png',
+            'favicon-64x64.png',
             'assets/icon.png',
             'apple-touch-icon.png',
             'pwa-192x192.png',
             'pwa-512x512.png',
             'pwa-maskable-512x512.png',
-            'sw-notifications.js',
             'robots.txt',
             'sitemap.xml',
             'google74c682c95adf1ccf.html',
             'yandex_b6e1c962dd71d738.html',
           ],
           workbox: {
-            importScripts: ['sw-notifications.js'],
-            skipWaiting: true,
-            clientsClaim: true,
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
             globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,ttf}'],
             globIgnores: ['**/assets/aistudio/**', '**/google*.html', '**/yandex*.html'],

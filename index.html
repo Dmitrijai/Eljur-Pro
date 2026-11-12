@@ -9,15 +9,21 @@
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(regs) {
           regs.forEach(function(reg) {
-            if (reg.active && reg.active.scriptURL && reg.active.scriptURL.indexOf('dev-sw.js') !== -1) {
+            if (reg.pushManager && typeof reg.pushManager.getSubscription === 'function') {
+              reg.pushManager.getSubscription().then(function(sub) {
+                if (sub) sub.unsubscribe().catch(function() {});
+              }).catch(function() {});
+            }
+            var scriptUrl = (reg.active && reg.active.scriptURL) || (reg.installing && reg.installing.scriptURL) || (reg.waiting && reg.waiting.scriptURL) || '';
+            if (scriptUrl.indexOf('dev-sw.js') !== -1 || scriptUrl.indexOf('firebase-messaging-sw') !== -1) {
               reg.unregister().then(function() {
                 if ('caches' in window) {
                   caches.keys().then(function(keys) {
                     Promise.all(keys.map(function(k) { return caches.delete(k); })).then(function() {
-                      window.location.reload();
+                      if (scriptUrl.indexOf('dev-sw.js') !== -1) window.location.reload();
                     });
                   });
-                } else {
+                } else if (scriptUrl.indexOf('dev-sw.js') !== -1) {
                   window.location.reload();
                 }
               });
@@ -54,9 +60,9 @@
     <meta name="twitter:description" content="ЭлЖур Про (E-Journal Pro / Eljur Pro) — современный электронный журнал и дневник образовательного учреждения.">
     <meta name="twitter:image" content="https://dmitrijai.github.io/Eljur-Pro/pwa-512x512.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/png" sizes="256x256" href="tab-favicon.png?v=2">
-    <link rel="icon" type="image/x-icon" href="favicon.ico?v=2">
-    <link rel="shortcut icon" type="image/png" href="tab-favicon.png?v=2">
+    <link rel="icon" type="image/png" sizes="192x192" href="favicon.png?v=2">
+    <link rel="icon" type="image/png" sizes="64x64" href="favicon-64x64.png?v=2">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico?v=2">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="192x192" href="pwa-192x192.png">
@@ -570,6 +576,10 @@
         html, body {
             overflow-x: hidden;
             max-width: 100vw;
+        }
+        .break-words, .whitespace-pre-wrap, .whitespace-pre-line {
+            overflow-wrap: anywhere !important;
+            word-break: break-word !important;
         }
         .hide-scrollbar::-webkit-scrollbar {
             display: none;

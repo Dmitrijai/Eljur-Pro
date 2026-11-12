@@ -34,22 +34,15 @@ export const Button: React.FC<ButtonProps> = ({ variant = 'secondary', size = 'm
 // --- INPUT ---
 export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ className = '', onChange, maxLength, ...props }) => {
   const hasWidth = /\bw-\w+/.test(className);
-  const resolvedMaxLength =
-    maxLength !== undefined
-      ? maxLength
-      : props.type === 'url'
-      ? 500
-      : props.type === 'date' || props.type === 'time' || props.type === 'number'
-      ? undefined
-      : 120;
+  const effectiveMaxLength = maxLength !== undefined ? maxLength : (props.type === 'number' ? 10 : 200);
   const handleSafeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (onChange) {
       if (typeof e.target.value === 'string') {
         if (/<\s*\/?\s*(script|iframe|object|embed)|\bon[a-z]+\s*=|(?:javascript|vbscript)\s*:/i.test(e.target.value)) {
           e.target.value = H.sanitizeInputText(e.target.value);
         }
-        if (typeof resolvedMaxLength === 'number' && resolvedMaxLength > 0 && e.target.value.length > resolvedMaxLength) {
-          e.target.value = e.target.value.slice(0, resolvedMaxLength);
+        if (effectiveMaxLength > 0 && e.target.value.length > effectiveMaxLength) {
+          e.target.value = e.target.value.slice(0, effectiveMaxLength);
         }
       }
       onChange(e);
@@ -58,8 +51,8 @@ export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({ c
   return (
     <input 
       className={`block ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-xs focus:border-blue-500 focus:ring-blue-500 text-xs sm:text-sm py-1.5 px-2.5 sm:py-2.5 sm:px-3 border transition-colors dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`} 
+      maxLength={effectiveMaxLength}
       onChange={handleSafeChange}
-      maxLength={resolvedMaxLength}
       {...props} 
     />
   );
@@ -436,9 +429,9 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({ options, val
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 sm:w-3.5 sm:h-3.5 sm:left-3" />
                 <input 
                   autoFocus
-                  maxLength={80}
+                  maxLength={100}
                   value={search} 
-                  onChange={e => setSearch(e.target.value.slice(0, 80))} 
+                  onChange={e => setSearch(e.target.value.slice(0, 100))} 
                   placeholder={t('search_placeholder')} 
                   className="w-full text-xs sm:text-sm pl-7 sm:pl-9 pr-2.5 sm:pr-3 py-1 sm:py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                 />
@@ -1303,12 +1296,6 @@ export const SideNavDrawer: React.FC<{
             <div className="flex items-center gap-2 min-w-0">
               <img
                 src={`${import.meta.env.BASE_URL}assets/icon.png`}
-                onError={(e) => {
-                  const img = e.currentTarget;
-                  if (!img.src.endsWith('tab-favicon.png')) {
-                    img.src = `${import.meta.env.BASE_URL}tab-favicon.png`;
-                  }
-                }}
                 alt="ЭлЖур"
                 draggable={false}
                 className="w-7 h-7 object-contain shrink-0 select-none"

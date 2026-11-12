@@ -339,6 +339,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                             <Input 
                                 type="number" 
                                 min="1"
+                                maxLength={4}
                                 className="w-11 sm:w-20 h-6 sm:h-10 text-[11px] sm:text-sm !py-0.5 !px-1 sm:!py-2.5 sm:!px-3 text-center" 
                                 value={isNaN(gradingSettings.minGrade) ? '' : gradingSettings.minGrade} 
                                 onChange={e => setGradingSettings({...gradingSettings, minGrade: parseInt(e.target.value)})}
@@ -347,6 +348,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                             <Input 
                                 type="number" 
                                 min="1"
+                                maxLength={4}
                                 className="w-11 sm:w-20 h-6 sm:h-10 text-[11px] sm:text-sm !py-0.5 !px-1 sm:!py-2.5 sm:!px-3 text-center" 
                                 value={isNaN(gradingSettings.maxGrade) ? '' : gradingSettings.maxGrade} 
                                 onChange={e => setGradingSettings({...gradingSettings, maxGrade: parseInt(e.target.value)})}
@@ -373,6 +375,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                                 <Input 
                                     type="number" 
                                     min="1"
+                                    maxLength={4}
                                     className="w-11 sm:w-20 h-6 sm:h-10 text-[11px] sm:text-sm !py-0.5 !px-1 sm:!py-2.5 sm:!px-3 text-center" 
                                     value={isNaN(gradingSettings.minWeight) ? '' : gradingSettings.minWeight} 
                                     onChange={e => setGradingSettings({...gradingSettings, minWeight: parseInt(e.target.value)})}
@@ -381,6 +384,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                                 <Input 
                                     type="number" 
                                     min="1"
+                                    maxLength={4}
                                     className="w-11 sm:w-20 h-6 sm:h-10 text-[11px] sm:text-sm !py-0.5 !px-1 sm:!py-2.5 sm:!px-3 text-center" 
                                     value={isNaN(gradingSettings.maxWeight) ? '' : gradingSettings.maxWeight} 
                                     onChange={e => setGradingSettings({...gradingSettings, maxWeight: parseInt(e.target.value)})}
@@ -438,7 +442,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                         <div className="space-y-2.5 sm:space-y-6">
                             <div>
                                 <label className="block text-[10px] sm:text-xs font-bold text-slate-500 uppercase mb-1 sm:mb-2">{t('name_label')}</label>
-                                <Input maxLength={40} value={typeName} onChange={e => setTypeName(e.target.value.slice(0, 40))} placeholder={t('example_essay')} className="h-7 sm:h-10 text-[11px] sm:text-sm !py-1 !px-2 sm:!py-2.5 sm:!px-3" />
+                                <Input maxLength={60} value={typeName} onChange={e => setTypeName(e.target.value)} placeholder={t('example_essay')} className="h-7 sm:h-10 text-[11px] sm:text-sm !py-1 !px-2 sm:!py-2.5 sm:!px-3" />
                             </div>
                             
                             {/* Conditionally render Weight inputs based on Global Setting */}
@@ -449,6 +453,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                                         <div className="w-full sm:flex-1">
                                             <Input 
                                                 type={isDynamic || isNoWeight ? 'text' : 'number'}
+                                                maxLength={4}
                                                 min={initialGradingSystem?.minWeight} 
                                                 max={initialGradingSystem?.maxWeight} 
                                                 value={isDynamic || isNoWeight ? '-' : typeWeight} 
@@ -624,6 +629,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                                             <Input 
                                                 type="number" 
                                                 min="0"
+                                                maxLength={4}
                                                 className={`w-11 sm:w-20 h-6 sm:h-10 !py-0.5 !px-1 sm:!py-2.5 sm:!px-3 text-[11px] sm:text-sm text-center font-bold mx-auto ${isAuto ? 'bg-slate-50 text-slate-500 border-transparent shadow-none' : 'bg-white border-slate-200'}`}
                                                 value={displayMin}
                                                 disabled={isAuto}

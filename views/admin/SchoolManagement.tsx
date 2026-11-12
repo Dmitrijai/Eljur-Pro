@@ -405,19 +405,19 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="text-xs font-bold text-slate-500">{t('school_name')}</label>
-                        <Input maxLength={100} value={newName} onChange={e => setNewName(e.target.value.slice(0, 100))} placeholder={t('school_placeholder')} />
+                        <Input maxLength={150} value={newName} onChange={e => setNewName(e.target.value)} placeholder={t('school_placeholder')} />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-slate-500">{t('director_fio')}</label>
-                        <Input maxLength={80} value={directorFio} onChange={e => setDirectorFio(e.target.value.slice(0, 80))} />
+                        <Input maxLength={100} value={directorFio} onChange={e => setDirectorFio(e.target.value)} />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-slate-500">{t('director_login')}</label>
-                        <Input maxLength={50} value={directorLogin} onChange={e => setDirectorLogin(e.target.value.slice(0, 50))} />
+                        <Input maxLength={50} value={directorLogin} onChange={e => setDirectorLogin(e.target.value)} />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-slate-500">{t('director_pass')}</label>
-                        <Input maxLength={64} value={directorPass} onChange={e => setDirectorPass(e.target.value.slice(0, 64))} />
+                        <Input maxLength={64} value={directorPass} onChange={e => setDirectorPass(e.target.value)} />
                     </div>
                 </div>
                 <Button onClick={addSchool} variant="primary" className="mt-4">{t('create_school')}</Button>
@@ -440,7 +440,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                     <div>
                                         <label className="text-xs font-bold text-slate-500">{t('title')}</label>
-                                        <Input maxLength={100} value={editName} onChange={e => setEditName(e.target.value.slice(0, 100))} />
+                                        <Input maxLength={150} value={editName} onChange={e => setEditName(e.target.value)} />
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-slate-500">{t('director')}</label>
@@ -463,7 +463,7 @@ export const SchoolManagement = ({ state, onUpdate, lang }: { state: AppState, o
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-slate-500">{t('school_id')}</label>
-                                        <Input maxLength={40} value={editSchoolIdVal} onChange={e => setEditSchoolIdVal(e.target.value.slice(0, 40))} />
+                                        <Input maxLength={64} value={editSchoolIdVal} onChange={e => setEditSchoolIdVal(e.target.value)} />
                                     </div>
                                 </div>
                                 <div className="flex gap-2">

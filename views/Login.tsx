@@ -485,12 +485,6 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           >
             <img
               src={`${import.meta.env.BASE_URL}assets/icon.png`}
-              onError={(e) => {
-                const img = e.currentTarget;
-                if (!img.src.endsWith('tab-favicon.png')) {
-                  img.src = `${import.meta.env.BASE_URL}tab-favicon.png`;
-                }
-              }}
               alt="ЭлЖур"
               draggable={false}
               className="w-full h-full object-contain pointer-events-none select-none [-webkit-user-drag:none] [-webkit-touch-callout:none]"
@@ -512,16 +506,16 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           </div>
           <div>
             <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('login')}</label>
-            <Input maxLength={50} value={login} onChange={(e) => setLogin(e.target.value.slice(0, 50))} placeholder={t('enter_login')} className="h-9 sm:h-12 text-xs sm:text-base" />
+            <Input maxLength={50} value={login} onChange={(e) => setLogin(e.target.value)} placeholder={t('enter_login')} className="h-9 sm:h-12 text-xs sm:text-base" />
           </div>
           <div>
             <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1 sm:mb-2 dark:text-slate-300">{t('password')}</label>
             <div className="relative">
               <Input
-                type={showPassword ? 'text' : 'password'}
                 maxLength={64}
+                type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value.slice(0, 64))}
+                onChange={(e) => setPassword(e.target.value)}
                 placeholder={t('enter_pass')}
                 className="h-9 sm:h-12 text-xs sm:text-base pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden"
               />
@@ -567,10 +561,10 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
               </label>
               <div className="relative">
                 <Input 
-                  type={showCreatorPassword ? 'text' : 'password'} 
                   maxLength={64}
+                  type={showCreatorPassword ? 'text' : 'password'} 
                   value={creatorPassword} 
-                  onChange={(e) => setCreatorPassword(e.target.value.slice(0, 64))} 
+                  onChange={(e) => setCreatorPassword(e.target.value)} 
                   placeholder="••••••••" 
                   className="h-9 sm:h-12 text-xs sm:text-base pr-10 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden" 
                   autoFocus

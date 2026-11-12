@@ -4,10 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { AppState, User, EducationalResource } from '../types';
 import * as DB from '../services/db';
 import * as H from '../utils/helpers';
-import * as Notifications from '../services/notifications';
 import { hashPassword, generateSalt } from '../utils/auth';
 import { Button, Input, Select, Card, FileUploader, Modal } from '../components/ui';
-import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle, Plus, Bell } from 'lucide-react';
+import { Eye, EyeOff, Trash2, Check, Sparkles, Clock, AlertCircle, Plus } from 'lucide-react';
 import { defaultState } from '../App';
 
 interface SettingsProps {
@@ -28,12 +27,6 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const [eduUrlSaved, setEduUrlSaved] = useState(false);
   const [fontList, setFontList] = useState<any[]>([]);
   const [showSecretPass, setShowSecretPass] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabledState] = useState<boolean>(() => Notifications.areNotificationsEnabled());
-  const [sysNotificationPerm, setSysNotificationPerm] = useState<string>(() => Notifications.getSystemNotificationPermission());
-  const [allowBtnStage, setAllowBtnStage] = useState<'visible' | 'check' | 'hidden'>(() => {
-    const initialPerm = Notifications.getSystemNotificationPermission();
-    return initialPerm === 'granted' || initialPerm === 'unsupported' ? 'hidden' : 'visible';
-  });
   
   // Time Machine State
   const [virtualDatePart, setVirtualDatePart] = useState('');
@@ -83,62 +76,6 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       updateInputsFromWorldTime();
     });
   }, []);
-
-  // Real-time system notification permission detector + animated checkmark morph
-  useEffect(() => {
-    let permStatusObj: PermissionStatus | null = null;
-    let hideTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-
-    const triggerGrantedAnimation = () => {
-      setAllowBtnStage(prev => {
-        if (prev === 'hidden' || prev === 'check') return prev;
-        const targetNotifyUser = Notifications.getNotificationTargetUser(user, state);
-        Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, (state.settings.language || 'ru') as 'ru' | 'en').catch(() => {});
-        if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          setAllowBtnStage('hidden');
-        }, 850);
-        return 'check';
-      });
-    };
-
-    const syncPermissionNow = () => {
-      const currentPerm = Notifications.getSystemNotificationPermission();
-      setSysNotificationPerm(prev => (prev === currentPerm ? prev : currentPerm));
-      if (currentPerm === 'granted') {
-        triggerGrantedAnimation();
-      } else if (currentPerm === 'unsupported') {
-        setAllowBtnStage('hidden');
-      }
-    };
-
-    syncPermissionNow();
-
-    if (typeof navigator !== 'undefined' && 'permissions' in navigator && typeof navigator.permissions?.query === 'function') {
-      navigator.permissions
-        .query({ name: 'notifications' as PermissionName })
-        .then(status => {
-          permStatusObj = status;
-          status.onchange = () => {
-            syncPermissionNow();
-          };
-        })
-        .catch(() => {});
-    }
-
-    window.addEventListener('focus', syncPermissionNow);
-    document.addEventListener('visibilitychange', syncPermissionNow);
-    pollInterval = setInterval(syncPermissionNow, 400);
-
-    return () => {
-      if (permStatusObj) permStatusObj.onchange = null;
-      if (hideTimer) clearTimeout(hideTimer);
-      if (pollInterval) clearInterval(pollInterval);
-      window.removeEventListener('focus', syncPermissionNow);
-      document.removeEventListener('visibilitychange', syncPermissionNow);
-    };
-  }, [user?.id, state.settings.language]);
 
   // Validation Effect
   useEffect(() => {
@@ -737,7 +674,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                <div>
                  <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('school_name')}</label>
                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-                   <Input maxLength={100} value={localName} onChange={e => setLocalName(e.target.value.slice(0, 100))} />
+                   <Input maxLength={150} value={localName} onChange={e => setLocalName(e.target.value)} />
                    <Button variant="primary" size="sm" onClick={handleSaveName}>{t('save')}</Button>
                  </div>
                </div>
@@ -752,10 +689,10 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                        <div className="flex-1 flex flex-col sm:flex-row gap-2 min-w-0">
                          <Input
                            type="text"
-                           maxLength={100}
+                           maxLength={120}
                            placeholder={t('educational_resource_title_placeholder')}
                            value={res.title}
-                           onChange={e => handleUpdateEduResourceRow(res.id, 'title', e.target.value.slice(0, 100))}
+                           onChange={e => handleUpdateEduResourceRow(res.id, 'title', e.target.value)}
                            className="sm:flex-1"
                          />
                          <Input
@@ -763,7 +700,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            maxLength={500}
                            placeholder={t('educational_resource_placeholder')}
                            value={res.url}
-                           onChange={e => handleUpdateEduResourceRow(res.id, 'url', e.target.value.slice(0, 500))}
+                           onChange={e => handleUpdateEduResourceRow(res.id, 'url', e.target.value)}
                            className="sm:flex-1"
                          />
                        </div>
@@ -904,7 +841,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                         maxLength={30}
                         value={state.settings.secretKey || 'Space'} 
                         onChange={e => {
-                          const val = e.target.value.slice(0, 30);
+                          const val = e.target.value;
                           state.settings.secretKey = val;
                           DB.savePublicCreatorGate(user.schoolId || 'school_1', {
                             secretKey: val,
@@ -924,6 +861,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                         type="number"
                         min="1"
                         max="20"
+                        maxLength={2}
                         value={state.settings.secretCount || 4} 
                         onChange={e => {
                           const count = parseInt(e.target.value) || 4;
@@ -943,8 +881,8 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                      <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('secret_pass')}</label>
                      <div className="relative">
                          <Input 
-                            type={showSecretPass ? 'text' : 'password'}
                             maxLength={64}
+                            type={showSecretPass ? 'text' : 'password'}
                             value={
                               state.settings.adminPassword !== undefined && state.settings.adminPassword !== ''
                                 ? state.settings.adminPassword
@@ -952,7 +890,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                             } 
                             placeholder={t('enter_creator_pass')}
                             onChange={async e => {
-                              const newPass = e.target.value.slice(0, 64);
+                              const newPass = e.target.value;
                               state.settings.adminPassword = newPass;
                               const creatorUser = state.users.find(u => u.role === 'creator');
                               if (creatorUser) creatorUser.password = newPass;
@@ -1071,124 +1009,6 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            <span className="block text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 leading-tight mt-0.5">{t('enable_seasonal')}</span>
                        </div>
                    </label>
-               </div>
-
-               <div className="col-span-1 md:col-span-2 space-y-2.5">
-                 {(() => {
-                   const targetNotifyUser = Notifications.getNotificationTargetUser(user, state);
-
-                   return (
-                     <div className="rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 p-2.5 sm:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                       <label className="flex items-center gap-2 sm:gap-3 cursor-pointer flex-1 min-w-0">
-                         <div className={`w-7 h-4 sm:w-10 sm:h-6 rounded-full p-0.5 sm:p-1 transition-colors shrink-0 ${notificationsEnabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                           <div className={`w-3 h-3 sm:w-4 sm:h-4 bg-white rounded-full shadow-sm transform transition-transform ${notificationsEnabled ? 'translate-x-3 sm:translate-x-4' : 'translate-x-0'}`}></div>
-                         </div>
-                         <input
-                           type="checkbox"
-                           className="hidden"
-                           checked={notificationsEnabled}
-                           onChange={(e) => {
-                             const val = e.target.checked;
-                             const permPromise = val && Notifications.getSystemNotificationPermission() === 'default'
-                               ? Notifications.requestSystemNotificationPermission()
-                               : null;
-                             Notifications.setNotificationsEnabled(val);
-                             setNotificationsEnabledState(val);
-                             Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
-                             if (permPromise) {
-                               permPromise.then((perm) => {
-                                 setSysNotificationPerm(perm);
-                               });
-                             }
-                           }}
-                         />
-                         <div className="min-w-0 flex-1">
-                           <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] sm:text-sm flex items-center gap-1.5 sm:gap-2 leading-tight">
-                             <Bell size={13} className="text-blue-600 dark:text-blue-400 shrink-0 sm:w-4 sm:h-4" />
-                             {lang === 'ru' ? 'Push-уведомления ЭлЖур' : 'ElZhur Push Notifications'}
-                           </span>
-                         </div>
-                       </label>
-
-                       <div className="flex flex-row flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0 w-full sm:w-auto overflow-x-auto no-scrollbar">
-                         {allowBtnStage !== 'hidden' && sysNotificationPerm !== 'unsupported' && (
-                           <button
-                             type="button"
-                             disabled={allowBtnStage === 'check'}
-                             onClick={() => {
-                               // Trigger native OS/Browser permission prompt synchronously in user gesture
-                               const permPromise = Notifications.requestSystemNotificationPermission();
-                               permPromise.then((perm) => {
-                                 setSysNotificationPerm(perm);
-                                 if (perm === 'granted') {
-                                   setAllowBtnStage('check');
-                                   Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
-                                   setTimeout(() => {
-                                     setAllowBtnStage('hidden');
-                                   }, 850);
-                                 } else if (perm === 'denied') {
-                                   notify(
-                                     lang === 'ru'
-                                       ? 'Уведомления заблокированы в браузере — разрешите их в значке замка в адресной строке или настройках сайта'
-                                       : 'Notifications are blocked in browser settings — please allow them in site permissions',
-                                     'error'
-                                   );
-                                 }
-                               });
-                             }}
-                             className={`inline-flex items-center justify-center font-semibold rounded-xl border transition-all duration-500 ease-out whitespace-nowrap shrink-0 cursor-pointer select-none ${
-                               allowBtnStage === 'check'
-                                 ? 'bg-emerald-500 border-emerald-500 text-white w-8 h-7 sm:w-9 sm:h-8 px-0 scale-105 shadow-md shadow-emerald-500/25'
-                                 : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700 text-[11px] sm:text-xs py-1 px-2 sm:px-2.5 h-7 sm:h-8 shadow-xs'
-                             }`}
-                           >
-                             {allowBtnStage === 'check' ? (
-                               <Check size={15} className="stroke-[2.75] animate-in zoom-in duration-200" />
-                             ) : (
-                               <span>{lang === 'ru' ? 'Разрешить в системе' : 'Allow in OS'}</span>
-                             )}
-                           </button>
-                         )}
-                         <Button
-                           variant="secondary"
-                           className="text-[11px] sm:text-xs py-1 px-2 sm:px-2.5 h-7 sm:h-8 whitespace-nowrap shrink-0"
-                           onClick={() => {
-                             const permPromise = Notifications.getSystemNotificationPermission() === 'default'
-                               ? Notifications.requestSystemNotificationPermission()
-                               : null;
-                             if (permPromise) {
-                               permPromise.then(perm => setSysNotificationPerm(perm));
-                             }
-                             Notifications.syncServiceWorkerWatcher(state, targetNotifyUser, lang as 'ru' | 'en').catch(() => {});
-                             const recipient = targetNotifyUser || user;
-                             const testItem: Notifications.EljurNotificationItem = {
-                               id: `test_notify_${Date.now()}`,
-                               category: recipient.role === 'student' ? 'grade' : 'message',
-                               title:
-                                 recipient.role === 'student'
-                                   ? (lang === 'ru' ? '⭐ Новая оценка: 5 (Математика)' : '⭐ New grade: 5 (Mathematics)')
-                                   : (lang === 'ru' ? '💬 Новое сообщение • ЭлЖур' : '💬 New message • ElZhur'),
-                               body:
-                                 recipient.role === 'student'
-                                   ? (lang === 'ru' ? `Проверка уведомлений для ${H.formatShortName(recipient.fio)} • Ответ на уроке` : `Test notification for ${H.formatShortName(recipient.fio)}`)
-                                   : (lang === 'ru' ? `Проверка уведомлений для ${H.formatShortName(recipient.fio)}` : `Test notification for ${H.formatShortName(recipient.fio)}`),
-                               targetTab: recipient.role === 'student' ? 'grades' : 'messages',
-                               targetUserId: recipient.id,
-                               targetUserFio: recipient.fio,
-                               targetUserRole: recipient.role,
-                               schoolId: recipient.schoolId || 'school_1',
-                               createdAt: Date.now()
-                             };
-                             window.dispatchEvent(new CustomEvent('eljur-test-notification', { detail: testItem }));
-                             Notifications.sendServerTestPush(testItem).catch(() => {});
-                           }}
-                         >
-                           {lang === 'ru' ? 'Проверить уведомление' : 'Test Notification'}
-                         </Button>
-                       </div>
-                     </div>
-                   );
-                 })()}
                </div>
             </div>
           );

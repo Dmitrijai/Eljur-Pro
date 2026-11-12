@@ -435,9 +435,9 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
                         <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                         <input
                             type="text"
-                            maxLength={80}
+                            maxLength={100}
                             value={searchFio}
-                            onChange={e => setSearchFio(e.target.value.slice(0, 80))}
+                            onChange={e => setSearchFio(e.target.value.slice(0, 100))}
                             placeholder={lang === 'ru' ? 'Поиск по ФИО...' : 'Search by name...'}
                             className="w-full h-8 sm:h-[38px] pl-7 pr-7 text-xs sm:text-sm rounded-lg border border-slate-300 bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100"
                         />

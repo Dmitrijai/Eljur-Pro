@@ -94,20 +94,12 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const handleDragLeave = (e: React.DragEvent) => { e.currentTarget.classList.remove('dragging-over'); };
     const handleDrop = (e: React.DragEvent, targetId: string) => { e.preventDefault(); e.currentTarget.classList.remove('dragging-over'); if (!draggedItemId || draggedItemId === targetId) return; const oldIdx = state.userOrder.indexOf(draggedItemId); const newIdx = state.userOrder.indexOf(targetId); if (oldIdx !== -1 && newIdx !== -1) { const newOrder = [...state.userOrder]; newOrder.splice(oldIdx, 1); newOrder.splice(newIdx, 0, draggedItemId); state.userOrder = newOrder; setSortField('default'); onUpdate(state); } };
     const toggleRow = (id: string) => setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
-    const userSaveTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-    const scheduleUserEntitySave = (sid: string, usr: User) => {
-        const key = `${sid}__${usr.id}`;
-        if (userSaveTimersRef.current[key]) {
-            clearTimeout(userSaveTimersRef.current[key]);
-        }
-        userSaveTimersRef.current[key] = setTimeout(() => {
-            delete userSaveTimersRef.current[key];
-            DB.saveSchoolEntity(sid, 'users', usr.id, usr).catch(() => {});
-        }, 350);
-    };
     const updateField = async (userId: string, field: keyof User, val: any) => { 
         const uIndex = state.users.findIndex(u => u.id === userId); 
         if (uIndex > -1) { 
+            if (field === 'fio' && typeof val === 'string') val = val.slice(0, 100);
+            if (field === 'login' && typeof val === 'string') val = val.slice(0, 50);
+            if (field === 'password' && typeof val === 'string') val = val.slice(0, 64);
             const userToUpdate = state.users[uIndex];
             if (field === 'fio') {
                 const normVal = String(val).toLowerCase().trim();
@@ -211,24 +203,15 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                 (state.users[uIndex] as any)[field] = val; 
             } 
             state.users = [...state.users];
-            const updatedUsr = { ...state.users[uIndex] };
-            state.users[uIndex] = updatedUsr;
-            const sid = updatedUsr?.schoolId && updatedUsr.schoolId !== 'global' ? updatedUsr.schoolId : 'school_1';
-            onUpdate(state); 
-            scheduleUserEntitySave(sid, updatedUsr);
-        } 
-    };
-    const updateCustomRole = (userId: string, val: string) => {
-        const uIndex = state.users.findIndex(u => u.id === userId);
-        if (uIndex > -1) {
-            state.users[uIndex] = { ...state.users[uIndex], customRole: val };
-            state.users = [...state.users];
             const updatedUsr = state.users[uIndex];
             const sid = updatedUsr?.schoolId && updatedUsr.schoolId !== 'global' ? updatedUsr.schoolId : 'school_1';
-            onUpdate(state);
-            scheduleUserEntitySave(sid, updatedUsr);
-        }
+            onUpdate(state); 
+            DB.saveSchoolEntity(sid, 'users', updatedUsr.id, updatedUsr).catch(() => {});
+            DB.saveSchoolCache(sid, state).catch(() => {});
+            if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
+        } 
     };
+    const updateCustomRole = (userId: string, val: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { state.users[uIndex].customRole = val.slice(0, 80); onUpdate(state); } };
     const addClassToTeacher = (userId: string, classKey: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { const u = state.users[uIndex]; if (!u.classes) u.classes = []; if (!u.classes.includes(classKey)) { u.classes.push(classKey); onUpdate(state); } } };
     
     // UPDATED REMOVE LOGIC WITH MODAL TRIGGER
@@ -603,11 +586,11 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     <div className="flex flex-wrap gap-2 sm:gap-4 items-end bg-slate-50 p-2.5 sm:p-6 rounded-xl sm:rounded-2xl border border-slate-200 dark:bg-slate-900/50 dark:border-slate-800">
                         <div className="w-16 sm:w-24">
                             <label className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('number')}</label>
-                            <Input maxLength={4} placeholder="10" value={newClassNum} onChange={e => setNewClassNum(e.target.value.slice(0, 4))} className="h-8 sm:h-10 text-xs sm:text-sm" />
+                            <Input maxLength={4} placeholder="10" value={newClassNum} onChange={e => setNewClassNum(e.target.value)} className="h-8 sm:h-10 text-xs sm:text-sm" />
                         </div>
                         <div className="w-16 sm:w-24">
                             <label className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('letter')}</label>
-                            <Input maxLength={4} placeholder="А" value={newClassLet} onChange={e => setNewClassLet(e.target.value.slice(0, 4))} className="h-8 sm:h-10 text-xs sm:text-sm" />
+                            <Input maxLength={4} placeholder="А" value={newClassLet} onChange={e => setNewClassLet(e.target.value)} className="h-8 sm:h-10 text-xs sm:text-sm" />
                         </div>
                         <Button onClick={handleAddClass} variant="primary" size="sm" className="px-4 sm:px-8 h-8 sm:h-10 text-xs sm:text-sm">{t('add_class')}</Button>
                     </div>
@@ -643,10 +626,10 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                           ) : (
                             <input
                               autoFocus
-                              maxLength={80}
+                              maxLength={100}
                               className="flex-1 bg-white dark:bg-slate-950 border border-blue-500 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-slate-100 outline-none"
                               value={u.fio}
-                              onChange={(e) => updateField(u.id, 'fio', e.target.value.slice(0, 80))}
+                              onChange={(e) => updateField(u.id, 'fio', e.target.value)}
                               onBlur={() => setFocusedNameId(null)}
                               placeholder={t('fio')}
                             />
@@ -679,7 +662,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                               maxLength={50}
                               className="w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-mono text-slate-700 dark:text-slate-300"
                               value={u.login}
-                              onChange={(e) => updateField(u.id, 'login', e.target.value.slice(0, 50))}
+                              onChange={(e) => updateField(u.id, 'login', e.target.value)}
                               placeholder={t('login')}
                             />
                           </div>
@@ -691,7 +674,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                               value={passwordInputs[u.id] !== undefined ? passwordInputs[u.id] : (u.password || '')}
                               onChange={(e) => setPasswordInputs(prev => ({ ...prev, [u.id]: e.target.value.slice(0, 64) }))}
                               onBlur={(e) => {
-                                const nextPass = e.target.value.trim().slice(0, 64);
+                                const nextPass = e.target.value.trim();
                                 if (nextPass && nextPass !== (u.password || '')) {
                                   updateField(u.id, 'password', nextPass);
                                 }
@@ -742,10 +725,10 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                             <div>
                               <label className="text-[9px] font-bold uppercase text-slate-400 block mb-0.5">{t('user_position')}</label>
                               <input
-                                maxLength={60}
+                                maxLength={80}
                                 className="w-full bg-white dark:bg-slate-950 border border-blue-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300"
                                 value={u.customRole || ''}
-                                onChange={e => updateCustomRole(u.id, e.target.value.slice(0, 60))}
+                                onChange={e => updateCustomRole(u.id, e.target.value)}
                                 placeholder={t('user_position')}
                               />
                             </div>
@@ -768,10 +751,10 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                           <div>
                             <label className="text-[9px] font-bold uppercase text-slate-400 block mb-0.5">{t('user_position')}</label>
                             <input
-                              maxLength={60}
+                              maxLength={80}
                               className="w-full bg-white dark:bg-slate-950 border border-blue-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300"
                               value={u.customRole || ''}
-                              onChange={e => updateCustomRole(u.id, e.target.value.slice(0, 60))}
+                              onChange={e => updateCustomRole(u.id, e.target.value)}
                               placeholder={t('user_position')}
                             />
                           </div>
@@ -888,7 +871,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
 
                 {/* Desktop & Print Table */}
                 <div className="hidden md:block print:block overflow-x-auto"><table className="w-full text-sm min-w-[800px]"><thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 uppercase text-xs tracking-wider dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"><tr><th className="p-5 w-8 text-center no-print"></th><th className="p-5 w-12 text-center no-print"></th><th className="p-5 text-center">{t('fio')}</th>{isGlobal && <th className="p-5 text-center">{t('school')}</th>}<th className="p-5 text-center">{t('login')}</th><th className="p-5 text-center">{t('password')}</th><th className="p-5 text-center w-40">{t('role')}</th><th className="p-5 text-center">{t('class_assignment')}</th><th className="p-5 text-right no-print">{t('actions')}</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{sortedUsers.map(u => { const hasEmptyFields = !u.fio || !u.login || (!u.password && !u.passwordHash) || (isGlobal && !u.schoolId) || (u.role === 'student' && (!u.class || !u.letter)) || (u.role === 'teacher' && (!u.classes || u.classes.length === 0)); return (<React.Fragment key={u.id}>{uiError && uiErrorUserId === u.id && (<tr className="bg-red-50 dark:bg-red-900/10 no-print animate-in fade-in slide-in-from-top-1"><td colSpan={isGlobal ? 9 : 8} className="p-2 text-red-600 dark:text-red-400 font-bold text-center border-b border-red-100 dark:border-red-900/30"><div className="flex items-center justify-center gap-2 relative"><AlertCircle size={14}/> {uiError}<button onClick={() => setUiError(null)} className="absolute right-2 p-1 hover:bg-red-200 rounded transition"><XIcon size={14}/></button></div></td></tr>)}<tr id={`row-${u.id}`} draggable onDragStart={(e) => handleDragStart(e, u.id)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, u.id)} className={`hover:bg-blue-50/50 transition duration-150 group dark:hover:bg-slate-800/50 cursor-move ${highlightId === u.id ? 'highlight-blink bg-blue-100 dark:bg-blue-900' : ''} ${hasEmptyFields ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}><td className="p-5 text-slate-400 text-center no-print"><GripVertical size={16}/></td><td className="p-5 text-center no-print">{((u.role === 'teacher' && !u.customRole) || u.role === 'employee') && <button onClick={() => toggleRow(u.id)} className={`p-1.5 rounded-full transition ${expandedRows[u.id] ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'hover:bg-slate-200 text-slate-400 dark:hover:bg-slate-700'}`}>{expandedRows[u.id] ? <Minus size={14}/> : <Plus size={14}/>}</button>}{u.blockedUntil && <div title={t('blocked')} className="flex justify-center mt-1"><Lock size={14} className="text-red-500" /></div>}</td><td className="p-5 text-center">{focusedNameId !== u.id ? <div onClick={() => setFocusedNameId(u.id)} className="bg-white border border-transparent hover:border-slate-200 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center cursor-text min-h-[38px] flex items-center justify-center transition-colors print:hidden">{H.formatShortName(u.fio)}</div> : <input autoFocus maxLength={80} className="bg-white border border-blue-500 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center focus:ring-2 focus:ring-blue-100 outline-none print:hidden" value={u.fio} onChange={(e) => updateField(u.id, 'fio', e.target.value.slice(0, 80))} onBlur={() => setFocusedNameId(null)} placeholder={t('fio')} />}<span className="hidden print:inline font-semibold text-slate-900 text-xs">{u.fio || '—'}</span></td>{isGlobal && <td className="p-5 text-center"><Select value={u.schoolId || '-'} onChange={e => updateField(u.id, 'schoolId', e.target.value === '-' ? '' : e.target.value)} className="text-xs w-32 print:hidden"><option value="-">-</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{state.schools.find(s => s.id === u.schoolId)?.name || '—'}</span></td>}<td className="p-5 text-center"><input maxLength={50} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={u.login} onChange={(e) => updateField(u.id, 'login', e.target.value.slice(0, 50))} placeholder={t('login')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.login || '—'}</span></td><td className="p-5 text-center"><input maxLength={64} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={passwordInputs[u.id] !== undefined ? passwordInputs[u.id] : (u.password || '')} onChange={(e) => setPasswordInputs(prev => ({ ...prev, [u.id]: e.target.value.slice(0, 64) }))} onBlur={(e) => { const nextPass = e.target.value.trim().slice(0, 64); if (nextPass && nextPass !== (u.password || '')) { updateField(u.id, 'password', nextPass); } setPasswordInputs(prev => { const n = {...prev}; delete n[u.id]; return n; }); }} placeholder={u.passwordHash ? '••••••••' : t('password')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.password || (u.passwordHash ? '••••••••' : '—')}</span></td><td className="p-5 text-center"><div className="flex flex-col gap-1 items-center relative"><Select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)} className="text-xs py-2 font-medium w-36 print:hidden"><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{(isGlobal || currentUser.role === 'creator') && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{u.role === 'employee' && u.customRole ? u.customRole : t(u.role)}</span>{u.role === 'employee' && <div className="mt-1 w-36 no-print">{roleInputOpen[u.id] || u.customRole ? <div className="relative group animate-in zoom-in duration-200"><input autoFocus={roleInputOpen[u.id] && !u.customRole} maxLength={60} className="text-xs border border-blue-200 rounded-lg px-3 py-1.5 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 dark:focus:border-blue-400 shadow-sm transition-all font-medium text-blue-700 dark:text-blue-300 placeholder-blue-300" value={u.customRole || ''} onChange={e => updateCustomRole(u.id, e.target.value.slice(0, 60))} placeholder={t('user_position')} />{roleInputOpen[u.id] && !u.customRole && <button onClick={() => toggleRoleInput(u.id)} className="absolute -right-2 -top-2 bg-red-100 rounded-full p-0.5 text-red-500 hover:bg-red-500 hover:text-white shadow-sm border border-red-200 transition-colors"><XIcon size={10}/></button>}</div> : <button onClick={() => toggleRoleInput(u.id)} className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-400 border border-dashed border-slate-300 rounded-lg py-1.5 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 group"><PlusCircle size={12} className="group-hover:scale-110 transition-transform"/><span>{t('user_position')}</span></button>}</div>}</div></td><td className="p-5 text-center">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{sortedUsers.map(u => { const hasEmptyFields = !u.fio || !u.login || (!u.password && !u.passwordHash) || (isGlobal && !u.schoolId) || (u.role === 'student' && (!u.class || !u.letter)) || (u.role === 'teacher' && (!u.classes || u.classes.length === 0)); return (<React.Fragment key={u.id}>{uiError && uiErrorUserId === u.id && (<tr className="bg-red-50 dark:bg-red-900/10 no-print animate-in fade-in slide-in-from-top-1"><td colSpan={isGlobal ? 9 : 8} className="p-2 text-red-600 dark:text-red-400 font-bold text-center border-b border-red-100 dark:border-red-900/30"><div className="flex items-center justify-center gap-2 relative"><AlertCircle size={14}/> {uiError}<button onClick={() => setUiError(null)} className="absolute right-2 p-1 hover:bg-red-200 rounded transition"><XIcon size={14}/></button></div></td></tr>)}<tr id={`row-${u.id}`} draggable onDragStart={(e) => handleDragStart(e, u.id)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, u.id)} className={`hover:bg-blue-50/50 transition duration-150 group dark:hover:bg-slate-800/50 cursor-move ${highlightId === u.id ? 'highlight-blink bg-blue-100 dark:bg-blue-900' : ''} ${hasEmptyFields ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}><td className="p-5 text-slate-400 text-center no-print"><GripVertical size={16}/></td><td className="p-5 text-center no-print">{((u.role === 'teacher' && !u.customRole) || u.role === 'employee') && <button onClick={() => toggleRow(u.id)} className={`p-1.5 rounded-full transition ${expandedRows[u.id] ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'hover:bg-slate-200 text-slate-400 dark:hover:bg-slate-700'}`}>{expandedRows[u.id] ? <Minus size={14}/> : <Plus size={14}/>}</button>}{u.blockedUntil && <div title={t('blocked')} className="flex justify-center mt-1"><Lock size={14} className="text-red-500" /></div>}</td><td className="p-5 text-center">{focusedNameId !== u.id ? <div onClick={() => setFocusedNameId(u.id)} className="bg-white border border-transparent hover:border-slate-200 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center cursor-text min-h-[38px] flex items-center justify-center transition-colors print:hidden">{H.formatShortName(u.fio)}</div> : <input autoFocus maxLength={100} className="bg-white border border-blue-500 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center focus:ring-2 focus:ring-blue-100 outline-none print:hidden" value={u.fio} onChange={(e) => updateField(u.id, 'fio', e.target.value)} onBlur={() => setFocusedNameId(null)} placeholder={t('fio')} />}<span className="hidden print:inline font-semibold text-slate-900 text-xs">{u.fio || '—'}</span></td>{isGlobal && <td className="p-5 text-center"><Select value={u.schoolId || '-'} onChange={e => updateField(u.id, 'schoolId', e.target.value === '-' ? '' : e.target.value)} className="text-xs w-32 print:hidden"><option value="-">-</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{state.schools.find(s => s.id === u.schoolId)?.name || '—'}</span></td>}<td className="p-5 text-center"><input maxLength={50} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={u.login} onChange={(e) => updateField(u.id, 'login', e.target.value)} placeholder={t('login')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.login || '—'}</span></td><td className="p-5 text-center"><input maxLength={64} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={passwordInputs[u.id] !== undefined ? passwordInputs[u.id] : (u.password || '')} onChange={(e) => setPasswordInputs(prev => ({ ...prev, [u.id]: e.target.value.slice(0, 64) }))} onBlur={(e) => { const nextPass = e.target.value.trim(); if (nextPass && nextPass !== (u.password || '')) { updateField(u.id, 'password', nextPass); } setPasswordInputs(prev => { const n = {...prev}; delete n[u.id]; return n; }); }} placeholder={u.passwordHash ? '••••••••' : t('password')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.password || (u.passwordHash ? '••••••••' : '—')}</span></td><td className="p-5 text-center"><div className="flex flex-col gap-1 items-center relative"><Select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)} className="text-xs py-2 font-medium w-36 print:hidden"><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{(isGlobal || currentUser.role === 'creator') && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{u.role === 'employee' && u.customRole ? u.customRole : t(u.role)}</span>{u.role === 'employee' && <div className="mt-1 w-36 no-print">{roleInputOpen[u.id] || u.customRole ? <div className="relative group animate-in zoom-in duration-200"><input autoFocus={roleInputOpen[u.id] && !u.customRole} maxLength={80} className="text-xs border border-blue-200 rounded-lg px-3 py-1.5 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 dark:focus:border-blue-400 shadow-sm transition-all font-medium text-blue-700 dark:text-blue-300 placeholder-blue-300" value={u.customRole || ''} onChange={e => updateCustomRole(u.id, e.target.value)} placeholder={t('user_position')} />{roleInputOpen[u.id] && !u.customRole && <button onClick={() => toggleRoleInput(u.id)} className="absolute -right-2 -top-2 bg-red-100 rounded-full p-0.5 text-red-500 hover:bg-red-500 hover:text-white shadow-sm border border-red-200 transition-colors"><XIcon size={10}/></button>}</div> : <button onClick={() => toggleRoleInput(u.id)} className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-400 border border-dashed border-slate-300 rounded-lg py-1.5 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 group"><PlusCircle size={12} className="group-hover:scale-110 transition-transform"/><span>{t('user_position')}</span></button>}</div>}</div></td><td className="p-5 text-center">
     {(() => {
         const leadingClasses = H.getUserLeadingClasses(state, u.schoolId, u.id);
         const leadingBadge = leadingClasses.length > 0 ? (
@@ -986,7 +969,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     )}
                     <div className="col-span-1">
                         <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('fio')}</label>
-                        <Input maxLength={80} placeholder={t('fio')} value={newUser.fio} onChange={e => setNewUser({...newUser, fio: e.target.value.slice(0, 80)})} className="h-8 sm:h-10 text-xs sm:text-sm" />
+                        <Input maxLength={100} placeholder={t('fio')} value={newUser.fio} onChange={e => setNewUser({...newUser, fio: e.target.value})} className="h-8 sm:h-10 text-xs sm:text-sm" />
                         {validationErrors.some(e => e.includes(t('already_exists'))) && <p className="text-[10px] text-red-500 mt-1 font-bold animate-pulse">{t('already_exists')}</p>}
                     </div>
                     <div className="col-span-1">
@@ -1002,7 +985,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                 <div className="mt-0.5 sm:mt-1">
                                     {newRoleInputOpen || newUser.customRole ? (
                                         <div className="relative group animate-in zoom-in duration-200">
-                                            <input autoFocus={newRoleInputOpen && !newUser.customRole} maxLength={60} className="text-xs sm:text-sm border border-blue-300 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2.5 w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all placeholder-slate-400" value={newUser.customRole || ''} onChange={e => setNewUser({...newUser, customRole: e.target.value.slice(0, 60)})} placeholder={t('user_position')} />
+                                            <input autoFocus={newRoleInputOpen && !newUser.customRole} maxLength={80} className="text-xs sm:text-sm border border-blue-300 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2.5 w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all placeholder-slate-400" value={newUser.customRole || ''} onChange={e => setNewUser({...newUser, customRole: e.target.value.slice(0, 80)})} placeholder={t('user_position')} />
                                             {newRoleInputOpen && !newUser.customRole && <button onClick={() => setNewRoleInputOpen(false)} className="absolute right-2 top-1.5 sm:top-2.5 bg-slate-100 rounded-full p-0.5 text-slate-400 hover:bg-red-100 hover:text-red-500 transition-colors"><XIcon size={12} className="sm:w-3.5 sm:h-3.5"/></button>}
                                         </div>
                                     ) : (
@@ -1014,12 +997,12 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     </div>
                     <div className="col-span-1">
                         <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('login')}</label>
-                        <Input maxLength={50} placeholder={t('login')} value={newUser.login} onChange={e => setNewUser({...newUser, login: e.target.value.slice(0, 50)})} className="h-8 sm:h-10 text-xs sm:text-sm" />
+                        <Input maxLength={50} placeholder={t('login')} value={newUser.login} onChange={e => setNewUser({...newUser, login: e.target.value})} className="h-8 sm:h-10 text-xs sm:text-sm" />
                         {validationErrors.some(e => e.includes(t('login_taken'))) && <p className="text-[10px] text-red-500 mt-1 font-bold animate-pulse">{t('login_taken')}</p>}
                     </div>
                     <div className="col-span-1">
                         <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('password')}</label>
-                        <Input maxLength={64} placeholder={t('password')} value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value.slice(0, 64)})} className="h-8 sm:h-10 text-xs sm:text-sm" />
+                        <Input maxLength={64} placeholder={t('password')} value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="h-8 sm:h-10 text-xs sm:text-sm" />
                         {validationErrors.some(e => e.includes(t('password_used'))) && <p className="text-[10px] text-red-500 mt-1 font-bold animate-pulse">{t('password_used')}</p>}
                     </div>
                     {(isGlobal || !isGlobal) && newUser.role === 'student' && (

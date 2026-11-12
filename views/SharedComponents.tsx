@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AppState, User, Message, Attachment } from '../types';
 import * as H from '../utils/helpers';
 import * as DB from '../services/db';
-import * as Notifications from '../services/notifications';
 import { Button, Input, Card, Modal, FileDisplay, MultiFileUploader, SearchableSelect, Select } from '../components/ui';
 import { Trash2, Edit, Shield, CheckCheck, Clock, Eye, Users, Search, Info, X } from 'lucide-react';
 
@@ -134,7 +133,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                 </div>
               )}
             </div>
-            <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-2 sm:mb-3 line-clamp-2 break-words [overflow-wrap:anywhere]">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
+            <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-2 sm:mb-3 break-words [overflow-wrap:anywhere]">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
 
             {/* Progress Bar */}
             <div className="space-y-1 sm:space-y-1.5">
@@ -234,9 +233,9 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
               <div className="relative">
                 <input
                   type="text"
-                  maxLength={80}
+                  maxLength={100}
                   value={search}
-                  onChange={(e) => setSearch(e.target.value.slice(0, 80))}
+                  onChange={(e) => setSearch(e.target.value.slice(0, 100))}
                   placeholder={lang === 'ru' ? 'Поиск получателя...' : 'Search recipient...'}
                   className="w-full sm:w-44 text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
                 />
@@ -402,7 +401,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
               </div>
             )}
           </div>
-          <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-1.5 sm:mb-2 line-clamp-2 break-words [overflow-wrap:anywhere]">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
+          <div className="font-bold text-slate-800 dark:text-white text-xs sm:text-base mb-1.5 sm:mb-2 break-words [overflow-wrap:anywhere]">{item.title || (item as any).subject || (lang === 'ru' ? 'Без темы' : 'No subject')}</div>
           <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-1.5">
               <Eye size={14} />
@@ -467,9 +466,9 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
               <div className="relative flex-1">
                 <input
                   type="text"
-                  maxLength={80}
+                  maxLength={100}
                   value={search}
-                  onChange={(e) => setSearch(e.target.value.slice(0, 80))}
+                  onChange={(e) => setSearch(e.target.value.slice(0, 100))}
                   placeholder={lang === 'ru' ? 'Поиск пользователя...' : 'Search user...'}
                   className="w-full text-xs py-1.5 px-3 pl-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200"
                 />
@@ -672,7 +671,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
   if (item.attachments) allAttachments.push(...item.attachments);
 
   const totalItemsCount = textLines.length + allAttachments.length;
-  const isLarge = totalItemsCount > 4;
+  const isLarge = totalItemsCount > 4 || itemBody.length > 350;
 
   const visibleTextLines = isLarge && !expanded ? textLines.slice(0, 4) : textLines;
   const remainingSlotsForAttachments =
@@ -684,15 +683,15 @@ const MessageCard: React.FC<MessageCardProps> = ({
     <>
       <div
         ref={cardRef}
-        className={`rounded-xl sm:rounded-2xl p-3 sm:p-6 transition duration-200 border bg-white dark:bg-slate-900 shadow-sm relative ${
+        className={`rounded-xl sm:rounded-2xl p-3 sm:p-6 transition duration-200 border bg-white dark:bg-slate-900 shadow-sm relative overflow-hidden ${
           isUnread && activeTab === 'inbox'
             ? 'border-blue-400 dark:border-blue-600 border-l-4 sm:border-l-[6px] border-l-blue-600 dark:border-l-blue-500 bg-blue-50/30 dark:bg-blue-950/20 ring-1 ring-blue-500/20'
             : 'border-slate-200 dark:border-slate-800 border-l-4 sm:border-l-[6px] border-l-blue-500/70 dark:border-l-blue-600/70 hover:shadow-md'
         }`}
       >
-        <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-1.5 sm:gap-3">
-          <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
-            <h4 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white break-words [overflow-wrap:anywhere] min-w-0 leading-snug">{itemTitle}</h4>
+        <div className="flex flex-col sm:flex-row justify-between items-start mb-2 sm:mb-3 gap-1.5 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap min-w-0 max-w-full flex-1">
+            <h4 className="font-bold text-sm sm:text-lg text-slate-800 dark:text-white break-words [overflow-wrap:anywhere] leading-snug min-w-0 max-w-full">{itemTitle}</h4>
             {isUnread && activeTab === 'inbox' && (
               <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-blue-700 bg-blue-100 dark:bg-blue-900/60 dark:text-blue-300 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
@@ -770,9 +769,9 @@ const MessageCard: React.FC<MessageCardProps> = ({
             </span>
 
             {activeTab === 'sent' && (
-              <span className="flex items-center gap-1.5 flex-wrap">
+              <span className="flex items-center gap-1.5 flex-wrap min-w-0 max-w-full">
                 <span>{t('to')}:</span>
-                <span className="font-bold text-slate-700 dark:text-slate-300">{recipients}</span>
+                <span className="font-bold text-slate-700 dark:text-slate-300 break-words [overflow-wrap:anywhere]">{recipients}</span>
               </span>
             )}
           </div>
@@ -875,7 +874,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
             )}
           </div>
         </div>
-        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-hidden text-xs sm:text-sm text-slate-700 leading-relaxed dark:text-slate-300">
+        <p className={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-xs sm:text-sm text-slate-700 leading-relaxed dark:text-slate-300 max-w-full ${isLarge && !expanded ? 'line-clamp-4' : ''}`}>
           {visibleTextLines.join('\n')}
           {isLarge && !expanded && visibleTextLines.length < textLines.length && '...'}
         </p>
@@ -1150,7 +1149,6 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         for (const sId of targetSchoolIds) {
           await DB.saveSchoolEntity(sId, collectionName, newItem.id, { ...newItem, schoolId: sId });
         }
-        Notifications.triggerServerPushCheck().catch(() => {});
       }
 
       onUpdate({ ...state });
@@ -1546,16 +1544,22 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
               </div>
             )}
             <div>
-              <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('theme')}</label>
-              <Input maxLength={120} value={composeTitle} onChange={e => setComposeTitle(e.target.value.slice(0, 120))} />
+              <div className="flex justify-between items-center mb-1 sm:mb-2">
+                <label className="block text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">{t('theme')}</label>
+                <span className="text-[10px] sm:text-xs text-slate-400 font-mono">{composeTitle.length}/150</span>
+              </div>
+              <Input maxLength={150} value={composeTitle} onChange={e => setComposeTitle(e.target.value.slice(0, 150))} />
             </div>
             <div>
-              <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('text')}</label>
+              <div className="flex justify-between items-center mb-1 sm:mb-2">
+                <label className="block text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">{t('text')}</label>
+                <span className="text-[10px] sm:text-xs text-slate-400 font-mono">{composeBody.length}/5000</span>
+              </div>
               <textarea 
-                maxLength={2000}
-                className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-36 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200 break-words"
+                maxLength={5000}
+                className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-36 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200 break-words [overflow-wrap:anywhere]"
                 value={composeBody}
-                onChange={e => setComposeBody(e.target.value.slice(0, 2000))}
+                onChange={e => setComposeBody(e.target.value.slice(0, 5000))}
               />
             </div>
             {editId && existingAttachments.length > 0 && (

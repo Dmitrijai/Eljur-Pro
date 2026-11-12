@@ -1,17 +1,13 @@
-try {
-  importScripts('./sw-notifications.js');
-} catch (e) {}
-
-const CACHE_NAME = 'ejournal-pro-pwa-v6';
+const CACHE_NAME = 'ejournal-pro-pwa-v4';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
-  './assets/icon.png',
-  './tab-favicon.png',
+  './favicon.png',
+  './favicon-64x64.png',
+  './favicon.ico',
   './pwa-192x192.png',
-  './pwa-512x512.png',
-  './sw-notifications.js'
+  './pwa-512x512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -26,7 +22,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME && key !== 'eljur-bg-watcher-v1') {
+          if (key !== CACHE_NAME) {
             return caches.delete(key);
           }
           return undefined;

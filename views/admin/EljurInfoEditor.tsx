@@ -1220,8 +1220,9 @@ export function EljurInfoEditor({ state, onUpdate, lang, setHasUnsavedChanges, m
             </label>
             <input
               type="text"
+              maxLength={500}
               value={videoUrlInput}
-              onChange={(e) => setVideoUrlInput(e.target.value)}
+              onChange={(e) => setVideoUrlInput(e.target.value.slice(0, 500))}
               className="w-full p-2 border border-slate-300 rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white mb-6"
               placeholder="https://www.youtube.com/watch?v=..."
               autoFocus

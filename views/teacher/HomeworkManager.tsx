@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AppState, User, Attachment, ScheduleDay } from '../../types';
 import * as H from '../../utils/helpers';
 import * as DB from '../../services/db';
-import * as Notifications from '../../services/notifications';
 import { Button, Select, Card, MultiFileUploader, FileDisplay } from '../../components/ui';
 import { Edit, Trash2, X } from 'lucide-react';
 
@@ -123,7 +122,6 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
         const newHW = { id: H.uid('hw'), schoolId: targetSchoolId, class: c, letter: l, date, subject: subj, text: finalText, attachments: newAttachments, fromId: user.id, lessonIndex: availableLessonCount > 1 ? lessonIndex : 0 };
         state.homework.push(newHW);
         await DB.saveSchoolEntity(targetSchoolId, 'homework', newHW.id, newHW);
-        Notifications.triggerServerPushCheck().catch(() => {});
      }
      onUpdate({ ...state }); alert(t('saved')); setText(''); setFiles([]); setExistingAttachments([]);
    };
@@ -170,7 +168,13 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
               </div>
               <div><label className="text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 block dark:text-slate-300">{t('submit_hw')}</label><div className="relative"><Select value={date} onChange={e => setDate(e.target.value)} disabled={validHWDates.length === 0}><option value="">-- {t('select_date')} --</option>{validHWDates.map(d => (<option key={d} value={d}>{H.formatDateDDMMYYYY(d)} ({H.getDayOfWeek(d, lang)})</option>))}</Select>{validHWDates.length === 0 && <div className="absolute inset-0 z-10" onClick={() => alert(cls && subj ? (lang === 'en' ? `There are no future lessons for "${subj}" in this class schedule.` : `В расписании этого класса нет будущих уроков по предмету «${subj}».`) : t('list_empty'))} />}</div></div>
               {availableLessonCount > 1 && (<div className="bg-blue-50 p-2.5 sm:p-3 rounded-lg border border-blue-100 dark:bg-blue-900/20 dark:border-blue-800"><label className="text-xs sm:text-sm font-bold text-blue-800 mb-1.5 sm:mb-2 block dark:text-blue-300">{t('select_lesson_found')} ({availableLessonCount})</label><Select value={lessonIndex} onChange={e => setLessonIndex(parseInt(e.target.value))}>{Array.from({length: availableLessonCount}).map((_, i) => (<option key={i} value={i}>{i + 1} {t('lesson_order')}</option>))}</Select></div>)}
-              <div><label className="text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 block dark:text-slate-300">{t('hw_text')}</label><textarea maxLength={1000} className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-40 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200 break-words" value={text} onChange={e => setText(e.target.value.slice(0, 1000))} placeholder="..." /></div>
+              <div>
+                <div className="flex justify-between items-center mb-1 sm:mb-2">
+                  <label className="text-xs sm:text-sm font-bold text-slate-600 block dark:text-slate-300">{t('hw_text')}</label>
+                  <span className="text-[10px] sm:text-xs text-slate-400 font-mono">{text.length}/3000</span>
+                </div>
+                <textarea maxLength={3000} className="block w-full border border-slate-300 rounded-xl p-2.5 sm:p-4 h-24 sm:h-40 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm shadow-sm bg-white dark:bg-slate-950 dark:border-slate-700 dark:text-slate-200 break-words [overflow-wrap:anywhere]" value={text} onChange={e => setText(e.target.value.slice(0, 3000))} placeholder="..." />
+              </div>
               {editId && existingAttachments.length > 0 && (
                 <div className="space-y-1.5">
                   <label className="block text-[11px] sm:text-xs font-bold text-slate-500 dark:text-slate-400">
@@ -205,8 +209,8 @@ export const HomeworkManager = ({ state, onUpdate, user, lang }: { state: AppSta
                const isPast = new Date(h.date).setHours(0,0,0,0) < H.getSchoolNow(state, user.schoolId).setHours(0,0,0,0);
                return (
                <Card key={h.id} className="p-3 sm:p-5 text-xs sm:text-sm border-l-4 sm:border-l-[6px] border-l-blue-400 dark:border-l-blue-600">
-                  <div className="flex justify-between items-center mb-1.5 sm:mb-3 gap-2"><div className="font-bold text-slate-800 text-xs sm:text-base truncate min-w-0 dark:text-white">{h.subject}{lIdxLabel}</div><div className="flex items-center gap-1.5 shrink-0"><div className="text-[10px] sm:text-xs font-mono font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full dark:bg-slate-800 dark:text-slate-400">{h.class}{h.letter} • {H.formatDateDDMMYYYY(h.date)}</div>{!isPast && (<><button onClick={() => startEdit(h)} className="text-blue-500 hover:text-blue-700"><Edit size={13}/></button><button onClick={() => deleteHW(h.id)} className="text-red-500 hover:text-red-700"><Trash2 size={13}/></button></>)}{isPast && <span title={t('past_edit_forbidden')} className="text-slate-300 cursor-not-allowed"><Edit size={13}/></span>}</div></div>
-                  <p className="text-slate-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-hidden leading-relaxed dark:text-slate-300">{h.text}</p>
+                  <div className="flex justify-between items-center mb-1.5 sm:mb-3 gap-2 min-w-0"><div className="font-bold text-slate-800 text-xs sm:text-base truncate dark:text-white min-w-0">{h.subject}{lIdxLabel}</div><div className="flex items-center gap-1.5 shrink-0"><div className="text-[10px] sm:text-xs font-mono font-semibold text-slate-500 bg-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full dark:bg-slate-800 dark:text-slate-400">{h.class}{h.letter} • {H.formatDateDDMMYYYY(h.date)}</div>{!isPast && (<><button onClick={() => startEdit(h)} className="text-blue-500 hover:text-blue-700"><Edit size={13}/></button><button onClick={() => deleteHW(h.id)} className="text-red-500 hover:text-red-700"><Trash2 size={13}/></button></>)}{isPast && <span title={t('past_edit_forbidden')} className="text-slate-300 cursor-not-allowed"><Edit size={13}/></span>}</div></div>
+                  <p className="text-slate-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed dark:text-slate-300">{h.text}</p>
                   {((h.attachments || []).length > 0 || h.attachmentId) && (<div className="mt-2.5 sm:mt-4 pt-2 sm:pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1">{h.attachmentId && <FileDisplay id={h.attachmentId} name={h.attachmentName} schoolId={h.schoolId || user.schoolId} lang={lang} />}{(h.attachments || []).map((att: Attachment) => (<FileDisplay key={att.id} id={att.id} name={att.name} schoolId={h.schoolId || user.schoolId} lang={lang} />))}</div>)}
                </Card>
              )})}

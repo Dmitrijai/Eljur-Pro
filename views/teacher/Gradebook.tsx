@@ -606,7 +606,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                )}
                <input
                    disabled={isDisabled}
-                   maxLength={7}
+                   maxLength={5}
                    placeholder="—"
                    className={`w-full text-center font-bold text-sm sm:text-lg leading-tight border-none bg-transparent focus:bg-blue-50 focus:ring-0 p-0 cursor-pointer placeholder:text-slate-300 dark:placeholder:text-slate-700 print:hidden ${isDisabled ? 'cursor-not-allowed text-slate-300' : ''} ${errorMsg ? 'text-red-500 line-through decoration-red-500/50' : H.getGradeColorClass(String(finalDisplayValue), minGrade, maxGrade)}`}
                    value={finalDisplayValue}
@@ -1049,13 +1049,16 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                            <X size={24} strokeWidth={2} />
                        </button>
                        <div className="flex-1">
-                           <label className="block text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1 sm:mb-2">{t('comment_upper')}</label>
+                           <div className="flex justify-between items-center mb-1 sm:mb-2">
+                               <label className="block text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">{t('comment_upper')}</label>
+                               <span className="text-[10px] text-slate-400 font-mono">{editComment.length}/500</span>
+                           </div>
                            <textarea
-                               maxLength={300}
-                               className="w-full h-14 sm:h-24 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg p-2 sm:p-3 text-xs sm:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 dark:placeholder-slate-500 transition-colors break-words"
+                               maxLength={500}
+                               className="w-full h-14 sm:h-24 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg p-2 sm:p-3 text-xs sm:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 dark:placeholder-slate-500 transition-colors break-words [overflow-wrap:anywhere]"
                                value={editComment}
                                onChange={e => { 
-                                   const val = e.target.value.slice(0, 300);
+                                   const val = e.target.value.slice(0, 500);
                                    setEditComment(val); 
                                    if (selectedGrade && targetKey) {
                                        const subjList = ensureMutableSubjectGrades();
@@ -1183,11 +1186,11 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                                        <div className="flex flex-col items-center gap-1 print:hidden">
                                            <div className="relative group/cell">
                                                <input
-                                                   maxLength={4}
+                                                   maxLength={5}
                                                    className={`w-10 sm:w-12 text-center border rounded p-1 text-xs sm:text-sm font-bold transition-all ${isConfirmed ? 'bg-white border-slate-200 text-slate-800 dark:bg-slate-900 dark:text-white dark:border-slate-700' : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800'} ${isPlaceholder ? 'opacity-50' : ''}`}
                                                    value={storedVal || ''}
                                                    placeholder={isPlaceholder ? autoVal! : ''}
-                                                   onChange={e => updateFinalGrade(s.id, field, e.target.value.slice(0, 4))}
+                                                   onChange={e => updateFinalGrade(s.id, field, e.target.value)}
                                                />
                                                {(!isConfirmed && (storedVal || autoVal)) && canConfirmYear && (
                                                    <button
