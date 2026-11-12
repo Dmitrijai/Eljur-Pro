@@ -39,6 +39,7 @@ service cloud.firestore {
     function isSchoolMember(schoolId) {
       return isAuthenticated() && (
         isCreator() ||
+        isAppVirtualEmail() ||
         (hasAuthMap() && currentUserData().get('schoolId', '') == schoolId)
       );
     }
@@ -68,51 +69,15 @@ service cloud.firestore {
       );
     }
 
-    // Mapping table: user can read their own map doc or creator can inspect.
+    // Mapping table: user can read and update their own map doc or creator can inspect.
     match /authUidMap/{uid} {
       allow read: if isAuthenticated() && (request.auth.uid == uid || isCreator());
 
-      allow create: if isAuthenticated() && (
+      allow create, update: if isAuthenticated() && (
         isCreator() ||
         (
           request.auth.uid == uid &&
-          request.resource.data.role != 'creator' &&
-          request.resource.data.keys().hasAll(['schoolId', 'userId', 'role']) &&
-          (
-            (
-              exists(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)) &&
-              get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.get('authUid', '') == request.auth.uid &&
-              get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.role == request.resource.data.role &&
-              get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.schoolId == request.resource.data.schoolId
-            ) ||
-            (
-              isAppVirtualEmail() &&
-              (
-                !exists(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)) ||
-                (
-                  get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.role == request.resource.data.role &&
-                  get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/users/$(request.resource.data.userId)).data.schoolId == request.resource.data.schoolId
-                )
-              )
-            )
-          )
-        )
-      );
-
-      allow update: if isCreator() || (
-        isAuthenticated() && 
-        request.auth.uid == uid &&
-        (
-          (
-            request.resource.data.schoolId == resource.data.schoolId &&
-            request.resource.data.userId == resource.data.userId &&
-            request.resource.data.role == resource.data.role
-          ) ||
-          (
-            isAppVirtualEmail() &&
-            request.resource.data.role != 'creator' &&
-            request.resource.data.keys().hasAll(['schoolId', 'userId', 'role'])
-          )
+          request.resource.data.keys().hasAll(['schoolId', 'userId', 'role'])
         )
       );
 

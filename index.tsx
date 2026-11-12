@@ -1,7 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { Settings as SettingsIcon, LogOut } from 'lucide-react';
 
 if (typeof window !== 'undefined') {
   const originalError = console.error;
@@ -17,21 +16,46 @@ if (typeof window !== 'undefined') {
     originalError.apply(console, args);
   };
 
-  if (!/bot|googlebot|yandex|crawler|spider|robot|crawling|lighthouse/i.test(navigator.userAgent || '')) {
-    document.title = 'E-Journal Pro';
+  // Clean up any legacy notification keys, caches, or active notifications from older versions
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (
+        k &&
+        (k.startsWith('eljur_notify_') ||
+         k.startsWith('eljur_notified_') ||
+         k.startsWith('eljur_notifications_'))
+      ) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => {
+      try { localStorage.removeItem(k); } catch {}
+    });
+  } catch {}
+
+  if ('caches' in window) {
+    window.caches.delete('eljur-bg-watcher-v1').catch(() => {});
   }
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker
-        .register('./sw.js')
-        .then((reg) => {
-          try {
-            reg.update().catch(() => {});
-          } catch {}
-        })
-        .catch(() => {});
-    });
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((reg) => {
+        try {
+          if (typeof reg.getNotifications === 'function') {
+            reg.getNotifications().then((list) => list.forEach((n) => n.close())).catch(() => {});
+          }
+          if (reg.pushManager) {
+            reg.pushManager.getSubscription().then((sub) => sub?.unsubscribe()).catch(() => {});
+          }
+        } catch {}
+      });
+    }).catch(() => {});
+  }
+
+  if (!/bot|googlebot|yandex|crawler|spider|robot|crawling|lighthouse/i.test(navigator.userAgent || '')) {
+    document.title = 'E-Journal Pro';
   }
 }
 

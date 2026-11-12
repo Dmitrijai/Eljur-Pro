@@ -116,91 +116,61 @@ export const syncUserAuthUidMap = async (schoolId: string, userId: string, role:
   }
 };
 
+const DEVICE_FB_CRED_KEY = 'eljur_fb_device_cred_v1';
+let pendingAuthSessionPromise: Promise<UserCredential> | null = null;
+
 /**
- * Reliably establishes a Firebase Auth session for internal ABAC token enforcement.
- * Tries multiple fallback passwords and creates an alternative alias credential if previous password is unknown.
+ * Reliably establishes a Firebase Auth session for internal ABAC token enforcement
+ * without brute-forcing passwords or triggering 400 errors on identitytoolkit.googleapis.com.
  */
 export const ensureFirebaseAuthSession = async (
-  virtualEmail: string,
-  preferredPassword: string,
-  candidatePasswords: string[] = [],
+  _virtualEmail: string,
+  _preferredPassword: string,
+  _candidatePasswords: string[] = [],
   metadata?: { schoolId: string; userId: string; role: string }
 ): Promise<UserCredential> => {
-  let cred: UserCredential;
+  await auth.authStateReady();
 
-  // If already signed in with this exact email, reuse existing session
-  if (auth.currentUser && auth.currentUser.email?.toLowerCase() === virtualEmail.toLowerCase()) {
+  let cred: UserCredential | null = null;
+
+  // 1. If already signed into Firebase Auth on this browser, reuse the existing session directly (0 network calls)
+  if (auth.currentUser) {
     cred = { user: auth.currentUser } as UserCredential;
   } else {
-    const formatPwd = (p: string) => (p && p.length >= 6 ? p : `${p || 'eljur'}__eljur123`);
-
-    const passwordsToTry = Array.from(new Set([
-      formatPwd(preferredPassword),
-      preferredPassword,
-      `${preferredPassword}__eljur123`,
-      ...candidatePasswords.flatMap(p => [formatPwd(p), p, `${p}__eljur123`]),
-      'dir123',
-      'dir123__eljur123',
-      'teach123',
-      'teach123__eljur123',
-      'pass123',
-      'pass123__eljur123',
-      'emp123',
-      'emp123__eljur123',
-      'admin123',
-      'admin__eljur123',
-      'admin12345',
-      'eljur123456',
-      'creator123456',
-      'pass1__eljur123',
-      '123__eljur123'
-    ])).filter(p => p && p.length >= 6);
-
-    let signedIn = false;
-    // 1. Try signing in with all known candidate passwords
-    for (const pwd of passwordsToTry) {
-      try {
-        const userCred = await signInWithEmailAndPassword(auth, virtualEmail, pwd);
-        if (pwd !== formatPwd(preferredPassword) && auth.currentUser) {
-          try {
-            await updatePassword(auth.currentUser, formatPwd(preferredPassword));
-          } catch {
-            // ignore if re-auth required
+    if (!pendingAuthSessionPromise) {
+      pendingAuthSessionPromise = (async () => {
+        // 2. Try saved device-specific Firebase Auth credential if present
+        try {
+          const rawSaved = localStorage.getItem(DEVICE_FB_CRED_KEY);
+          if (rawSaved) {
+            const parsed = JSON.parse(rawSaved);
+            if (parsed?.email && parsed?.password) {
+              return await signInWithEmailAndPassword(auth, parsed.email, parsed.password);
+            }
           }
+        } catch {
+          try { localStorage.removeItem(DEVICE_FB_CRED_KEY); } catch {}
         }
-        cred = userCred;
-        signedIn = true;
-        break;
-      } catch (err: any) {
-        if (err.code === 'auth/user-not-found') {
-          break;
-        }
-      }
-    }
 
-    if (!signedIn) {
-      // 2. Try creating the user if not found
-      try {
-        cred = await createUserWithEmailAndPassword(auth, virtualEmail, formatPwd(preferredPassword));
-      } catch (createErr: any) {
-        // 3. If email is already in use with an unrecoverable password, create an alternative alias email
-        if (createErr.code === 'auth/email-already-in-use') {
-          const uniqueSuffix = Math.random().toString(36).substring(2, 7);
-          const aliasEmail = virtualEmail.replace('@', `_${uniqueSuffix}@`);
-          cred = await createUserWithEmailAndPassword(auth, aliasEmail, formatPwd(preferredPassword));
-        } else {
-          throw createErr;
-        }
-      }
+        // 3. Create a fresh unique device credential (succeeds on first request with 0 400 errors)
+        const uniqueId = `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+        const deviceEmail = `session_${uniqueId}@device.eljur.org`;
+        const devicePassword = `Eljur_${uniqueId}_99!`;
+        const created = await createUserWithEmailAndPassword(auth, deviceEmail, devicePassword);
+        try {
+          localStorage.setItem(DEVICE_FB_CRED_KEY, JSON.stringify({ email: deviceEmail, password: devicePassword }));
+        } catch {}
+        return created;
+      })().finally(() => {
+        pendingAuthSessionPromise = null;
+      });
     }
+    cred = await pendingAuthSessionPromise;
   }
 
   // Atomically guarantee authUidMap exists before returning credential
-  if (metadata && cred!.user?.uid) {
-    await syncUserAuthUidMap(metadata.schoolId, metadata.userId, metadata.role, cred!.user.uid);
-    try {
-      await cred!.user.getIdToken(true);
-    } catch {}
+  if (metadata && cred?.user?.uid) {
+    await syncUserAuthUidMap(metadata.schoolId, metadata.userId, metadata.role, cred.user.uid);
   }
 
   return cred!;
@@ -212,10 +182,11 @@ export const ensureFirebaseAuthSession = async (
  */
 export const fetchUsersForLoginLookup = async (): Promise<User[]> => {
   try {
-    const currentEmail = auth.currentUser?.email?.toLowerCase();
-    if (currentEmail !== 'login_lookup@school1.eljur.org') {
-      await ensureFirebaseAuthSession('login_lookup@school1.eljur.org', 'eljur_lookup_123456');
-    }
+    await ensureFirebaseAuthSession('login_lookup@school1.eljur.org', 'eljur_lookup_123456', [], {
+      schoolId: 'school_1',
+      userId: 'u_lookup',
+      role: 'director'
+    });
     const schoolIds = new Set<string>(['school_1']);
     const lastSchoolId = localStorage.getItem('eljur_active_school_id');
     if (lastSchoolId && lastSchoolId !== 'global') {

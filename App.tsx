@@ -9,9 +9,8 @@ import StudentDashboard from './views/StudentDashboard';
 import CreatorDashboard from './views/CreatorDashboard';
 import EmployeeDashboard from './views/EmployeeDashboard';
 import Settings from './views/Settings';
-import { Settings as SettingsIcon, LogOut, Menu, GraduationCap, ExternalLink, Copy, Check, Bell, MessageSquare, Megaphone, Award, BookOpen, X } from 'lucide-react';
+import { Settings as SettingsIcon, LogOut, Menu, GraduationCap, ExternalLink, Copy, Check } from 'lucide-react';
 import * as H from './utils/helpers';
-import * as Notifications from './services/notifications';
 import { Modal, Button } from './components/ui';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
@@ -671,44 +670,12 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [customFonts, setCustomFonts] = useState<{name: string, displayName: string}[]>([]);
   const [dbError, setDbError] = useState<string | null>(null);
-  const [inAppNotifications, setInAppNotifications] = useState<Notifications.EljurNotificationItem[]>([]);
-  const [cloudReadySchools, setCloudReadySchools] = useState<Record<string, boolean>>({});
 
   const currentUserRef = useRef<User | null>(null);
   currentUserRef.current = currentUser;
   const appStateRef = useRef<AppState>(appState);
   appStateRef.current = appState;
   const cloudSyncedSchoolsRef = useRef<Set<string>>(new Set());
-  const cloudReadyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const cloudReadySetRef = useRef<Set<string>>(new Set());
-  const loadedSchoolCollectionsRef = useRef<Map<string, Set<string>>>(new Map());
-  const pendingNavRef = useRef<{ targetUserId: string; targetTab: string; schoolId?: string } | null>(null);
-
-  const scheduleSchoolCloudReady = (sid: string, loadedKeys?: string[]) => {
-    if (!sid) return;
-    if (loadedKeys && loadedKeys.length > 0) {
-      let setForSchool = loadedSchoolCollectionsRef.current.get(sid);
-      if (!setForSchool) {
-        setForSchool = new Set<string>();
-        loadedSchoolCollectionsRef.current.set(sid, setForSchool);
-      }
-      loadedKeys.forEach(k => setForSchool!.add(k));
-    }
-    const loadedSet = loadedSchoolCollectionsRef.current.get(sid);
-    const hasCoreCollections = Boolean(
-      loadedSet &&
-      loadedSet.has('messages') &&
-      loadedSet.has('announcements')
-    );
-    if (!hasCoreCollections) return;
-    if (cloudReadySetRef.current.has(sid)) return;
-    if (cloudReadyTimersRef.current.has(sid)) return;
-    const timer = setTimeout(() => {
-      cloudReadySetRef.current.add(sid);
-      setCloudReadySchools(prev => (prev[sid] ? prev : { ...prev, [sid]: true }));
-    }, 350);
-    cloudReadyTimersRef.current.set(sid, timer);
-  };
 
   // Cross-tab synchronization for login/logout and state updates
   useEffect(() => {
@@ -741,9 +708,6 @@ export default function App() {
           if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= H.getAccurateNow(appStateRef.current?.settings?.systemTimeOffset || 0))) {
             DB.setCurrentSessionUser(foundUser);
             setCurrentUser(foundUser);
-            if (foundUser.role !== 'creator') {
-              Notifications.saveLastNonCreatorTargetUser(foundUser);
-            }
             setShowLogoutConfirm(false);
           }
         }
@@ -766,9 +730,6 @@ export default function App() {
           if (foundUser) {
             DB.setCurrentSessionUser(foundUser);
             setCurrentUser(foundUser);
-            if (foundUser.role !== 'creator') {
-              Notifications.saveLastNonCreatorTargetUser(foundUser);
-            }
             setShowLogoutConfirm(false);
           }
         }
@@ -933,9 +894,6 @@ export default function App() {
                 if (foundUser && (!foundUser.blockedUntil || new Date(foundUser.blockedUntil) <= H.getAccurateNow(cached?.settings?.systemTimeOffset || 0))) {
                   DB.setCurrentSessionUser(foundUser);
                   setCurrentUser(foundUser);
-                  if (foundUser.role !== 'creator') {
-                    Notifications.saveLastNonCreatorTargetUser(foundUser);
-                  }
                   if (session.viewMode) setViewMode(session.viewMode);
                 }
               }
@@ -958,9 +916,6 @@ export default function App() {
             if (u && (!u.blockedUntil || new Date(u.blockedUntil) <= H.getAccurateNow(appState?.settings?.systemTimeOffset || 0))) {
               DB.setCurrentSessionUser(u);
               setCurrentUser(u);
-              if (u.role !== 'creator') {
-                Notifications.saveLastNonCreatorTargetUser(u);
-              }
               if (session.viewMode) setViewMode(session.viewMode);
               if (DB.auth.currentUser) {
                 DB.syncUserAuthUidMap(u.schoolId || activeSchoolId, u.id, u.role, DB.auth.currentUser.uid).catch(() => {});
@@ -1007,14 +962,6 @@ export default function App() {
 
     const mergeSchoolUpdate = (targetSid: string, schoolUpdate: Partial<AppState>, isPrimarySchool: boolean) => {
       clearTimeout(safetyTimer);
-      const updateKeys = Object.keys(schoolUpdate);
-      scheduleSchoolCloudReady(targetSid, updateKeys);
-      const hasNotificationRelevantUpdate =
-        schoolUpdate.messages !== undefined ||
-        schoolUpdate.announcements !== undefined ||
-        schoolUpdate.grades !== undefined ||
-        schoolUpdate.finalGrades !== undefined ||
-        schoolUpdate.homework !== undefined;
       setAppState(prev => {
         const cur = prev || defaultState;
 
@@ -1161,68 +1108,31 @@ export default function App() {
           DB.saveSchoolCache(targetSid, updated);
         }
 
-        // Immediate notification evaluation inside network callback ONLY when notification-relevant
-        // collections (messages, announcements, grades, finalGrades, homework) changed
-        if (hasNotificationRelevantUpdate) {
-          const targetNotifyUser = Notifications.getNotificationTargetUser(currentUserRef.current, updated);
-          if (targetNotifyUser) {
-            const notifySid = (targetNotifyUser.schoolId && targetNotifyUser.schoolId !== 'global')
-              ? targetNotifyUser.schoolId
-              : 'school_1';
-            const isReadyNow = cloudReadySetRef.current.has(notifySid);
-            const activeLang = (userPrefs.language || updated.settings?.language || 'ru') as 'ru' | 'en';
-            const immediateItems = Notifications.evaluateStateNotifications(updated, targetNotifyUser, isReadyNow, activeLang);
-            if (immediateItems.length > 0 && Notifications.areNotificationsEnabled()) {
-              setTimeout(() => {
-                Notifications.playNotificationSound();
-                immediateItems.forEach(item => {
-                  Notifications.dispatchSystemNotification(item);
-                });
-                pushInAppNotifications(immediateItems);
-              }, 0);
-            }
-          }
-        }
-
         return updated;
       });
     };
 
-    const subscriptionUser = currentUser || Notifications.getNotificationTargetUser(null, appStateRef.current);
-
-    if (subscriptionUser) {
-      // Ensure Firebase Auth session is active for this user (or last non-creator user when on Login screen)
-      const sId = (subscriptionUser.schoolId && subscriptionUser.schoolId !== 'global')
-        ? subscriptionUser.schoolId
+    if (currentUser) {
+      const sId = (currentUser.schoolId && currentUser.schoolId !== 'global')
+        ? currentUser.schoolId
         : activeSchoolId;
       const domainSchool = sId.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase() || 'school1';
-      const userSafeId = subscriptionUser.id.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
-      const virtualEmail = subscriptionUser.role === 'creator'
+      const userSafeId = currentUser.id.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
+      const virtualEmail = currentUser.role === 'creator'
         ? 'creator@global.eljur.org'
         : `${userSafeId}@${domainSchool}.eljur.org`;
 
       let isCancelledEffect = false;
 
-      if (!currentUser) {
-        setLoading(false);
-      }
-
       DB.ensureFirebaseAuthSession(
         virtualEmail,
-        subscriptionUser.password || 'eljur123456',
-        subscriptionUser.password ? [subscriptionUser.password] : [],
-        { schoolId: sId, userId: subscriptionUser.id, role: subscriptionUser.role }
+        currentUser.password || 'eljur123456',
+        currentUser.password ? [currentUser.password] : [],
+        { schoolId: sId, userId: currentUser.id, role: currentUser.role }
       ).catch(() => {}).finally(() => {
         if (isCancelledEffect) return;
 
-        // Sync watcher token with Service Worker as soon as Firebase Auth is ready
-        const latestTarget = Notifications.getNotificationTargetUser(currentUserRef.current, appStateRef.current);
-        if (latestTarget) {
-          const langNow = (H.getUserPreferences(currentUserRef.current?.id, null).language || appStateRef.current?.settings?.language || 'ru') as 'ru' | 'en';
-          Notifications.syncServiceWorkerWatcher(appStateRef.current, latestTarget, langNow).catch(() => {});
-        }
-
-        if (subscriptionUser.role === 'creator') {
+        if (currentUser.role === 'creator') {
           unsubAllSchools = DB.subscribeToAllSchools((schools) => {
             if (schools && schools.length > 0) {
               setAppState(prev => {
@@ -1291,211 +1201,6 @@ export default function App() {
       extraSchoolUnsubs.clear();
     };
   }, [currentUser?.id, currentUser?.schoolId, currentUser?.role]);
-
-  // Keep last non-creator user target updated when user profile changes in appState
-  useEffect(() => {
-    if (currentUser && currentUser.role !== 'creator') {
-      const fresh = (appState?.users || []).find(u => u.id === currentUser.id) || currentUser;
-      Notifications.saveLastNonCreatorTargetUser(fresh);
-    }
-  }, [currentUser?.id, currentUser?.role, appState?.users]);
-
-  const [notifSwipeMap, setNotifSwipeMap] = useState<Record<string, { dx: number; dy: number; swiping: boolean; dismissing?: 'left' | 'right' | 'up' }>>({});
-  const notifDragStartRef = useRef<Record<string, { x: number; y: number; moved: boolean }>>({});
-
-  const dismissNotificationWithSwipe = (id: string, dir: 'left' | 'right' | 'up') => {
-    setNotifSwipeMap(prev => ({
-      ...prev,
-      [id]: {
-        dx: dir === 'left' ? -360 : dir === 'right' ? 360 : 0,
-        dy: dir === 'up' ? -140 : 0,
-        swiping: false,
-        dismissing: dir
-      }
-    }));
-    setTimeout(() => {
-      setInAppNotifications(prev => prev.filter(n => n.id !== id));
-      setNotifSwipeMap(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-    }, 180);
-  };
-
-  const pushInAppNotifications = (items: Notifications.EljurNotificationItem[]) => {
-    if (!items || items.length === 0) return;
-    const latestBatch = items.slice(-2).reverse();
-    setInAppNotifications(prev => {
-      const incomingIds = new Set(latestBatch.map(i => i.id));
-      const keptPrev = prev.filter(i => !incomingIds.has(i.id));
-      return [...latestBatch, ...keptPrev].slice(0, 2);
-    });
-    latestBatch.forEach(item => {
-      setTimeout(() => {
-        setInAppNotifications(prev => prev.filter(p => p.id !== item.id));
-      }, 4200);
-    });
-  };
-
-  // Real-time and wake-up catch-up notification evaluation for the target non-creator user
-  useEffect(() => {
-    if (!appState) return;
-    const targetUser = Notifications.getNotificationTargetUser(currentUser, appState);
-    if (!targetUser) return;
-    const targetSid = (targetUser.schoolId && targetUser.schoolId !== 'global') ? targetUser.schoolId : 'school_1';
-    const isReady = Boolean(cloudReadySchools[targetSid] || cloudReadySetRef.current.has(targetSid));
-    const activeLang = (H.getUserPreferences(currentUser?.id, null).language || appState?.settings?.language || 'ru') as 'ru' | 'en';
-
-    const newNotifications = Notifications.evaluateStateNotifications(
-      appState,
-      targetUser,
-      isReady,
-      activeLang
-    );
-
-    if (newNotifications.length > 0 && Notifications.areNotificationsEnabled()) {
-      Notifications.playNotificationSound();
-      newNotifications.forEach(item => {
-        Notifications.dispatchSystemNotification(item);
-      });
-      pushInAppNotifications(newNotifications);
-    }
-  }, [
-    appState?.messages,
-    appState?.announcements,
-    appState?.grades,
-    appState?.finalGrades,
-    appState?.homework,
-    currentUser?.id,
-    currentUser?.role,
-    cloudReadySchools
-  ]);
-
-  const handleNotificationNavigation = (payload?: { targetUserId?: string; schoolId?: string; targetTab?: string; id?: string; notificationId?: string }) => {
-    if (!payload) return;
-    const dismissId = payload.id || payload.notificationId;
-    if (dismissId) {
-      setInAppNotifications(prev => prev.filter(n => n.id !== dismissId));
-    }
-    const targetUid = payload.targetUserId;
-    const targetTab = payload.targetTab || 'messages';
-
-    setShowEljurInfo(false);
-    setShowEmptyEduResourceModal(false);
-    setShowLogoutConfirm(false);
-    setMobileMenuOpen(false);
-
-    if (targetUid) {
-      H.setSyncedStorageValue(`eljur_tab_${targetUid}`, targetTab);
-      H.setSyncedStorageValue(`eljur_view_mode_${targetUid}`, 'dashboard');
-    }
-    setViewMode('dashboard');
-
-    if (currentUserRef.current && targetUid && currentUserRef.current.id === targetUid) {
-      return;
-    }
-
-    if (targetUid) {
-      const candidateUser =
-        (appStateRef.current?.users || []).find(u => u.id === targetUid) ||
-        defaultState.users.find(u => u.id === targetUid) ||
-        Notifications.getNotificationTargetUser(null, appStateRef.current);
-
-      if (candidateUser && candidateUser.id === targetUid && candidateUser.role !== 'creator') {
-        handleLogin(candidateUser);
-        setTimeout(() => {
-          H.setSyncedStorageValue(`eljur_tab_${targetUid}`, targetTab);
-          H.setSyncedStorageValue(`eljur_view_mode_${targetUid}`, 'dashboard');
-          setViewMode('dashboard');
-        }, 50);
-      } else {
-        pendingNavRef.current = {
-          targetUserId: targetUid,
-          targetTab,
-          schoolId: payload.schoolId
-        };
-      }
-    }
-  };
-
-  // Resolve pending notification navigation once users list is populated
-  useEffect(() => {
-    if (!pendingNavRef.current) return;
-    const { targetUserId, targetTab } = pendingNavRef.current;
-    const candidateUser =
-      (appState?.users || []).find(u => u.id === targetUserId) ||
-      defaultState.users.find(u => u.id === targetUserId) ||
-      Notifications.getNotificationTargetUser(null, appState);
-    if (candidateUser && candidateUser.id === targetUserId && candidateUser.role !== 'creator') {
-      pendingNavRef.current = null;
-      handleLogin(candidateUser);
-      setTimeout(() => {
-        H.setSyncedStorageValue(`eljur_tab_${targetUserId}`, targetTab);
-        H.setSyncedStorageValue(`eljur_view_mode_${targetUserId}`, 'dashboard');
-        setViewMode('dashboard');
-      }, 50);
-    }
-  }, [appState?.users]);
-
-  // Listen for Service Worker notification clicks, browser notification clicks, background wakeups, and test notifications
-  useEffect(() => {
-    const checkPendingClickAndWake = async () => {
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistration().then(reg => reg?.update().catch(() => {})).catch(() => {});
-      }
-      const targetUser = Notifications.getNotificationTargetUser(currentUserRef.current, appStateRef.current);
-      if (targetUser) {
-        await Notifications.consumeSwUpdatedBaseline(targetUser.id);
-      }
-      const pendingClick = await Notifications.consumePendingNotificationClick();
-      if (pendingClick) {
-        handleNotificationNavigation(pendingClick);
-      }
-    };
-
-    checkPendingClickAndWake();
-
-    const stopKeepAlive = Notifications.startBackgroundKeepAliveWorker(() => {
-      checkPendingClickAndWake();
-    });
-
-    const onSwMessage = (event: MessageEvent) => {
-      if (event.data && event.data.type === 'ELJUR_NOTIFICATION_CLICK') {
-        Notifications.consumePendingNotificationClick().catch(() => {});
-        handleNotificationNavigation(event.data.data);
-      }
-    };
-    const onWindowClickEvent = (event: Event) => {
-      const custom = event as CustomEvent;
-      if (custom.detail) {
-        handleNotificationNavigation(custom.detail);
-      }
-    };
-    const onTestNotification = (event: Event) => {
-      const custom = event as CustomEvent<Notifications.EljurNotificationItem>;
-      if (custom.detail) {
-        Notifications.playNotificationSound();
-        Notifications.dispatchSystemNotification(custom.detail);
-        pushInAppNotifications([custom.detail]);
-      }
-    };
-
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('message', onSwMessage);
-    }
-    window.addEventListener('eljur-notification-click', onWindowClickEvent);
-    window.addEventListener('eljur-test-notification', onTestNotification);
-
-    return () => {
-      stopKeepAlive();
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.removeEventListener('message', onSwMessage);
-      }
-      window.removeEventListener('eljur-notification-click', onWindowClickEvent);
-      window.removeEventListener('eljur-test-notification', onTestNotification);
-    };
-  }, []);
 
   // Synchronize device-local visual preferences (theme, language, seasonal animations, fonts) with appState.settings
   useEffect(() => {
@@ -1634,7 +1339,6 @@ export default function App() {
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingStateRef = useRef<AppState | null>(null);
-  const lastFlushedGradesSigRef = useRef<string>('');
 
   const flushPendingState = (stateToFlush: AppState) => {
     if (currentUser?.role === 'creator') {
@@ -1654,16 +1358,6 @@ export default function App() {
       DB.saveSchoolState(targetSchoolId, stateToFlush);
       DB.saveSchoolCache(targetSchoolId, stateToFlush);
     }
-    const gradesSig = JSON.stringify({
-      g: stateToFlush.grades || {},
-      fg: stateToFlush.finalGrades || {}
-    });
-    if (lastFlushedGradesSigRef.current && lastFlushedGradesSigRef.current !== gradesSig) {
-      setTimeout(() => {
-        Notifications.triggerServerPushCheck().catch(() => {});
-      }, 500);
-    }
-    lastFlushedGradesSigRef.current = gradesSig;
   };
 
   useEffect(() => {
@@ -1731,12 +1425,6 @@ export default function App() {
     DB.setCurrentSessionUser(enrichedUser);
     setCurrentUser(enrichedUser);
     setViewMode('dashboard');
-    if (enrichedUser.role !== 'creator') {
-      Notifications.saveLastNonCreatorTargetUser(enrichedUser);
-      if (Notifications.areNotificationsEnabled() && Notifications.getSystemNotificationPermission() === 'default') {
-        Notifications.requestSystemNotificationPermission().catch(() => {});
-      }
-    }
     if (enrichedUser.schoolId && enrichedUser.schoolId !== 'global') {
       try { localStorage.setItem('eljur_active_school_id', enrichedUser.schoolId); } catch {}
     }
@@ -2318,174 +2006,6 @@ export default function App() {
           </div>
         </div>
       </Modal>
-
-      {/* In-app real-time push notification banners (max 2, swipeable up/left/right) */}
-      {inAppNotifications.length > 0 && (
-        <div className="fixed top-3 right-3 sm:top-5 sm:right-5 left-3 sm:left-auto sm:w-96 z-50 flex flex-col gap-2.5 pointer-events-none no-print">
-          {inAppNotifications.slice(0, 2).map((notif) => {
-            const IconComp =
-              notif.category === 'message'
-                ? MessageSquare
-                : notif.category === 'announcement'
-                ? Megaphone
-                : notif.category === 'grade' || notif.category === 'final_grade'
-                ? Award
-                : notif.category === 'homework'
-                ? BookOpen
-                : Bell;
-            const iconColors =
-              notif.category === 'message'
-                ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400'
-                : notif.category === 'announcement'
-                ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400'
-                : notif.category === 'grade' || notif.category === 'final_grade'
-                ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400'
-                : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400';
-
-            const showRecipientTag = currentUser?.id !== notif.targetUserId;
-            const swipe = notifSwipeMap[notif.id] || { dx: 0, dy: 0, swiping: false };
-            const translateX = swipe.dx;
-            const translateY = Math.min(0, swipe.dy);
-            const dragProgress = Math.max(Math.abs(translateX) / 180, Math.abs(translateY) / 100);
-            const opacity = swipe.dismissing ? 0 : Math.max(0.2, 1 - dragProgress * 0.7);
-
-            const handleStart = (clientX: number, clientY: number) => {
-              notifDragStartRef.current[notif.id] = { x: clientX, y: clientY, moved: false };
-              setNotifSwipeMap(prev => ({
-                ...prev,
-                [notif.id]: { dx: 0, dy: 0, swiping: true }
-              }));
-            };
-
-            const handleMove = (clientX: number, clientY: number) => {
-              const start = notifDragStartRef.current[notif.id];
-              if (!start) return;
-              const dx = clientX - start.x;
-              const dy = clientY - start.y;
-              if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
-                start.moved = true;
-              }
-              setNotifSwipeMap(prev => ({
-                ...prev,
-                [notif.id]: {
-                  dx,
-                  dy: dy < 0 ? dy : 0,
-                  swiping: true
-                }
-              }));
-            };
-
-            const handleEnd = () => {
-              const start = notifDragStartRef.current[notif.id];
-              const current = notifSwipeMap[notif.id];
-              delete notifDragStartRef.current[notif.id];
-              if (!current) return;
-              if (current.dy < -36 && Math.abs(current.dy) >= Math.abs(current.dx) * 0.7) {
-                dismissNotificationWithSwipe(notif.id, 'up');
-              } else if (current.dx < -55) {
-                dismissNotificationWithSwipe(notif.id, 'left');
-              } else if (current.dx > 55) {
-                dismissNotificationWithSwipe(notif.id, 'right');
-              } else {
-                setNotifSwipeMap(prev => ({
-                  ...prev,
-                  [notif.id]: { dx: 0, dy: 0, swiping: false }
-                }));
-              }
-              if (start?.moved) {
-                setTimeout(() => {
-                  delete notifDragStartRef.current[` suppress_${notif.id}`];
-                }, 80);
-                notifDragStartRef.current[` suppress_${notif.id}`] = { x: 0, y: 0, moved: true };
-              }
-            };
-
-            return (
-              <div
-                key={notif.id}
-                style={{
-                  transform: `translate3d(${translateX}px, ${translateY}px, 0)`,
-                  opacity,
-                  transition: swipe.swiping ? 'none' : 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease-out',
-                  touchAction: 'none'
-                }}
-                onTouchStart={(e) => {
-                  const t0 = e.touches[0];
-                  if (t0) handleStart(t0.clientX, t0.clientY);
-                }}
-                onTouchMove={(e) => {
-                  const t0 = e.touches[0];
-                  if (t0) handleMove(t0.clientX, t0.clientY);
-                }}
-                onTouchEnd={() => handleEnd()}
-                onTouchCancel={() => handleEnd()}
-                onPointerDown={(e) => {
-                  if (e.pointerType === 'touch') return;
-                  if ((e.target as HTMLElement)?.closest('button')) return;
-                  e.currentTarget.setPointerCapture?.(e.pointerId);
-                  handleStart(e.clientX, e.clientY);
-                }}
-                onPointerMove={(e) => {
-                  if (e.pointerType === 'touch') return;
-                  if (!notifDragStartRef.current[notif.id]) return;
-                  handleMove(e.clientX, e.clientY);
-                }}
-                onPointerUp={(e) => {
-                  if (e.pointerType === 'touch') return;
-                  handleEnd();
-                }}
-                onPointerCancel={(e) => {
-                  if (e.pointerType === 'touch') return;
-                  handleEnd();
-                }}
-                onClick={() => {
-                  if (notifDragStartRef.current[` suppress_${notif.id}`]?.moved) {
-                    delete notifDragStartRef.current[` suppress_${notif.id}`];
-                    return;
-                  }
-                  handleNotificationNavigation({
-                    id: notif.id,
-                    targetUserId: notif.targetUserId,
-                    schoolId: notif.schoolId,
-                    targetTab: notif.targetTab
-                  });
-                }}
-                className="pointer-events-auto cursor-pointer select-none group bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 rounded-2xl shadow-xl shadow-slate-900/10 dark:shadow-black/40 p-3.5 sm:p-4 flex items-start gap-3 hover:border-blue-400 dark:hover:border-blue-500 animate-in fade-in slide-in-from-top-2 duration-200"
-              >
-                <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 ${iconColors}`}>
-                  <IconComp size={18} />
-                </div>
-                <div className="min-w-0 flex-1 overflow-hidden">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white break-words [overflow-wrap:anywhere] line-clamp-2 leading-snug">
-                      {notif.title}
-                    </span>
-                    {showRecipientTag && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shrink-0">
-                        {H.formatShortName(notif.targetUserFio)}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 break-words [overflow-wrap:anywhere] line-clamp-2 mt-0.5 leading-snug">
-                    {notif.body}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setInAppNotifications(prev => prev.filter(n => n.id !== notif.id));
-                  }}
-                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors shrink-0"
-                  aria-label="Закрыть уведомление"
-                >
-                  <X size={15} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* Visual error feedback for database save/read issues */}
       {dbError && (
