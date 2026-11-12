@@ -485,6 +485,12 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           >
             <img
               src={`${import.meta.env.BASE_URL}assets/icon.png`}
+              onError={(e) => {
+                const img = e.currentTarget;
+                if (!img.src.endsWith('tab-favicon.png')) {
+                  img.src = `${import.meta.env.BASE_URL}tab-favicon.png`;
+                }
+              }}
               alt="ЭлЖур"
               draggable={false}
               className="w-full h-full object-contain pointer-events-none select-none [-webkit-user-drag:none] [-webkit-touch-callout:none]"

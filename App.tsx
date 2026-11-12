@@ -1634,6 +1634,7 @@ export default function App() {
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingStateRef = useRef<AppState | null>(null);
+  const lastFlushedGradesSigRef = useRef<string>('');
 
   const flushPendingState = (stateToFlush: AppState) => {
     if (currentUser?.role === 'creator') {
@@ -1653,9 +1654,16 @@ export default function App() {
       DB.saveSchoolState(targetSchoolId, stateToFlush);
       DB.saveSchoolCache(targetSchoolId, stateToFlush);
     }
-    setTimeout(() => {
-      Notifications.triggerServerPushCheck().catch(() => {});
-    }, 500);
+    const gradesSig = JSON.stringify({
+      g: stateToFlush.grades || {},
+      fg: stateToFlush.finalGrades || {}
+    });
+    if (lastFlushedGradesSigRef.current && lastFlushedGradesSigRef.current !== gradesSig) {
+      setTimeout(() => {
+        Notifications.triggerServerPushCheck().catch(() => {});
+      }, 500);
+    }
+    lastFlushedGradesSigRef.current = gradesSig;
   };
 
   useEffect(() => {
@@ -2025,6 +2033,12 @@ export default function App() {
                   <img
                     onClick={() => setShowEljurInfo(true)}
                     src={`${import.meta.env.BASE_URL}assets/icon.png`}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (!img.src.endsWith('tab-favicon.png')) {
+                        img.src = `${import.meta.env.BASE_URL}tab-favicon.png`;
+                      }
+                    }}
                     alt={t('info_eljur')}
                     title={t('info_eljur')}
                     draggable={false}
@@ -2069,6 +2083,12 @@ export default function App() {
                   <img
                     onClick={(e) => { e.stopPropagation(); setShowEljurInfo(true); }}
                     src={`${import.meta.env.BASE_URL}assets/icon.png`}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (!img.src.endsWith('tab-favicon.png')) {
+                        img.src = `${import.meta.env.BASE_URL}tab-favicon.png`;
+                      }
+                    }}
                     alt={t('info_eljur')}
                     title={t('info_eljur')}
                     draggable={false}

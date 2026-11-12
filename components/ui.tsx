@@ -1303,6 +1303,12 @@ export const SideNavDrawer: React.FC<{
             <div className="flex items-center gap-2 min-w-0">
               <img
                 src={`${import.meta.env.BASE_URL}assets/icon.png`}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (!img.src.endsWith('tab-favicon.png')) {
+                    img.src = `${import.meta.env.BASE_URL}tab-favicon.png`;
+                  }
+                }}
                 alt="ЭлЖур"
                 draggable={false}
                 className="w-7 h-7 object-contain shrink-0 select-none"

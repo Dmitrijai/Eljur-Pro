@@ -522,7 +522,7 @@ const buildCurrentSnapshot = (
       userId: targetUser.id,
       schoolId,
       updatedAt: Date.now(),
-      cloudSeeded: true,
+      cloudSeeded: false,
       messages,
       announcements,
       homework,
@@ -929,11 +929,16 @@ export const syncServiceWorkerWatcher = async (
     await consumeSwUpdatedBaseline(targetUser.id);
 
     const existingStored = readStoredBaseline(targetUser.id);
-    let baseline = explicitBaseline
+    const currentSnap = buildCurrentSnapshot(state, targetUser).baseline;
+    const baseline = explicitBaseline
       ? mergeBaselines(existingStored, explicitBaseline)
-      : existingStored || buildCurrentSnapshot(state, targetUser).baseline;
+      : existingStored
+        ? mergeBaselines(existingStored, currentSnap)
+        : currentSnap;
 
-    writeStoredBaseline(targetUser.id, baseline);
+    if (existingStored || explicitBaseline) {
+      writeStoredBaseline(targetUser.id, baseline);
+    }
 
     let idToken = '';
     let refreshToken = '';

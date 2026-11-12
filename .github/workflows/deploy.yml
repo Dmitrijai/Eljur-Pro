@@ -1,1 +1,108 @@
+name: Deploy React app to GitHub Pages
 
+on:
+  # Trigger deployment on every push to the main branch
+  push:
+    branches: ["main"]
+  # Allow manual trigger from the GitHub Actions tab
+  workflow_dispatch:
+
+# Set directory permissions to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Prevent concurrent deployments without colliding with stuck legacy runs
+concurrency:
+  group: "gh-pages-deploy-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  # Build job
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Restore Eljur icon and clean temporary attachments
+        run: |
+          rm -rf public/assets/aistudio
+          mkdir -p public/assets
+          if [ ! -s public/assets/icon.png ]; then
+            git show 452c3211eb5be23340249df65078d181ca1745c7:public/assets/icon.png > public/assets/icon.png 2>/dev/null || cp public/tab-favicon.png public/assets/icon.png
+          fi
+
+      - name: Build project
+        run: npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+  # Deployment job
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.dep1.outputs.page_url || steps.dep2.outputs.page_url || steps.dep3.outputs.page_url || steps.dep4.outputs.page_url || steps.dep5.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages (Attempt 1)
+        id: dep1
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retry 2
+        if: steps.dep1.outcome == 'failure'
+        run: sleep 10
+
+      - name: Deploy to GitHub Pages (Attempt 2)
+        if: steps.dep1.outcome == 'failure'
+        id: dep2
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retry 3
+        if: steps.dep1.outcome == 'failure' && steps.dep2.outcome == 'failure'
+        run: sleep 15
+
+      - name: Deploy to GitHub Pages (Attempt 3)
+        if: steps.dep1.outcome == 'failure' && steps.dep2.outcome == 'failure'
+        id: dep3
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retry 4
+        if: steps.dep1.outcome == 'failure' && steps.dep2.outcome == 'failure' && steps.dep3.outcome == 'failure'
+        run: sleep 20
+
+      - name: Deploy to GitHub Pages (Attempt 4)
+        if: steps.dep1.outcome == 'failure' && steps.dep2.outcome == 'failure' && steps.dep3.outcome == 'failure'
+        id: dep4
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retry 5
+        if: steps.dep1.outcome == 'failure' && steps.dep2.outcome == 'failure' && steps.dep3.outcome == 'failure' && steps.dep4.outcome == 'failure'
+        run: sleep 30
+
+      - name: Deploy to GitHub Pages (Attempt 5)
+        if: steps.dep1.outcome == 'failure' && steps.dep2.outcome == 'failure' && steps.dep3.outcome == 'failure' && steps.dep4.outcome == 'failure'
+        id: dep5
+        uses: actions/deploy-pages@v4

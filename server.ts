@@ -44,6 +44,8 @@ interface WatcherBaseline {
   userId: string;
   schoolId: string;
   updatedAt: number;
+  cloudSeeded?: boolean;
+  serverFirestoreSeeded?: boolean;
   messages: Record<string, string>;
   announcements: Record<string, string>;
   homework: Record<string, string>;
@@ -70,9 +72,30 @@ interface StoredPushDevice {
     studentGroupIds?: string[];
   };
   baseline: WatcherBaseline;
+  notifiedIds?: string[];
   senderNames: Record<string, string>;
   localReceipts: Record<string, any>;
   updatedAt: number;
+}
+
+function mergeServerBaselines(
+  a: WatcherBaseline | null | undefined,
+  b: WatcherBaseline | null | undefined
+): WatcherBaseline | null {
+  if (!b) return a || null;
+  if (!a || a.userId !== b.userId) return b;
+  return {
+    userId: b.userId,
+    schoolId: b.schoolId || a.schoolId || 'school_1',
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),
+    cloudSeeded: Boolean(a.cloudSeeded || b.cloudSeeded),
+    serverFirestoreSeeded: Boolean(a.serverFirestoreSeeded || b.serverFirestoreSeeded),
+    messages: { ...(a.messages || {}), ...(b.messages || {}) },
+    announcements: { ...(a.announcements || {}), ...(b.announcements || {}) },
+    homework: { ...(a.homework || {}), ...(b.homework || {}) },
+    grades: { ...(a.grades || {}), ...(b.grades || {}) },
+    finalGrades: { ...(a.finalGrades || {}), ...(b.finalGrades || {}) }
+  };
 }
 
 const devicesByEndpoint = new Map<string, StoredPushDevice>();
@@ -407,6 +430,28 @@ async function pollDevicesOnServer() {
         }
       }
 
+      // On first server poll for this user, seed Firestore baseline silently without firing old notifications
+      if (!prev.serverFirestoreSeeded) {
+        const seededBaseline = mergeServerBaselines(prev, {
+          userId: targetUser.id,
+          schoolId,
+          updatedAt: Date.now(),
+          cloudSeeded: true,
+          serverFirestoreSeeded: true,
+          messages: currentMessages,
+          announcements: currentAnnouncements,
+          homework: currentHomework,
+          grades: currentGrades,
+          finalGrades: currentFinalGrades
+        })!;
+        device.baseline = seededBaseline;
+        latestServerBaselineByUser.set(targetUser.id, seededBaseline);
+        saveStoredSubscriptions();
+        continue;
+      }
+
+      const notifiedSet = new Set<string>(Array.isArray(device.notifiedIds) ? device.notifiedIds : []);
+
       const resolveSender = (fromId: string) => {
         if (fromId === 'u_creator') return lang === 'ru' ? 'Создатель платформы' : 'Platform Creator';
         return senderNames[fromId] || (lang === 'ru' ? 'Администрация' : 'Administration');
@@ -416,6 +461,8 @@ async function pollDevicesOnServer() {
 
       for (const [msgId, sig] of Object.entries(currentMessages)) {
         if (prev.messages?.[msgId] === sig) continue;
+        const notifId = `notif_msg_${msgId}_${sig}`;
+        if (notifiedSet.has(notifId)) continue;
         const msg = messagesById[msgId];
         if (!msg || msg.fromId === targetUser.id || !isUnreadByUserServer(msg, targetUser.id, localReceipts)) continue;
         const isEdit = Boolean(prev.messages?.[msgId]);
@@ -426,7 +473,7 @@ async function pollDevicesOnServer() {
         const prefix = msg.title ? `${msg.title}: ` : '';
         const body = stripCleanText(`${prefix}${msg.body || ''}`) || (lang === 'ru' ? 'Откройте раздел «Сообщения»' : 'Open Messages');
         notificationsToSend.push({
-          id: `notif_msg_${msgId}_${sig}`,
+          id: notifId,
           category: 'message',
           title,
           body,
@@ -438,6 +485,8 @@ async function pollDevicesOnServer() {
 
       for (const [annId, sig] of Object.entries(currentAnnouncements)) {
         if (prev.announcements?.[annId] === sig) continue;
+        const notifId = `notif_ann_${annId}_${sig}`;
+        if (notifiedSet.has(notifId)) continue;
         const ann = announcementsById[annId];
         if (!ann || ann.fromId === targetUser.id || !isUnreadByUserServer(ann, targetUser.id, localReceipts)) continue;
         const isEdit = Boolean(prev.announcements?.[annId]);
@@ -448,7 +497,7 @@ async function pollDevicesOnServer() {
         const prefix = ann.title ? `${ann.title}: ` : '';
         const body = stripCleanText(`${prefix}${ann.body || ''}`) || (lang === 'ru' ? 'Откройте раздел «Объявления»' : 'Open Announcements');
         notificationsToSend.push({
-          id: `notif_ann_${annId}_${sig}`,
+          id: notifId,
           category: 'announcement',
           title,
           body,
@@ -461,6 +510,8 @@ async function pollDevicesOnServer() {
       if (targetUser.role === 'student') {
         for (const [gradeId, sig] of Object.entries(currentGrades)) {
           if (prev.grades?.[gradeId] === sig) continue;
+          const notifId = `notif_grade_${gradeId}_${sig}`;
+          if (notifiedSet.has(notifId)) continue;
           const gInfo = gradesById[gradeId];
           if (!gInfo) continue;
           const isEdit = Boolean(prev.grades?.[gradeId]);
@@ -471,7 +522,7 @@ async function pollDevicesOnServer() {
           const commentPart = gInfo.entry.comment ? `${stripCleanText(gInfo.entry.comment, 90)} • ` : '';
           const body = `${commentPart}${dateStr ? (lang === 'ru' ? `Урок ${dateStr}` : `Date ${dateStr}`) : ''}`.trim() || gInfo.subject;
           notificationsToSend.push({
-            id: `notif_grade_${gradeId}_${sig}`,
+            id: notifId,
             category: 'grade',
             title,
             body,
@@ -483,6 +534,8 @@ async function pollDevicesOnServer() {
 
         for (const [fgKey, val] of Object.entries(currentFinalGrades)) {
           if (prev.finalGrades?.[fgKey] === val) continue;
+          const notifId = `notif_fgrade_${fgKey}_${val}`;
+          if (notifiedSet.has(notifId)) continue;
           const fgInfo = finalGradesByKey[fgKey];
           if (!fgInfo) continue;
           const periodLabel = PERIOD_LABELS_RU[fgInfo.periodKey] || fgInfo.periodKey.toUpperCase();
@@ -493,7 +546,7 @@ async function pollDevicesOnServer() {
             ? `Выставлена оценка за период: ${periodLabel}`
             : `Period grade posted: ${periodLabel}`;
           notificationsToSend.push({
-            id: `notif_fgrade_${fgKey}_${val}`,
+            id: notifId,
             category: 'final_grade',
             title,
             body,
@@ -505,6 +558,8 @@ async function pollDevicesOnServer() {
 
         for (const [hwId, sig] of Object.entries(currentHomework)) {
           if (prev.homework?.[hwId] === sig) continue;
+          const notifId = `notif_hw_${hwId}_${sig}`;
+          if (notifiedSet.has(notifId)) continue;
           const hw = homeworkById[hwId];
           if (!hw) continue;
           const isEdit = Boolean(prev.homework?.[hwId]);
@@ -514,7 +569,7 @@ async function pollDevicesOnServer() {
             : `${isEdit ? '📚 Homework updated' : '📚 New homework'}: ${hw.subject}`;
           const body = `${dateStr ? (lang === 'ru' ? `На ${dateStr}: ` : `For ${dateStr}: `) : ''}${stripCleanText(hw.text, 120)}`;
           notificationsToSend.push({
-            id: `notif_hw_${hwId}_${sig}`,
+            id: notifId,
             category: 'homework',
             title,
             body,
@@ -525,19 +580,26 @@ async function pollDevicesOnServer() {
         }
       }
 
+      const updatedBaseline = mergeServerBaselines(prev, {
+        userId: targetUser.id,
+        schoolId,
+        updatedAt: Date.now(),
+        cloudSeeded: true,
+        serverFirestoreSeeded: true,
+        messages: currentMessages,
+        announcements: currentAnnouncements,
+        homework: currentHomework,
+        grades: currentGrades,
+        finalGrades: currentFinalGrades
+      })!;
+      device.baseline = updatedBaseline;
+      latestServerBaselineByUser.set(targetUser.id, updatedBaseline);
+
       if (notificationsToSend.length > 0) {
-        const updatedBaseline: WatcherBaseline = {
-          userId: targetUser.id,
-          schoolId,
-          updatedAt: Date.now(),
-          messages: { ...(prev.messages || {}), ...currentMessages },
-          announcements: { ...(prev.announcements || {}), ...currentAnnouncements },
-          homework: { ...(prev.homework || {}), ...currentHomework },
-          grades: { ...(prev.grades || {}), ...currentGrades },
-          finalGrades: { ...(prev.finalGrades || {}), ...currentFinalGrades }
-        };
-        device.baseline = updatedBaseline;
-        latestServerBaselineByUser.set(targetUser.id, updatedBaseline);
+        for (const item of notificationsToSend) {
+          notifiedSet.add(item.id);
+        }
+        device.notifiedIds = Array.from(notifiedSet).slice(-600);
         saveStoredSubscriptions();
 
         for (const item of notificationsToSend) {
@@ -585,6 +647,19 @@ async function startServer() {
     }
     const endpoint = String(body.subscription.endpoint);
     const existing = devicesByEndpoint.get(endpoint);
+    const targetUserId = body.targetUser?.id || existing?.targetUser?.id || '';
+    const latestUserBaseline = targetUserId ? latestServerBaselineByUser.get(targetUserId) : null;
+    const mergedBaseline = mergeServerBaselines(
+      mergeServerBaselines(existing?.baseline, latestUserBaseline),
+      body.baseline
+    ) as WatcherBaseline;
+    const mergedNotifiedIds = Array.from(
+      new Set([
+        ...(Array.isArray(existing?.notifiedIds) ? existing.notifiedIds : []),
+        ...(Array.isArray(body.notifiedIds) ? body.notifiedIds : [])
+      ])
+    ).slice(-600);
+
     const record: StoredPushDevice = {
       endpoint,
       subscription: body.subscription,
@@ -595,9 +670,10 @@ async function startServer() {
       enabled: body.enabled !== undefined ? Boolean(body.enabled) : (existing?.enabled ?? true),
       lang: body.lang === 'en' ? 'en' : 'ru',
       targetUser: body.targetUser || existing?.targetUser,
-      baseline: body.baseline || existing?.baseline,
-      senderNames: body.senderNames || existing?.senderNames || {},
-      localReceipts: body.localReceipts || existing?.localReceipts || {},
+      baseline: mergedBaseline,
+      notifiedIds: mergedNotifiedIds,
+      senderNames: { ...(existing?.senderNames || {}), ...(body.senderNames || {}) },
+      localReceipts: { ...(existing?.localReceipts || {}), ...(body.localReceipts || {}) },
       updatedAt: Date.now()
     };
     devicesByEndpoint.set(endpoint, record);

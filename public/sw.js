@@ -2,11 +2,13 @@ try {
   importScripts('./sw-notifications.js');
 } catch (e) {}
 
-const CACHE_NAME = 'ejournal-pro-pwa-v5';
+const CACHE_NAME = 'ejournal-pro-pwa-v6';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
+  './assets/icon.png',
+  './tab-favicon.png',
   './pwa-192x192.png',
   './pwa-512x512.png',
   './sw-notifications.js'
