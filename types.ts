@@ -11,6 +11,7 @@ export interface School {
   id: string;
   name: string;
   directorId: string; // The ID of the director who owns this school
+  timezone?: string; // School-specific timezone (e.g. 'UTC+3')
   classes?: { class: string; letter: string; headmasterId?: string }[];
   subjects?: string[];
   gradingSystem?: GradingSystemSettings;
@@ -30,10 +31,11 @@ export interface School {
 }
 
 export interface EmployeePermissions {
-  allowedTabs: string[]; // 'messages', 'rating', 'schedule', 'announcements', 'users'
+  allowedTabs: string[]; // 'messages', 'rating', 'schedule', 'announcements', 'users', 'load', 'groups', 'grading'
   messagingScope: string[]; // List of class keys "10_A" or "ALL"
   canSendAsDirector?: boolean; // Restored permission
   isAdministration?: boolean; // If true, accessible by everyone (except Creator), otherwise restricted to messagingScope
+  isTeacher?: boolean; // If true, employee also acts as a teacher (teaches lessons, homework, gradebook)
 }
 
 export interface User {

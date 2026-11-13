@@ -1435,6 +1435,7 @@ export const subscribeToSchool = (
         delete schoolLevelSettings.headingFontId;
         delete schoolLevelSettings.schoolsSettings;
         delete schoolLevelSettings.schoolInfo;
+        delete schoolLevelSettings.creatorTimezone;
 
         const snapshotSettings = { ...schoolLevelSettings };
         if (resolvedEljurInfo !== undefined) {
@@ -1501,6 +1502,15 @@ export const subscribeToSchool = (
       const users = snap.docs.map(d => {
         const uData = d.data() as any;
         const cleanDoc = { ...uData, schoolId: uData.schoolId || schoolId };
+        delete cleanDoc.theme;
+        delete cleanDoc.language;
+        delete cleanDoc.showSeasonalAnimations;
+        delete cleanDoc.bodyFontId;
+        delete cleanDoc.headingFontId;
+        delete cleanDoc.fcmTokens;
+        delete cleanDoc.notificationsEnabled;
+        delete cleanDoc.pushToken;
+        delete cleanDoc.notificationSettings;
         docSnapshots.set(`schools/${schoolId}/users/${d.id}`, stableSerialize(cleanDoc));
         return cleanDoc;
       });
@@ -1865,7 +1875,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
             gradeTypes: school.gradeTypes || plainState.schoolGradeTypes?.[schoolId] || (schoolId === 'school_1' ? plainState.gradeTypes : []),
             subjectRequirements: school.subjectRequirements || (schoolId === 'school_1' ? plainState.subjectRequirements : {}),
             scheduleSettings: school.scheduleSettings || plainState.schoolScheduleSettings?.[schoolId] || (schoolId === 'school_1' ? plainState.scheduleSettings : undefined),
-            timezone: (school as any).timezone || plainState.settings?.schoolsSettings?.[schoolId]?.timezone || plainState.schoolsSettings?.[schoolId]?.timezone || plainState.settings?.timezone || 'UTC+3',
+            timezone: (school as any).timezone || plainState.settings?.schoolsSettings?.[schoolId]?.timezone || plainState.schoolsSettings?.[schoolId]?.timezone || 'UTC+3',
             settings: (() => {
               const rawSettings = plainState.settings || plainState.schoolsSettings?.[schoolId];
               if (!rawSettings) return undefined;
@@ -1873,7 +1883,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
                 ...rawSettings,
                 ...(plainState.settings?.schoolsSettings?.[schoolId] || {}),
                 systemTimeOffset: plainState.settings?.systemTimeOffset ?? 0,
-                timezone: (school as any).timezone || plainState.settings?.schoolsSettings?.[schoolId]?.timezone || plainState.schoolsSettings?.[schoolId]?.timezone || plainState.settings?.timezone || 'UTC+3'
+                timezone: (school as any).timezone || plainState.settings?.schoolsSettings?.[schoolId]?.timezone || plainState.schoolsSettings?.[schoolId]?.timezone || 'UTC+3'
               };
               delete cleaned.theme;
               delete cleaned.language;
@@ -1882,6 +1892,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
               delete cleaned.headingFontId;
               delete cleaned.schoolsSettings;
               delete cleaned.schoolInfo;
+              delete cleaned.creatorTimezone;
               return cleaned;
             })()
           };
@@ -1946,7 +1957,7 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
         delete (userDoc as any).notificationsEnabled;
         delete (userDoc as any).pushToken;
         delete (userDoc as any).notificationSettings;
-        queueSetIfChanged(doc(db, 'schools', schoolId, 'users', u.id), `schools/${schoolId}/users/${u.id}`, userDoc, true);
+        queueSetIfChanged(doc(db, 'schools', schoolId, 'users', u.id), `schools/${schoolId}/users/${u.id}`, userDoc, false);
         synced.users.add(u.id);
       }
     }

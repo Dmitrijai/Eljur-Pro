@@ -288,6 +288,8 @@ export const DICT: Record<string, Record<string, string>> = {
     select_lesson: 'Выберите урок',
     back: 'Назад',
     timezone_desc: 'Определяет эталонное время для школы.',
+    timezone_creator_desc: 'Устанавливает часовой пояс только для вашего аккаунта Создателя (не влияет на школы).',
+    can_be_teacher: 'Является также учителем (ведёт уроки и журнал)',
     creator_settings: 'Настройки Создателя',
     secret_key: 'Секретная клавиша (Код)',
     secret_key_desc: 'Код клавиши (например: Space, Enter, KeyA)',
@@ -867,6 +869,8 @@ export const DICT: Record<string, Record<string, string>> = {
     select_lesson: 'Select Lesson',
     back: 'Back',
     timezone_desc: 'Defines the reference time for the school.',
+    timezone_creator_desc: 'Sets the timezone only for your Creator account (does not affect schools).',
+    can_be_teacher: 'Also a teacher (teaches lessons & gradebook)',
     creator_settings: 'Creator Settings',
     secret_key: 'Secret Key (Code)',
     secret_key_desc: 'Key Code (e.g., Space, Enter, KeyA)',
@@ -2032,6 +2036,11 @@ export const getClassHeadmaster = (state: AppState, schoolId: string | undefined
     const cls = classes.find(c => c.class === classNum && c.letter === classLetter);
     if (!cls || !cls.headmasterId) return null;
     return state.users.find(u => u.id === cls.headmasterId && (!schoolId || schoolId === 'global' || !u.schoolId || u.schoolId === schoolId)) || null;
+};
+
+export const isUserTeacherCapable = (u?: User | null): boolean => {
+    if (!u) return false;
+    return u.role === 'teacher' || (u.role === 'employee' && !!u.employeePermissions?.isTeacher);
 };
 
 export const getEligibleHeadmasterCandidates = (state: AppState, schoolId: string | undefined): User[] => {
@@ -3238,6 +3247,16 @@ export const parseTimezoneOffsetHours = (tz?: string | null): number => {
 };
 
 export const getSchoolTimezone = (state?: any, schoolId?: string | null): string => {
+    if (schoolId === 'global') {
+        if (state?.settings?.creatorTimezone) return state.settings.creatorTimezone;
+        if (typeof localStorage !== 'undefined') {
+            try {
+                const savedCreatorTz = localStorage.getItem('eljur_creator_timezone');
+                if (savedCreatorTz) return savedCreatorTz;
+            } catch {}
+        }
+        return 'UTC+3';
+    }
     const targetSid = schoolId && schoolId !== 'global' ? schoolId : undefined;
     if (targetSid) {
         const sch = state?.schools?.find?.((s: any) => s.id === targetSid);
@@ -3245,6 +3264,7 @@ export const getSchoolTimezone = (state?: any, schoolId?: string | null): string
         if (state?.settings?.schoolsSettings?.[targetSid]?.timezone) {
             return state.settings.schoolsSettings[targetSid].timezone;
         }
+        return 'UTC+3';
     }
     if (state?.settings?.timezone) return state.settings.timezone;
     return activeSchoolTimezone || 'UTC+3';

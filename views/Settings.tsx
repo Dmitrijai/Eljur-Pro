@@ -65,7 +65,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
     refreshFonts();
     
     const updateInputsFromWorldTime = () => {
-      const currentSystemTime = H.getSchoolNow(state, user.schoolId);
+      const currentSystemTime = H.getSchoolNow(state, isCreator ? 'global' : user.schoolId);
       const pad = (n: number) => n.toString().padStart(2, '0');
       setVirtualDatePart(`${currentSystemTime.getFullYear()}-${pad(currentSystemTime.getMonth()+1)}-${pad(currentSystemTime.getDate())}`);
       setVirtualTimePart(`${pad(currentSystemTime.getHours())}:${pad(currentSystemTime.getMinutes())}:${pad(currentSystemTime.getSeconds())}`);
@@ -523,7 +523,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       if (timeMachineError || !virtualDatePart || !virtualTimePart) return;
       
       await H.syncNetworkClockOffset(true);
-      const activeTz = H.getSchoolTimezone(state, user.schoolId);
+      const activeTz = H.getSchoolTimezone(state, isCreator ? 'global' : user.schoolId);
       const targetTime = H.parseWallClockInSchoolTz(virtualDatePart, virtualTimePart, activeTz);
       
       if (isNaN(targetTime)) {
@@ -550,9 +550,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const resetTime = async () => {
       await H.syncNetworkClockOffset(true);
       state.settings.systemTimeOffset = 0;
-      const activeTz = H.getSchoolTimezone(state, user.schoolId);
+      const activeTz = H.getSchoolTimezone(state, isCreator ? 'global' : user.schoolId);
       H.setActiveTimeContext(0, activeTz);
-      const now = H.getSchoolNow({ ...state, settings: { ...state.settings, systemTimeOffset: 0 } }, user.schoolId);
+      const now = H.getSchoolNow({ ...state, settings: { ...state.settings, systemTimeOffset: 0 } }, isCreator ? 'global' : user.schoolId);
       const pad = (n: number) => n.toString().padStart(2, '0');
       setVirtualDatePart(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`);
       setVirtualTimePart(`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
@@ -614,7 +614,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       : user.role === 'student'
         ? `${t('student')}${user.class ? ` • ${user.class}${user.letter || ''}` : ''}`
         : user.role === 'employee'
-          ? (user.customRole || t('employee'))
+          ? `${user.customRole || t('employee')}${user.employeePermissions?.isTeacher ? ` • ${t('teacher')}` : ''}`
           : t('creator');
 
   const schoolDisplayName = user.role === 'creator'
@@ -744,26 +744,39 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
              <div>
                 <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('timezone')}</label>
                 <Select 
-                   value={H.getSchoolTimezone(state, user.schoolId)} 
+                   value={H.getSchoolTimezone(state, isCreator ? 'global' : user.schoolId)} 
                    onChange={(e) => {
                      const tz = e.target.value;
-                     state.settings.timezone = tz;
-                     const targetSid = user.schoolId && user.schoolId !== 'global' ? user.schoolId : 'school_1';
-                     if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
-                     if (!(state.settings as any).schoolsSettings[targetSid]) (state.settings as any).schoolsSettings[targetSid] = {};
-                     (state.settings as any).schoolsSettings[targetSid].timezone = tz;
-                     if (currentSchool) {
-                       (currentSchool as any).timezone = tz;
+                     if (isCreator) {
+                       try {
+                         localStorage.setItem('eljur_creator_timezone', tz);
+                       } catch {}
+                       (state.settings as any).creatorTimezone = tz;
+                       H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
+                       const updatedNow = H.getSchoolNow(state, 'global');
+                       const pad = (n: number) => n.toString().padStart(2, '0');
+                       setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
+                       setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                       onUpdate({ ...state });
+                     } else if (isDirector && user.schoolId && user.schoolId !== 'global') {
+                       const targetSid = user.schoolId;
+                       state.settings.timezone = tz;
+                       if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
+                       if (!(state.settings as any).schoolsSettings[targetSid]) (state.settings as any).schoolsSettings[targetSid] = {};
+                       (state.settings as any).schoolsSettings[targetSid].timezone = tz;
+                       if (currentSchool && currentSchool.id === targetSid) {
+                         (currentSchool as any).timezone = tz;
+                       }
+                       state.schools = state.schools.map(s => s.id === targetSid ? ({ ...s, timezone: tz } as any) : s);
+                       H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
+                       const updatedNow = H.getSchoolNow(state, targetSid);
+                       const pad = (n: number) => n.toString().padStart(2, '0');
+                       setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
+                       setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                       onUpdate({ ...state });
+                       DB.saveSchoolState(targetSid, state).catch(() => {});
+                       DB.saveSchoolCache(targetSid, state).catch(() => {});
                      }
-                     state.schools = state.schools.map(s => s.id === targetSid ? ({ ...s, timezone: tz } as any) : s);
-                     H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
-                     const updatedNow = H.getSchoolNow(state, user.schoolId);
-                     const pad = (n: number) => n.toString().padStart(2, '0');
-                     setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
-                     setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
-                     onUpdate({ ...state });
-                     DB.saveSchoolState(targetSid, state).catch(() => {});
-                     DB.saveSchoolCache(targetSid, state).catch(() => {});
                    }}
                 >
                    <option value="UTC+2">{lang === 'en' ? 'Kaliningrad (MSK-1)' : 'Калининград (MSK-1)'}</option>
@@ -778,7 +791,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                    <option value="UTC+11">{lang === 'en' ? 'Magadan (MSK+8)' : 'Магадан (MSK+8)'}</option>
                    <option value="UTC+12">{lang === 'en' ? 'Kamchatka (MSK+9)' : 'Камчатка (MSK+9)'}</option>
                 </Select>
-                <p className="text-[11px] sm:text-xs text-slate-400 mt-1">{t('timezone_desc')}</p>
+                <p className="text-[11px] sm:text-xs text-slate-400 mt-1">{isCreator ? t('timezone_creator_desc') : t('timezone_desc')}</p>
              </div>
           </div>
         </Card>

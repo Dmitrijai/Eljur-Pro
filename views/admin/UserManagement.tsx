@@ -18,7 +18,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const [roleInputOpen, setRoleInputOpen] = useState<Record<string, boolean>>({});
     const [newRoleInputOpen, setNewRoleInputOpen] = useState(false);
     const [focusedNameId, setFocusedNameId] = useState<string | null>(null);
-    const [newUser, setNewUser] = useState({ fio: '', login: '', password: '', role: 'student' as Role, customRole: '', classKey: '', teacherClasses: [] as string[], schoolId: (currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : (state.schools[0]?.id || 'school_1') });
+    const [newUser, setNewUser] = useState({ fio: '', login: '', password: '', role: 'student' as Role, customRole: '', classKey: '', teacherClasses: [] as string[], isTeacher: false, schoolId: (currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : (state.schools[0]?.id || 'school_1') });
     const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>({});
     const [newClassNum, setNewClassNum] = useState('');
     const [newClassLet, setNewClassLet] = useState('');
@@ -77,7 +77,30 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         }
         return errors; 
     }, [newUser.fio, newUser.login, newUser.password, state.users, targetAddUserSchoolId, isGlobal, lang]);
-    let filteredUsers = state.users.filter(u => { if (isGlobal) { if (u.role === 'creator') return false; if (filterSchool && u.schoolId !== filterSchool) return false; } else { if (u.schoolId !== currentUser.schoolId) return false; if (u.id === currentUser.id) return false; if (u.role === 'creator') return false; if (currentUser.role === 'employee' && u.role === 'director') return false; } if (filterRole) return u.role === filterRole; if (filterClass) { if (u.role === 'student') return `${u.class}_${u.letter}` === filterClass; if (u.role === 'teacher') return (u.classes || []).includes(filterClass); return false; } return true; });
+    let filteredUsers = state.users.filter(u => {
+        if (isGlobal) {
+            if (u.role === 'creator') return false;
+            if (filterSchool && u.schoolId !== filterSchool) return false;
+        } else {
+            if (u.schoolId !== currentUser.schoolId) return false;
+            if (u.id === currentUser.id) return false;
+            if (u.role === 'creator') return false;
+            if (currentUser.role === 'employee' && u.role === 'director') return false;
+        }
+        if (filterRole) {
+            if (filterRole === 'teacher') {
+                if (!H.isUserTeacherCapable(u)) return false;
+            } else if (u.role !== filterRole) {
+                return false;
+            }
+        }
+        if (filterClass) {
+            if (u.role === 'student') return `${u.class}_${u.letter}` === filterClass;
+            if (H.isUserTeacherCapable(u)) return (u.classes || []).includes(filterClass);
+            return false;
+        }
+        return true;
+    });
     const sortedUsers = [...filteredUsers].sort((a, b) => {
         if (sortField === 'fio') return (a.fio || '').localeCompare(b.fio || '');
         if (sortField === 'role') return (a.role || '').localeCompare(b.role || '') || (a.fio || '').localeCompare(b.fio || '');
@@ -211,8 +234,33 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
         } 
     };
-    const updateCustomRole = (userId: string, val: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { state.users[uIndex].customRole = val.slice(0, 80); onUpdate(state); } };
-    const addClassToTeacher = (userId: string, classKey: string) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { const u = state.users[uIndex]; if (!u.classes) u.classes = []; if (!u.classes.includes(classKey)) { u.classes.push(classKey); onUpdate(state); } } };
+    const persistUpdatedUser = (u: User) => {
+        state.users = [...state.users];
+        const sid = u?.schoolId && u.schoolId !== 'global' ? u.schoolId : 'school_1';
+        onUpdate(state);
+        DB.saveSchoolEntity(sid, 'users', u.id, u).catch(() => {});
+        DB.saveSchoolCache(sid, state).catch(() => {});
+        if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
+    };
+
+    const updateCustomRole = (userId: string, val: string) => {
+        const uIndex = state.users.findIndex(u => u.id === userId);
+        if (uIndex > -1) {
+            state.users[uIndex].customRole = val.slice(0, 80);
+            persistUpdatedUser(state.users[uIndex]);
+        }
+    };
+    const addClassToTeacher = (userId: string, classKey: string) => {
+        const uIndex = state.users.findIndex(u => u.id === userId);
+        if (uIndex > -1) {
+            const u = state.users[uIndex];
+            if (!u.classes) u.classes = [];
+            if (!u.classes.includes(classKey)) {
+                u.classes.push(classKey);
+                persistUpdatedUser(u);
+            }
+        }
+    };
     
     // UPDATED REMOVE LOGIC WITH MODAL TRIGGER
     const removeClassFromTeacher = (userId: string, classKey: string) => { 
@@ -239,13 +287,26 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             const u = state.users[uIndex]; 
             if (u.classes) { 
                 u.classes = u.classes.filter(c => c !== classKey); 
-                onUpdate(state); 
+                persistUpdatedUser(u);
             } 
         }
         setClassRemovalConfirm(null);
     };
 
-    const updateEmployeePermission = (userId: string, field: any, val: any) => { const uIndex = state.users.findIndex(u => u.id === userId); if (uIndex > -1) { const u = state.users[uIndex]; if (!u.employeePermissions) u.employeePermissions = { allowedTabs: ['messages'], messagingScope: ['ALL'], canSendAsDirector: false }; (u.employeePermissions as any)[field] = val; if (field === 'isAdministration' && val === true) { u.employeePermissions.messagingScope = ['ALL']; } onUpdate(state); } };
+    const updateEmployeePermission = (userId: string, field: any, val: any) => {
+        const uIndex = state.users.findIndex(u => u.id === userId);
+        if (uIndex > -1) {
+            const u = state.users[uIndex];
+            if (!u.employeePermissions) {
+                u.employeePermissions = { allowedTabs: ['messages'], messagingScope: ['ALL'], canSendAsDirector: false };
+            }
+            (u.employeePermissions as any)[field] = val;
+            if (field === 'isAdministration' && val === true) {
+                u.employeePermissions.messagingScope = ['ALL'];
+            }
+            persistUpdatedUser(u);
+        }
+    };
     const deleteUser = (id: string, name: string) => { 
         if(!window.confirm(`${t('confirm_delete')} "${name}"?`)) return; 
         if (currentUser.role === 'employee' && (id === currentUser.id || id === state.schools.find(s=>s.id===currentUser.schoolId)?.directorId)) return alert('Error'); 
@@ -398,7 +459,15 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         } else if (newUser.role === 'teacher') { 
             u.classes = newUser.teacherClasses; 
         } else if (newUser.role === 'employee') { 
-            u.employeePermissions = { allowedTabs: ['messages'], messagingScope: ['ALL'], canSendAsDirector: false }; 
+            u.employeePermissions = {
+                allowedTabs: ['messages'],
+                messagingScope: ['ALL'],
+                canSendAsDirector: false,
+                ...(newUser.isTeacher ? { isTeacher: true } : {})
+            };
+            if (newUser.isTeacher && newUser.teacherClasses.length > 0) {
+                u.classes = newUser.teacherClasses;
+            }
         } else if (newUser.role === 'director' && targetSchoolId) {
             const targetSchool = state.schools.find(s => s.id === targetSchoolId);
             if (targetSchool) targetSchool.directorId = u.id;
@@ -410,7 +479,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         DB.saveSchoolEntity(sid, 'users', u.id, u).catch(() => {});
         DB.saveSchoolCache(sid, state).catch(() => {});
         if (sid !== 'school_1') DB.saveSchoolCache('school_1', state).catch(() => {});
-        setNewUser({ ...newUser, fio: '', login: '', password: '', role: 'student', customRole: '', classKey: '', teacherClasses: [] }); 
+        setNewUser({ ...newUser, fio: '', login: '', password: '', role: 'student', customRole: '', classKey: '', teacherClasses: [], isTeacher: false }); 
         setNewRoleInputOpen(false); 
         setUiError(null); 
         setUiErrorUserId(null); 
@@ -447,7 +516,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         // Also cleanup teacher and student class references within this school
         state.users.forEach(u => {
             if (schoolId && u.schoolId !== schoolId) return;
-            if (u.role === 'teacher' && u.classes) {
+            if ((u.role === 'teacher' || u.role === 'employee') && u.classes) {
                 u.classes = u.classes.filter(c => c !== clsKey);
             }
             if (u.role === 'student' && u.class === cNum && u.letter === cLet) {
@@ -861,7 +930,39 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                 />
                                 <span className="font-semibold text-blue-900 dark:text-blue-400 flex items-center gap-1.5"><Building size={13}/> {t('add_to_admin')}</span>
                               </label>
+                              <label className="flex items-center gap-2 text-xs cursor-pointer bg-emerald-50 p-2 rounded-lg border border-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-900/30">
+                                <input
+                                  type="checkbox"
+                                  className="rounded text-emerald-600 focus:ring-emerald-500"
+                                  checked={!!u.employeePermissions?.isTeacher}
+                                  onChange={(e) => updateEmployeePermission(u.id, 'isTeacher', e.target.checked)}
+                                />
+                                <span className="font-semibold text-emerald-900 dark:text-emerald-400 flex items-center gap-1.5"><GraduationCap size={13}/> {t('can_be_teacher')}</span>
+                              </label>
                             </div>
+
+                            {u.employeePermissions?.isTeacher && (
+                              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 animate-in fade-in">
+                                <div className="text-[10px] font-bold uppercase text-slate-400">{t('class_management')}</div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {H.getSchoolClasses(state, u.schoolId).map(c => {
+                                    const key = `${c.class}_${c.letter}`;
+                                    const isActive = (u.classes || []).includes(key);
+                                    return (
+                                      <button
+                                        key={key}
+                                        type="button"
+                                        onClick={() => isActive ? removeClassFromTeacher(u.id, key) : addClassToTeacher(u.id, key)}
+                                        className={`px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300'}`}
+                                      >
+                                        {isActive && <Check size={12} strokeWidth={3}/>}
+                                        {c.class}{c.letter}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -927,15 +1028,30 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                 </div>
             );
         } else if (u.role === 'employee') {
+            const validKeys = new Set((rowSchoolClasses || []).map(c => `${c.class}_${c.letter}`));
+            const activeTeacherClasses = (u.classes || []).filter(ck => validKeys.has(ck));
             return (
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center gap-1">
                     <span className="text-xs text-slate-500 font-medium">
                         {u.employeePermissions?.messagingScope?.includes('ALL') ? t('all_classes') : `${u.employeePermissions?.messagingScope?.length || 0} ${t('classes_count_suffix')}`}
                     </span>
-                    {u.employeePermissions?.isAdministration && (
-                        <span className="text-[9px] uppercase font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 mt-1 dark:bg-amber-900/30 dark:text-amber-400">
-                            {t('administration')}
-                        </span>
+                    <div className="flex flex-wrap gap-1 items-center justify-center">
+                        {u.employeePermissions?.isAdministration && (
+                            <span className="text-[9px] uppercase font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 dark:bg-amber-900/30 dark:text-amber-400">
+                                {t('administration')}
+                            </span>
+                        )}
+                        {u.employeePermissions?.isTeacher && (
+                            <span className="text-[9px] uppercase font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800">
+                                {t('teacher')}
+                            </span>
+                        )}
+                    </div>
+                    {u.employeePermissions?.isTeacher && activeTeacherClasses.length > 0 && (
+                        <div className="flex flex-wrap gap-1 items-center justify-center">
+                            {activeTeacherClasses.slice(0, 3).map(ck => <span key={ck} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md text-[9px] font-bold dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300">{ck.replace('_','')}</span>)}
+                            {activeTeacherClasses.length > 3 && <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded-md dark:bg-slate-800">+{activeTeacherClasses.length - 3}</span>}
+                        </div>
                     )}
                     {leadingBadge}
                 </div>
@@ -950,7 +1066,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         }
         return <span className="text-slate-400">—</span>;
     })()}
-</td><td className="p-5 text-right no-print"><div className="flex items-center justify-end gap-2">{isGlobal && <Button size="sm" variant={u.blockedUntil ? 'primary' : 'secondary'} onClick={() => setBlockingUserId(u.id)}>{u.blockedUntil ? <Unlock size={14} /> : <Lock size={14} />}</Button>}<Button variant="danger" size="sm" onClick={() => deleteUser(u.id, u.fio)}><Trash2 size={14}/></Button></div></td></tr>{u.role === 'teacher' && expandedRows[u.id] && <tr className="bg-slate-50/50 border-b border-slate-200 transition-all animate-in fade-in dark:bg-slate-900/50 dark:border-slate-800 no-print"><td colSpan={isGlobal ? 9 : 8} className="p-4 md:p-5 md:pl-20"><div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-8 shadow-xl max-w-4xl dark:bg-slate-900 dark:border-slate-700"><div className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-[0.2em] dark:text-slate-500">{t('class_management')} {u.fio}</div><div className="flex flex-wrap gap-3">{H.getSchoolClasses(state, u.schoolId).map(c => { const key = `${c.class}_${c.letter}`; const isActive = (u.classes || []).includes(key); return <button key={key} onClick={() => isActive ? removeClassFromTeacher(u.id, key) : addClassToTeacher(u.id, key)} className={`px-5 py-2.5 rounded-xl border-2 text-sm font-bold transition-all duration-300 flex items-center gap-2 ${isActive ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/30 transform scale-105' : 'bg-white text-slate-600 border-slate-100 hover:border-blue-400 hover:text-blue-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-blue-500 dark:hover:text-blue-300'}`}>{isActive && <Check size={16} strokeWidth={3}/>}{c.class}{c.letter}</button> })}</div></div></td></tr>}{u.role === 'employee' && expandedRows[u.id] && <tr className="bg-slate-50/50 border-b border-slate-200 transition-all animate-in fade-in dark:bg-slate-900/50 dark:border-slate-800 no-print"><td colSpan={isGlobal ? 9 : 8} className="p-4 md:p-5 md:pl-20"><div className="bg-white border border-slate-200 rounded-xl p-4 md:p-6 shadow-sm max-w-4xl dark:bg-slate-900 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8"><div><h4 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide dark:text-slate-400">{t('can_write_to')}</h4><div className="space-y-2 mb-4"><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" disabled={u.employeePermissions?.isAdministration} checked={u.employeePermissions?.messagingScope?.includes('ALL')} onChange={(e) => updateEmployeePermission(u.id, 'messagingScope', e.target.checked ? ['ALL'] : [])} /><span className="font-semibold text-slate-700 dark:text-slate-200">{t('all_classes')}</span></label></div>{!u.employeePermissions?.messagingScope?.includes('ALL') && <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">{H.getSchoolClasses(state, u.schoolId).map(c => { const key = `${c.class}_${c.letter}`; const isActive = u.employeePermissions?.messagingScope?.includes(key); return <button key={key} onClick={() => { const current = u.employeePermissions?.messagingScope || []; const newScope = isActive ? current.filter(s => s !== key) : [...current, key]; updateEmployeePermission(u.id, 'messagingScope', newScope); }} className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-all ${isActive ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{c.class}{c.letter}</button> })}</div>}</div><div><h4 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide dark:text-slate-400">{t('access_tabs')}</h4><div className="space-y-3">{['messages', 'announcements', 'rating', 'schedule', 'users', 'load', 'groups', 'grading'].map(tab => <label key={tab} className="flex items-center gap-2 text-sm cursor-pointer p-2 hover:bg-slate-50 rounded dark:hover:bg-slate-800"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" checked={u.employeePermissions?.allowedTabs?.includes(tab)} onChange={(e) => { const current = u.employeePermissions?.allowedTabs || []; const newTabs = e.target.checked ? [...current, tab] : current.filter(t => t !== tab); updateEmployeePermission(u.id, 'allowedTabs', newTabs); }} /><span className="capitalize text-slate-700 dark:text-slate-300">{t(tab === 'load' ? 'teacher_load' : tab === 'grading' ? 'grading_setup' : tab)}</span></label>)}</div><div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2"><h4 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide dark:text-slate-400">{t('special_rights')}</h4><label className="flex items-center gap-2 text-sm cursor-pointer bg-amber-50 p-2 rounded border border-amber-100 dark:bg-amber-900/20 dark:border-amber-900/30"><input type="checkbox" className="rounded text-amber-600 focus:ring-amber-500" checked={!!u.employeePermissions?.canSendAsDirector} onChange={(e) => updateEmployeePermission(u.id, 'canSendAsDirector', e.target.checked)} /><span className="font-semibold text-amber-900 dark:text-amber-400 flex items-center gap-2"><Shield size={14}/> {t('write_as_director')}</span></label><label className="flex items-center gap-2 text-sm cursor-pointer bg-blue-50 p-2 rounded border border-blue-100 dark:bg-blue-900/20 dark:border-blue-900/30"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" checked={!!u.employeePermissions?.isAdministration} onChange={(e) => updateEmployeePermission(u.id, 'isAdministration', e.target.checked)} /><span className="font-semibold text-blue-900 dark:text-blue-400 flex items-center gap-2"><Building size={14}/> {t('add_to_admin')}</span></label></div></div></div></td></tr>}</React.Fragment>)})}</tbody></table></div>
+</td><td className="p-5 text-right no-print"><div className="flex items-center justify-end gap-2">{isGlobal && <Button size="sm" variant={u.blockedUntil ? 'primary' : 'secondary'} onClick={() => setBlockingUserId(u.id)}>{u.blockedUntil ? <Unlock size={14} /> : <Lock size={14} />}</Button>}<Button variant="danger" size="sm" onClick={() => deleteUser(u.id, u.fio)}><Trash2 size={14}/></Button></div></td></tr>{u.role === 'teacher' && expandedRows[u.id] && <tr className="bg-slate-50/50 border-b border-slate-200 transition-all animate-in fade-in dark:bg-slate-900/50 dark:border-slate-800 no-print"><td colSpan={isGlobal ? 9 : 8} className="p-4 md:p-5 md:pl-20"><div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-8 shadow-xl max-w-4xl dark:bg-slate-900 dark:border-slate-700"><div className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-[0.2em] dark:text-slate-500">{t('class_management')} {u.fio}</div><div className="flex flex-wrap gap-3">{H.getSchoolClasses(state, u.schoolId).map(c => { const key = `${c.class}_${c.letter}`; const isActive = (u.classes || []).includes(key); return <button key={key} onClick={() => isActive ? removeClassFromTeacher(u.id, key) : addClassToTeacher(u.id, key)} className={`px-5 py-2.5 rounded-xl border-2 text-sm font-bold transition-all duration-300 flex items-center gap-2 ${isActive ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/30 transform scale-105' : 'bg-white text-slate-600 border-slate-100 hover:border-blue-400 hover:text-blue-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-blue-500 dark:hover:text-blue-300'}`}>{isActive && <Check size={16} strokeWidth={3}/>}{c.class}{c.letter}</button> })}</div></div></td></tr>}{u.role === 'employee' && expandedRows[u.id] && <tr className="bg-slate-50/50 border-b border-slate-200 transition-all animate-in fade-in dark:bg-slate-900/50 dark:border-slate-800 no-print"><td colSpan={isGlobal ? 9 : 8} className="p-4 md:p-5 md:pl-20"><div className="bg-white border border-slate-200 rounded-xl p-4 md:p-6 shadow-sm max-w-4xl dark:bg-slate-900 dark:border-slate-700 space-y-6"><div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8"><div><h4 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide dark:text-slate-400">{t('can_write_to')}</h4><div className="space-y-2 mb-4"><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" disabled={u.employeePermissions?.isAdministration} checked={u.employeePermissions?.messagingScope?.includes('ALL')} onChange={(e) => updateEmployeePermission(u.id, 'messagingScope', e.target.checked ? ['ALL'] : [])} /><span className="font-semibold text-slate-700 dark:text-slate-200">{t('all_classes')}</span></label></div>{!u.employeePermissions?.messagingScope?.includes('ALL') && <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">{H.getSchoolClasses(state, u.schoolId).map(c => { const key = `${c.class}_${c.letter}`; const isActive = u.employeePermissions?.messagingScope?.includes(key); return <button key={key} onClick={() => { const current = u.employeePermissions?.messagingScope || []; const newScope = isActive ? current.filter(s => s !== key) : [...current, key]; updateEmployeePermission(u.id, 'messagingScope', newScope); }} className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-all ${isActive ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{c.class}{c.letter}</button> })}</div>}</div><div><h4 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide dark:text-slate-400">{t('access_tabs')}</h4><div className="space-y-3">{['messages', 'announcements', 'rating', 'schedule', 'users', 'load', 'groups', 'grading'].map(tab => <label key={tab} className="flex items-center gap-2 text-sm cursor-pointer p-2 hover:bg-slate-50 rounded dark:hover:bg-slate-800"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" checked={u.employeePermissions?.allowedTabs?.includes(tab)} onChange={(e) => { const current = u.employeePermissions?.allowedTabs || []; const newTabs = e.target.checked ? [...current, tab] : current.filter(t => t !== tab); updateEmployeePermission(u.id, 'allowedTabs', newTabs); }} /><span className="capitalize text-slate-700 dark:text-slate-300">{t(tab === 'load' ? 'teacher_load' : tab === 'grading' ? 'grading_setup' : tab)}</span></label>)}</div><div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2"><h4 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide dark:text-slate-400">{t('special_rights')}</h4><label className="flex items-center gap-2 text-sm cursor-pointer bg-amber-50 p-2 rounded border border-amber-100 dark:bg-amber-900/20 dark:border-amber-900/30"><input type="checkbox" className="rounded text-amber-600 focus:ring-amber-500" checked={!!u.employeePermissions?.canSendAsDirector} onChange={(e) => updateEmployeePermission(u.id, 'canSendAsDirector', e.target.checked)} /><span className="font-semibold text-amber-900 dark:text-amber-400 flex items-center gap-2"><Shield size={14}/> {t('write_as_director')}</span></label><label className="flex items-center gap-2 text-sm cursor-pointer bg-blue-50 p-2 rounded border border-blue-100 dark:bg-blue-900/20 dark:border-blue-900/30"><input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" checked={!!u.employeePermissions?.isAdministration} onChange={(e) => updateEmployeePermission(u.id, 'isAdministration', e.target.checked)} /><span className="font-semibold text-blue-900 dark:text-blue-400 flex items-center gap-2"><Building size={14}/> {t('add_to_admin')}</span></label><label className="flex items-center gap-2 text-sm cursor-pointer bg-emerald-50 p-2 rounded border border-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-900/30"><input type="checkbox" className="rounded text-emerald-600 focus:ring-emerald-500" checked={!!u.employeePermissions?.isTeacher} onChange={(e) => updateEmployeePermission(u.id, 'isTeacher', e.target.checked)} /><span className="font-semibold text-emerald-900 dark:text-emerald-400 flex items-center gap-2"><GraduationCap size={14}/> {t('can_be_teacher')}</span></label></div></div></div>{u.employeePermissions?.isTeacher && <div className="pt-5 border-t border-slate-100 dark:border-slate-800 animate-in fade-in"><div className="text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-[0.2em] dark:text-slate-500">{t('class_management')} {u.fio}</div><div className="flex flex-wrap gap-2.5">{H.getSchoolClasses(state, u.schoolId).map(c => { const key = `${c.class}_${c.letter}`; const isActive = (u.classes || []).includes(key); return <button key={key} type="button" onClick={() => isActive ? removeClassFromTeacher(u.id, key) : addClassToTeacher(u.id, key)} className={`px-4 py-2 rounded-xl border-2 text-sm font-bold transition-all duration-200 flex items-center gap-2 ${isActive ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/25' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400 hover:text-blue-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-blue-500 dark:hover:text-blue-300'}`}>{isActive && <Check size={15} strokeWidth={3}/>}{c.class}{c.letter}</button> })}</div></div>}</div></td></tr>}</React.Fragment>)})}</tbody></table></div>
             </Card>
             <Card className="p-3 sm:p-10 max-w-4xl no-print shadow-xl relative">
                 <h3 className="font-bold text-slate-800 mb-3 sm:mb-8 text-base sm:text-2xl dark:text-white font-heading">{t('add_user')}</h3>
@@ -975,14 +1091,14 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     <div className="col-span-1">
                         <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('role')}</label>
                         <div className="flex flex-col gap-1.5 sm:gap-2">
-                            <Select value={newUser.role} onChange={e => { const val = e.target.value as Role; setNewUser({ ...newUser, role: val, customRole: val === 'employee' ? t('employee') : undefined, teacherClasses: [] }); setNewRoleInputOpen(false); }} className="h-8 sm:h-10 text-xs sm:text-sm">
+                            <Select value={newUser.role} onChange={e => { const val = e.target.value as Role; setNewUser({ ...newUser, role: val, customRole: val === 'employee' ? t('employee') : undefined, teacherClasses: [], isTeacher: false }); setNewRoleInputOpen(false); }} className="h-8 sm:h-10 text-xs sm:text-sm">
                                 <option value="student">{t('student')}</option>
                                 <option value="teacher">{t('teacher')}</option>
                                 {(currentUser.role === 'creator' || isGlobal) && <option value="director">{t('director')}</option>}
                                 <option value="employee">{t('employee')}</option>
                             </Select>
                             {newUser.role === 'employee' && (
-                                <div className="mt-0.5 sm:mt-1">
+                                <div className="mt-0.5 sm:mt-1 space-y-2">
                                     {newRoleInputOpen || newUser.customRole ? (
                                         <div className="relative group animate-in zoom-in duration-200">
                                             <input autoFocus={newRoleInputOpen && !newUser.customRole} maxLength={80} className="text-xs sm:text-sm border border-blue-300 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2.5 w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all placeholder-slate-400" value={newUser.customRole || ''} onChange={e => setNewUser({...newUser, customRole: e.target.value.slice(0, 80)})} placeholder={t('user_position')} />
@@ -991,6 +1107,15 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                     ) : (
                                         <button onClick={() => setNewRoleInputOpen(true)} className="w-full flex items-center justify-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-bold text-slate-500 border border-dashed border-slate-300 rounded-lg py-1.5 sm:py-3 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800"><PlusCircle size={12} className="sm:w-3.5 sm:h-3.5" /> {t('user_position')}</button>
                                     )}
+                                    <label className="flex items-center gap-2 text-xs sm:text-sm cursor-pointer bg-emerald-50 p-2 rounded-lg border border-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-900/30">
+                                        <input
+                                            type="checkbox"
+                                            className="rounded text-emerald-600 focus:ring-emerald-500"
+                                            checked={!!newUser.isTeacher}
+                                            onChange={(e) => setNewUser({ ...newUser, isTeacher: e.target.checked, teacherClasses: e.target.checked ? newUser.teacherClasses : [] })}
+                                        />
+                                        <span className="font-semibold text-emerald-900 dark:text-emerald-400 flex items-center gap-1.5"><GraduationCap size={14}/> {t('can_be_teacher')}</span>
+                                    </label>
                                 </div>
                             )}
                         </div>
@@ -1011,7 +1136,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                             <Select value={newUser.classKey} onChange={e => setNewUser({...newUser, classKey: e.target.value})} className="h-8 sm:h-10 text-xs sm:text-sm"><option value="">{t('not_selected')}</option>{addUserSchoolClasses.map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select>
                         </div>
                     )}
-                    {(isGlobal || !isGlobal) && newUser.role === 'teacher' && (
+                    {(isGlobal || !isGlobal) && (newUser.role === 'teacher' || (newUser.role === 'employee' && newUser.isTeacher)) && (
                         <div className="col-span-1 md:col-span-2">
                             <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1.5 sm:mb-3 block">{t('assign_classes')}</label>
                             <MultiSelect lang={lang as 'ru'|'en'} placeholder={t('select_classes_placeholder')} options={addUserSchoolClasses.map(c => `${c.class}_${c.letter}`)} selected={newUser.teacherClasses} onChange={sel => setNewUser({...newUser, teacherClasses: sel})} label="%s" />

@@ -1045,8 +1045,8 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             const sId = val.replace('GROUP_SCHOOL_', '');
             finalToIds.push(...state.users.filter(u => u.schoolId === sId && (u.role as string) !== 'creator').map(u => u.id));
           } else if (val === 'GROUP_TEACHERS') {
-            // Only teachers in SAME school
-            finalToIds.push(...state.users.filter(u => u.role === 'teacher' && u.schoolId === currentUser.schoolId).map(u => u.id));
+            // Only teachers (including employees with isTeacher) in SAME school
+            finalToIds.push(...state.users.filter(u => H.isUserTeacherCapable(u) && u.schoolId === currentUser.schoolId).map(u => u.id));
           } else if (val === 'GROUP_HEADMASTERS') {
             // All class teachers in this school
             const schoolClasses = H.getSchoolClasses(state, currentUser.schoolId);
@@ -1312,6 +1312,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
          if (currentUser.role === 'teacher') return currentUser.classes?.includes(`${c.class}_${c.letter}`);
          if (actingAsRestrictedEmployee) {
              if (canMessageAll) return true;
+             if (currentUser.employeePermissions?.isTeacher && currentUser.classes?.includes(`${c.class}_${c.letter}`)) return true;
              return employeeScopes.includes(`${c.class}_${c.letter}`);
          }
          return false;
@@ -1354,7 +1355,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      if (isCreator || actingAsDirector || isAdministrationEmployee) {
          canSee = true; // Creator/Director/Admin mode sees all
      } else if (currentUser.role === 'teacher') {
-         if (u.role === 'director' || u.role === 'teacher') canSee = true;
+         if (u.role === 'director' || H.isUserTeacherCapable(u)) canSee = true;
          // Can see employees who are Administration
          if (u.role === 'employee' && u.employeePermissions?.isAdministration) canSee = true;
          // Can see students in my classes
@@ -1364,8 +1365,8 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
          if (u.role === 'student' && myLeadingClasses.some(c => c.class === u.class && c.letter === u.letter)) canSee = true;
      } else if (currentUser.role === 'student') {
          if (u.role === 'director') canSee = true;
-         // Can see my teachers
-         if (u.role === 'teacher' && u.classes?.includes(`${currentUser.class}_${currentUser.letter}`)) canSee = true;
+         // Can see my teachers (including employees who are also teachers)
+         if (H.isUserTeacherCapable(u) && u.classes?.includes(`${currentUser.class}_${currentUser.letter}`)) canSee = true;
          // Can see employees who are Administration
          if (u.role === 'employee' && u.employeePermissions?.isAdministration) canSee = true;
          // Can see employees who are assigned to my class
@@ -1381,6 +1382,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
          if (u.role === 'student') {
              if (canMessageAll) canSee = true;
              else if (employeeScopes.includes(`${u.class}_${u.letter}`)) canSee = true;
+             else if (currentUser.employeePermissions?.isTeacher && currentUser.classes?.includes(`${u.class}_${u.letter}`)) canSee = true;
              // If employee is homeroom teacher of a class, they can see students of that class
              const myLeadingClasses = H.getUserLeadingClasses(state, currentUser.schoolId, currentUser.id);
              if (myLeadingClasses.some(c => c.class === u.class && c.letter === u.letter)) canSee = true;
@@ -1436,16 +1438,17 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         let label = H.formatShortName(u.fio);
         
         // Add Suffixes
-        if (u.role === 'teacher') {
-            // Get subjects from LOAD (teacherAssignments), not just u.subjects
+        if (H.isUserTeacherCapable(u)) {
             const assignedSubjects = Array.from(new Set(
                 state.teacherAssignments
                     .filter(a => a.teacherId === u.id)
                     .map(a => a.subject)
             ));
-            
-            if (assignedSubjects.length > 0) {
-                label += ` (${assignedSubjects.join(', ')})`;
+            const parts: string[] = [];
+            if (u.role === 'employee' && u.customRole) parts.push(u.customRole);
+            if (assignedSubjects.length > 0) parts.push(assignedSubjects.join(', '));
+            if (parts.length > 0) {
+                label += ` (${parts.join(' • ')})`;
             }
         } else if (u.role === 'director') {
             label += ` (${t('director')})`;

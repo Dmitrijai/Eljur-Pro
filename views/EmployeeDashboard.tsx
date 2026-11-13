@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AppState, User } from '../types';
 import { Messaging } from './SharedComponents';
 import * as H from '../utils/helpers';
@@ -10,7 +9,10 @@ import { HomeroomSummaryView } from './shared/HomeroomSummaryView';
 import { TeacherLoadManager } from './admin/TeacherLoadManager';
 import { GroupManager } from './admin/GroupManager';
 import { GradingSetup } from './admin/GradingSetup';
-import { SideNavDrawer } from '../components/ui';
+import { ScheduleView } from './teacher/ScheduleView';
+import { HomeworkManager } from './teacher/HomeworkManager';
+import { Gradebook } from './teacher/Gradebook';
+import { Modal, Button, SideNavDrawer } from '../components/ui';
 
 interface Props {
   state: AppState;
@@ -23,12 +25,31 @@ interface Props {
 export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpen, setMobileMenuOpen }: Props) {
   const leadingClasses = H.getUserLeadingClasses(state, user.schoolId, user.id);
   const hasHomeroom = leadingClasses.length > 0;
+  const isAlsoTeacher = !!user.employeePermissions?.isTeacher;
 
-  const allowedTabs = user.employeePermissions?.allowedTabs || ['messages']; 
-  const effectiveAllowedTabs = allowedTabs.filter(t => t !== 'homeroom');
-  if (hasHomeroom) effectiveAllowedTabs.push('homeroom');
+  const allowedTabs = user.employeePermissions?.allowedTabs || ['messages'];
+  const effectiveAllowedTabs = useMemo(() => {
+    const list: string[] = [];
+    if (isAlsoTeacher) {
+      list.push('my_schedule', 'homework', 'grades');
+    }
+    if (hasHomeroom) {
+      list.push('homeroom');
+    }
+    allowedTabs.forEach(tb => {
+      if (tb !== 'homeroom' && !list.includes(tb)) {
+        list.push(tb);
+      }
+    });
+    if (isAlsoTeacher && !list.includes('rating')) {
+      list.push('rating');
+    }
+    return list;
+  }, [allowedTabs, hasHomeroom, isAlsoTeacher]);
 
   const [view, setView] = H.useSyncedState<string>(`eljur_tab_${user.id}`, () => effectiveAllowedTabs[0] || 'messages');
+  const [hasUnsavedGrades, setHasUnsavedGrades] = useState(false);
+  const [pendingView, setPendingView] = useState<string | null>(null);
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 
@@ -46,10 +67,15 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
   }
 
   const tabs: { id: string; label: string; badgeCount?: number }[] = [
+    ...(isAlsoTeacher ? [
+      { id: 'my_schedule', label: allowedTabs.includes('schedule') ? t('my_schedule') : t('schedule') },
+      { id: 'homework', label: t('homework') },
+      { id: 'grades', label: t('journal') }
+    ] : []),
     ...(hasHomeroom ? [{ id: 'homeroom', label: `${t('homeroom_tab')} (${leadingClasses.map(c => `${c.class}${c.letter}`).join(', ')})` }] : []),
     ...(allowedTabs.includes('messages') ? [{ id: 'messages', label: t('messages'), badgeCount: unreadMessagesCount }] : []),
     ...(allowedTabs.includes('announcements') ? [{ id: 'announcements', label: t('announcements'), badgeCount: unreadAnnouncementsCount }] : []),
-    ...(allowedTabs.includes('rating') ? [{ id: 'rating', label: t('rating') }] : []),
+    ...((allowedTabs.includes('rating') || isAlsoTeacher) ? [{ id: 'rating', label: t('rating') }] : []),
     ...(allowedTabs.includes('schedule') ? [{ id: 'schedule', label: t('schedule') }] : []),
     ...(allowedTabs.includes('users') ? [{ id: 'users', label: t('users') }] : []),
     ...(allowedTabs.includes('load') ? [{ id: 'load', label: t('teacher_load') }] : []),
@@ -58,9 +84,21 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
   ];
 
   const handleSelectTab = (id: string) => {
-    setView(id);
     setMobileMenuOpen?.(false);
+    if (view === 'grades' && hasUnsavedGrades && id !== 'grades') {
+      setPendingView(id);
+    } else {
+      setView(id);
+    }
   };
+
+  const confirmLeave = () => {
+    setHasUnsavedGrades(false);
+    if (pendingView) setView(pendingView);
+    setPendingView(null);
+  };
+
+  const roleLabel = `${user.customRole || t('employee')}${isAlsoTeacher ? ` • ${t('teacher')}` : ''}`;
 
   return (
     <div className="space-y-2.5 sm:space-y-6">
@@ -72,7 +110,7 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
         onClose={() => setMobileMenuOpen?.(false)}
         onOpen={() => setMobileMenuOpen?.(true)}
         userFio={user.fio}
-        userRoleLabel={user.customRole || t('employee')}
+        userRoleLabel={roleLabel}
         schoolName={H.getSchool(state, user.schoolId)?.name}
         lang={lang}
       />
@@ -85,6 +123,9 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+        {view === 'my_schedule' && isAlsoTeacher && <ScheduleView state={state} user={user} lang={lang} />}
+        {view === 'homework' && isAlsoTeacher && <HomeworkManager state={state} onUpdate={onUpdate} user={user} lang={lang} />}
+        {view === 'grades' && isAlsoTeacher && <Gradebook state={state} onUpdate={onUpdate} user={user} lang={lang} setHasUnsavedGrades={setHasUnsavedGrades} hasUnsavedGrades={hasUnsavedGrades} />}
         {view === 'homeroom' && hasHomeroom && <HomeroomSummaryView state={state} user={user} onUpdate={onUpdate} />}
         {view === 'messages' && <Messaging state={state} onUpdate={onUpdate} currentUser={user} type="messages" />}
         {view === 'announcements' && <Messaging state={state} onUpdate={onUpdate} currentUser={user} type="announcements" />}
@@ -95,6 +136,18 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
         {view === 'groups' && <GroupManager state={state} onUpdate={onUpdate} user={user} />}
         {view === 'grading' && <GradingSetup state={state} onUpdate={onUpdate} user={user} />}
       </div>
+
+      <Modal isOpen={!!pendingView} onClose={() => setPendingView(null)} title={t('attention')}>
+        <div className="space-y-4">
+          <p className="text-slate-700 dark:text-slate-300">
+            {t('unsaved_grades_alert')}
+          </p>
+          <div className="flex flex-wrap justify-end gap-2 pt-4">
+            <Button variant="secondary" onClick={() => setPendingView(null)}>{t('cancel')}</Button>
+            <Button variant="primary" onClick={confirmLeave} className="bg-red-600 hover:bg-red-700 text-white border-none">{t('leave_without_saving')}</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { Briefcase, Copy, ChevronUp, ChevronDown, RefreshCw, X as XIcon, AlertCi
 
 export const TeacherLoadManager = ({ state, onUpdate, user }: { state: AppState, onUpdate: (s: AppState) => void, user?: User }) => {
     const schoolId = user?.schoolId;
-    const teachers = state.users.filter(u => u.role === 'teacher' && (schoolId ? u.schoolId === schoolId : true)).sort((a,b) => a.fio.localeCompare(b.fio));
+    const teachers = state.users.filter(u => H.isUserTeacherCapable(u) && (schoolId ? u.schoolId === schoolId : true)).sort((a,b) => a.fio.localeCompare(b.fio));
     const schoolClasses = H.getSchoolClasses(state, schoolId);
     const schoolSubjects = H.getSchoolSubjects(state, schoolId);
     const defaultClass = schoolClasses[0] ? `${schoolClasses[0].class}_${schoolClasses[0].letter}` : '';
@@ -124,7 +124,14 @@ export const TeacherLoadManager = ({ state, onUpdate, user }: { state: AppState,
                     return (
                         <div key={teacher.id} className="border border-slate-200 rounded-lg sm:rounded-xl overflow-hidden dark:border-slate-700">
                             <div className={`p-2.5 sm:p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${isExpanded ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'}`} onClick={() => setExpandedTeacher(isExpanded ? null : teacher.id)}>
-                                <div className="font-bold text-xs sm:text-base text-slate-700 dark:text-slate-200">{H.formatShortName(teacher.fio)}</div>
+                                <div className="font-bold text-xs sm:text-base text-slate-700 dark:text-slate-200 flex flex-wrap items-center gap-2">
+                                    <span>{H.formatShortName(teacher.fio)}</span>
+                                    {teacher.role === 'employee' && (
+                                        <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800">
+                                            {teacher.customRole || t('employee')}
+                                        </span>
+                                    )}
+                                </div>
                                 <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm text-slate-500">
                                     <span className="bg-slate-100 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold dark:bg-slate-800 dark:text-slate-400">{assignments.length} {t('items')}</span>
                                     {isExpanded ? <ChevronUp size={14} className="sm:w-4 sm:h-4"/> : <ChevronDown size={14} className="sm:w-4 sm:h-4"/>}

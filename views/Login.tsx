@@ -198,6 +198,9 @@ export default function Login({ users, onLogin, schoolName, settings, onShowInfo
           if (role === 'employee') {
             return u.role === 'employee' || (u.role === 'teacher' && !!u.customRole);
           }
+          if (role === 'teacher') {
+            return u.role === 'teacher' || (u.role === 'employee' && !!u.employeePermissions?.isTeacher);
+          }
           return u.role === role;
         });
 

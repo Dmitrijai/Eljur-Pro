@@ -773,6 +773,38 @@ export default function App() {
     DB.setCurrentSessionUser(currentUser);
   }, [currentUser]);
 
+  // Keep currentUser synchronized with live user updates in appState.users (e.g., employeePermissions, classes, customRole)
+  useEffect(() => {
+    if (!currentUser || currentUser.role === 'creator') return;
+    const latest = (appState?.users || []).find(u => u.id === currentUser.id);
+    if (!latest) return;
+    const prevPerms = JSON.stringify(currentUser.employeePermissions || null);
+    const nextPerms = JSON.stringify(latest.employeePermissions || null);
+    const prevClasses = JSON.stringify(currentUser.classes || null);
+    const nextClasses = JSON.stringify(latest.classes || null);
+    if (
+      prevPerms !== nextPerms ||
+      prevClasses !== nextClasses ||
+      currentUser.customRole !== latest.customRole ||
+      currentUser.fio !== latest.fio ||
+      currentUser.class !== latest.class ||
+      currentUser.letter !== latest.letter ||
+      currentUser.role !== latest.role
+    ) {
+      const updatedUser: User = {
+        ...currentUser,
+        ...latest,
+        theme: currentUser.theme,
+        language: currentUser.language,
+        showSeasonalAnimations: currentUser.showSeasonalAnimations,
+        bodyFontId: currentUser.bodyFontId,
+        headingFontId: currentUser.headingFontId
+      };
+      DB.setCurrentSessionUser(updatedUser);
+      setCurrentUser(updatedUser);
+    }
+  }, [appState?.users, currentUser]);
+
   // Initialize Data with instant cache fast-path and Firestore real-time sync
   useEffect(() => {
     // Instant fast-path: restore cached state from IndexedDB if available
@@ -1065,10 +1097,30 @@ export default function App() {
 
         const userPrefs = H.getUserPreferences(currentUser?.id, null);
 
+        const incomingSchoolTz = schoolUpdate.schools?.[0]?.timezone || schoolUpdate.settings?.timezone;
+        const prevSchoolsSettings = (cur.settings as any)?.schoolsSettings || {};
+        const nextSchoolsSettings = incomingSchoolTz
+          ? {
+              ...prevSchoolsSettings,
+              [targetSid]: {
+                ...(prevSchoolsSettings[targetSid] || {}),
+                timezone: incomingSchoolTz
+              }
+            }
+          : prevSchoolsSettings;
+
         const baseSettings = isPrimarySchool && schoolUpdate.settings
-          ? { ...cur.settings, ...schoolUpdate.settings }
+          ? {
+              ...cur.settings,
+              ...schoolUpdate.settings,
+              schoolsSettings: nextSchoolsSettings,
+              ...(currentUser?.role === 'creator'
+                ? { timezone: cur.settings?.timezone || 'UTC+3' }
+                : {})
+            }
           : {
               ...cur.settings,
+              schoolsSettings: nextSchoolsSettings,
               ...(schoolUpdate.settings?.systemTimeOffset !== undefined
                 ? { systemTimeOffset: schoolUpdate.settings.systemTimeOffset }
                 : {})
@@ -1490,9 +1542,10 @@ export default function App() {
   };
 
   const currentSchool = appState?.schools.find(s => s.id === currentUser?.schoolId);
+  const effectiveTimezoneTarget = currentUser?.role === 'creator' ? 'global' : currentUser?.schoolId;
   H.setActiveTimeContext(
     appState?.settings?.systemTimeOffset || 0,
-    H.getSchoolTimezone(appState, currentUser?.schoolId)
+    H.getSchoolTimezone(appState, effectiveTimezoneTarget)
   );
   const currentUserPrefs = H.getUserPreferences(currentUser?.id, null);
   const lang = currentUserPrefs.language || appState?.settings?.language || 'ru';
@@ -1796,7 +1849,7 @@ export default function App() {
                     </p>
                     <div className="flex justify-end mt-0.5">
                        <p className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full inline-block dark:bg-slate-800 dark:text-slate-400">
-                         {currentUser.role === 'director' ? t('director') : currentUser.role === 'teacher' ? t('teacher') : currentUser.role === 'student' ? `${t('student')}${currentUser.class ? ` • ${currentUser.class}${currentUser.letter || ''}` : ''}` : currentUser.role === 'employee' ? (currentUser.customRole || t('employee')) : t('creator')}
+                         {currentUser.role === 'director' ? t('director') : currentUser.role === 'teacher' ? t('teacher') : currentUser.role === 'student' ? `${t('student')}${currentUser.class ? ` • ${currentUser.class}${currentUser.letter || ''}` : ''}` : currentUser.role === 'employee' ? `${currentUser.customRole || t('employee')}${currentUser.employeePermissions?.isTeacher ? ` • ${t('teacher')}` : ''}` : t('creator')}
                        </p>
                     </div>
                   </div>
