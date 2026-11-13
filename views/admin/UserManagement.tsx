@@ -18,6 +18,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
     const [roleInputOpen, setRoleInputOpen] = useState<Record<string, boolean>>({});
     const [newRoleInputOpen, setNewRoleInputOpen] = useState(false);
     const [focusedNameId, setFocusedNameId] = useState<string | null>(null);
+    const [focusedCustomRoleId, setFocusedCustomRoleId] = useState<string | null>(null);
     const [newUser, setNewUser] = useState({ fio: '', login: '', password: '', role: 'student' as Role, customRole: '', classKey: '', teacherClasses: [] as string[], isTeacher: false, schoolId: (currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : (state.schools[0]?.id || 'school_1') });
     const [passwordInputs, setPasswordInputs] = useState<Record<string, string>>({});
     const [newClassNum, setNewClassNum] = useState('');
@@ -650,7 +651,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                             <option value="">-- {t('not_assigned')} --</option>
                                             {headmasterCandidates.map(cand => {
                                                 const check = H.canUserBeAssignedAsHeadmaster(state, currentUser.schoolId, cand.id, c.class, c.letter);
-                                                const roleName = cand.role === 'director' ? t('director') : (cand.customRole || t(cand.role));
+                                                const roleName = cand.role === 'director' ? t('director') : (cand.customRole ? H.formatShortPosition(cand.customRole) : t(cand.role));
                                                 let extra = '';
                                                 if (check.leadingClasses.length > 0) {
                                                     extra = ` — ${t('homeroom_short')} ${check.leadingClasses.join(', ')}`;
@@ -812,8 +813,11 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                               <label className="text-[9px] font-bold uppercase text-slate-400 block mb-0.5">{t('user_position')}</label>
                               <input
                                 maxLength={80}
+                                title={u.customRole || ''}
                                 className="w-full bg-white dark:bg-slate-950 border border-blue-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300"
-                                value={u.customRole || ''}
+                                value={focusedCustomRoleId === u.id ? (u.customRole || '') : H.formatShortPosition(u.customRole || '')}
+                                onFocus={() => setFocusedCustomRoleId(u.id)}
+                                onBlur={() => setFocusedCustomRoleId(null)}
                                 onChange={e => updateCustomRole(u.id, e.target.value)}
                                 placeholder={t('user_position')}
                               />
@@ -838,8 +842,11 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                             <label className="text-[9px] font-bold uppercase text-slate-400 block mb-0.5">{t('user_position')}</label>
                             <input
                               maxLength={80}
+                              title={u.customRole || ''}
                               className="w-full bg-white dark:bg-slate-950 border border-blue-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300"
-                              value={u.customRole || ''}
+                              value={focusedCustomRoleId === u.id ? (u.customRole || '') : H.formatShortPosition(u.customRole || '')}
+                              onFocus={() => setFocusedCustomRoleId(u.id)}
+                              onBlur={() => setFocusedCustomRoleId(null)}
                               onChange={e => updateCustomRole(u.id, e.target.value)}
                               placeholder={t('user_position')}
                             />
@@ -989,12 +996,12 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
 
                 {/* Desktop & Print Table */}
                 <div className="hidden md:block print:block overflow-x-auto"><table className="w-full text-sm min-w-[800px]"><thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 uppercase text-xs tracking-wider dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"><tr><th className="p-5 w-8 text-center no-print"></th><th className="p-5 w-12 text-center no-print"></th><th className="p-5 text-center">{t('fio')}</th>{isGlobal && <th className="p-5 text-center">{t('school')}</th>}<th className="p-5 text-center">{t('login')}</th><th className="p-5 text-center">{t('password')}</th><th className="p-5 text-center w-40">{t('role')}</th><th className="p-5 text-center">{t('class_assignment')}</th><th className="p-5 text-right no-print">{t('actions')}</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{sortedUsers.map(u => { const hasEmptyFields = !u.fio || !u.login || (!u.password && !u.passwordHash) || (isGlobal && !u.schoolId) || (u.role === 'student' && (!u.class || !u.letter)) || (u.role === 'teacher' && (!u.classes || u.classes.length === 0)); return (<React.Fragment key={u.id}>{uiError && uiErrorUserId === u.id && (<tr className="bg-red-50 dark:bg-red-900/10 no-print animate-in fade-in slide-in-from-top-1"><td colSpan={isGlobal ? 9 : 8} className="p-2 text-red-600 dark:text-red-400 font-bold text-center border-b border-red-100 dark:border-red-900/30"><div className="flex items-center justify-center gap-2 relative"><AlertCircle size={14}/> {uiError}<button onClick={() => setUiError(null)} className="absolute right-2 p-1 hover:bg-red-200 rounded transition"><XIcon size={14}/></button></div></td></tr>)}<tr id={`row-${u.id}`} draggable onDragStart={(e) => handleDragStart(e, u.id)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, u.id)} className={`hover:bg-blue-50/50 transition duration-150 group dark:hover:bg-slate-800/50 cursor-move ${highlightId === u.id ? 'highlight-blink bg-blue-100 dark:bg-blue-900' : ''} ${hasEmptyFields ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}><td className="p-5 text-slate-400 text-center no-print"><GripVertical size={16}/></td><td className="p-5 text-center no-print">{((u.role === 'teacher' && !u.customRole) || u.role === 'employee') && <button onClick={() => toggleRow(u.id)} className={`p-1.5 rounded-full transition ${expandedRows[u.id] ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'hover:bg-slate-200 text-slate-400 dark:hover:bg-slate-700'}`}>{expandedRows[u.id] ? <Minus size={14}/> : <Plus size={14}/>}</button>}{u.blockedUntil && <div title={t('blocked')} className="flex justify-center mt-1"><Lock size={14} className="text-red-500" /></div>}</td><td className="p-5 text-center">{focusedNameId !== u.id ? <div onClick={() => setFocusedNameId(u.id)} className="bg-white border border-transparent hover:border-slate-200 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center cursor-text min-h-[38px] flex items-center justify-center transition-colors print:hidden">{H.formatShortName(u.fio)}</div> : <input autoFocus maxLength={100} className="bg-white border border-blue-500 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center focus:ring-2 focus:ring-blue-100 outline-none print:hidden" value={u.fio} onChange={(e) => updateField(u.id, 'fio', e.target.value)} onBlur={() => setFocusedNameId(null)} placeholder={t('fio')} />}<span className="hidden print:inline font-semibold text-slate-900 text-xs">{u.fio || '—'}</span></td>{isGlobal && <td className="p-5 text-center"><Select value={u.schoolId || '-'} onChange={e => updateField(u.id, 'schoolId', e.target.value === '-' ? '' : e.target.value)} className="text-xs w-32 print:hidden"><option value="-">-</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{state.schools.find(s => s.id === u.schoolId)?.name || '—'}</span></td>}<td className="p-5 text-center"><input maxLength={50} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={u.login} onChange={(e) => updateField(u.id, 'login', e.target.value)} placeholder={t('login')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.login || '—'}</span></td><td className="p-5 text-center"><input maxLength={64} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={passwordInputs[u.id] !== undefined ? passwordInputs[u.id] : (u.password || '')} onChange={(e) => setPasswordInputs(prev => ({ ...prev, [u.id]: e.target.value.slice(0, 64) }))} onBlur={(e) => { const nextPass = e.target.value.trim(); if (nextPass && nextPass !== (u.password || '')) { updateField(u.id, 'password', nextPass); } setPasswordInputs(prev => { const n = {...prev}; delete n[u.id]; return n; }); }} placeholder={u.passwordHash ? '••••••••' : t('password')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.password || (u.passwordHash ? '••••••••' : '—')}</span></td><td className="p-5 text-center"><div className="flex flex-col gap-1 items-center relative"><Select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)} className="text-xs py-2 font-medium w-36 print:hidden"><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{(isGlobal || currentUser.role === 'creator') && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{u.role === 'employee' && u.customRole ? u.customRole : t(u.role)}</span>{u.role === 'employee' && <div className="mt-1 w-36 no-print">{roleInputOpen[u.id] || u.customRole ? <div className="relative group animate-in zoom-in duration-200"><input autoFocus={roleInputOpen[u.id] && !u.customRole} maxLength={80} className="text-xs border border-blue-200 rounded-lg px-3 py-1.5 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 dark:focus:border-blue-400 shadow-sm transition-all font-medium text-blue-700 dark:text-blue-300 placeholder-blue-300" value={u.customRole || ''} onChange={e => updateCustomRole(u.id, e.target.value)} placeholder={t('user_position')} />{roleInputOpen[u.id] && !u.customRole && <button onClick={() => toggleRoleInput(u.id)} className="absolute -right-2 -top-2 bg-red-100 rounded-full p-0.5 text-red-500 hover:bg-red-500 hover:text-white shadow-sm border border-red-200 transition-colors"><XIcon size={10}/></button>}</div> : <button onClick={() => toggleRoleInput(u.id)} className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-400 border border-dashed border-slate-300 rounded-lg py-1.5 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 group"><PlusCircle size={12} className="group-hover:scale-110 transition-transform"/><span>{t('user_position')}</span></button>}</div>}</div></td><td className="p-5 text-center">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">{sortedUsers.map(u => { const hasEmptyFields = !u.fio || !u.login || (!u.password && !u.passwordHash) || (isGlobal && !u.schoolId) || (u.role === 'student' && (!u.class || !u.letter)) || (u.role === 'teacher' && (!u.classes || u.classes.length === 0)); return (<React.Fragment key={u.id}>{uiError && uiErrorUserId === u.id && (<tr className="bg-red-50 dark:bg-red-900/10 no-print animate-in fade-in slide-in-from-top-1"><td colSpan={isGlobal ? 9 : 8} className="p-2 text-red-600 dark:text-red-400 font-bold text-center border-b border-red-100 dark:border-red-900/30"><div className="flex items-center justify-center gap-2 relative"><AlertCircle size={14}/> {uiError}<button onClick={() => setUiError(null)} className="absolute right-2 p-1 hover:bg-red-200 rounded transition"><XIcon size={14}/></button></div></td></tr>)}<tr id={`row-${u.id}`} draggable onDragStart={(e) => handleDragStart(e, u.id)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, u.id)} className={`hover:bg-blue-50/50 transition duration-150 group dark:hover:bg-slate-800/50 cursor-move ${highlightId === u.id ? 'highlight-blink bg-blue-100 dark:bg-blue-900' : ''} ${hasEmptyFields ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}><td className="p-5 text-slate-400 text-center no-print"><GripVertical size={16}/></td><td className="p-5 text-center no-print">{((u.role === 'teacher' && !u.customRole) || u.role === 'employee') && <button onClick={() => toggleRow(u.id)} className={`p-1.5 rounded-full transition ${expandedRows[u.id] ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'hover:bg-slate-200 text-slate-400 dark:hover:bg-slate-700'}`}>{expandedRows[u.id] ? <Minus size={14}/> : <Plus size={14}/>}</button>}{u.blockedUntil && <div title={t('blocked')} className="flex justify-center mt-1"><Lock size={14} className="text-red-500" /></div>}</td><td className="p-5 text-center">{focusedNameId !== u.id ? <div onClick={() => setFocusedNameId(u.id)} className="bg-white border border-transparent hover:border-slate-200 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center cursor-text min-h-[38px] flex items-center justify-center transition-colors print:hidden">{H.formatShortName(u.fio)}</div> : <input autoFocus maxLength={100} className="bg-white border border-blue-500 rounded px-2 py-1.5 w-full font-semibold text-slate-800 dark:bg-slate-950 dark:text-slate-200 text-center focus:ring-2 focus:ring-blue-100 outline-none print:hidden" value={u.fio} onChange={(e) => updateField(u.id, 'fio', e.target.value)} onBlur={() => setFocusedNameId(null)} placeholder={t('fio')} />}<span className="hidden print:inline font-semibold text-slate-900 text-xs">{u.fio || '—'}</span></td>{isGlobal && <td className="p-5 text-center"><Select value={u.schoolId || '-'} onChange={e => updateField(u.id, 'schoolId', e.target.value === '-' ? '' : e.target.value)} className="text-xs w-32 print:hidden"><option value="-">-</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{state.schools.find(s => s.id === u.schoolId)?.name || '—'}</span></td>}<td className="p-5 text-center"><input maxLength={50} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={u.login} onChange={(e) => updateField(u.id, 'login', e.target.value)} placeholder={t('login')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.login || '—'}</span></td><td className="p-5 text-center"><input maxLength={64} className="bg-white border border-slate-200 hover:border-slate-300 rounded px-2 py-1.5 w-full font-mono text-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-950 dark:hover:border-slate-600 text-center print:hidden" value={passwordInputs[u.id] !== undefined ? passwordInputs[u.id] : (u.password || '')} onChange={(e) => setPasswordInputs(prev => ({ ...prev, [u.id]: e.target.value.slice(0, 64) }))} onBlur={(e) => { const nextPass = e.target.value.trim(); if (nextPass && nextPass !== (u.password || '')) { updateField(u.id, 'password', nextPass); } setPasswordInputs(prev => { const n = {...prev}; delete n[u.id]; return n; }); }} placeholder={u.passwordHash ? '••••••••' : t('password')} /><span className="hidden print:inline font-mono text-slate-800 text-xs">{u.password || (u.passwordHash ? '••••••••' : '—')}</span></td><td className="p-5 text-center"><div className="flex flex-col gap-1 items-center relative"><Select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)} className="text-xs py-2 font-medium w-36 print:hidden"><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{(isGlobal || currentUser.role === 'creator') && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{u.role === 'employee' && u.customRole ? H.formatShortPosition(u.customRole) : t(u.role)}</span>{u.role === 'employee' && <div className="mt-1 w-36 no-print">{roleInputOpen[u.id] || u.customRole ? <div className="relative group animate-in zoom-in duration-200"><input autoFocus={roleInputOpen[u.id] && !u.customRole} maxLength={80} title={u.customRole || ''} className="text-xs border border-blue-200 rounded-lg px-2 py-1.5 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 dark:focus:border-blue-400 shadow-sm transition-all font-medium text-blue-700 dark:text-blue-300 placeholder-blue-300" value={focusedCustomRoleId === u.id ? (u.customRole || '') : H.formatShortPosition(u.customRole || '')} onFocus={() => setFocusedCustomRoleId(u.id)} onBlur={() => setFocusedCustomRoleId(null)} onChange={e => updateCustomRole(u.id, e.target.value)} placeholder={t('user_position')} />{roleInputOpen[u.id] && !u.customRole && <button onClick={() => toggleRoleInput(u.id)} className="absolute -right-2 -top-2 bg-red-100 rounded-full p-0.5 text-red-500 hover:bg-red-500 hover:text-white shadow-sm border border-red-200 transition-colors"><XIcon size={10}/></button>}</div> : <button onClick={() => toggleRoleInput(u.id)} className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-400 border border-dashed border-slate-300 rounded-lg py-1.5 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 group"><PlusCircle size={12} className="group-hover:scale-110 transition-transform"/><span>{t('user_position')}</span></button>}</div>}</div></td><td className="p-5 text-center">
     {(() => {
         const leadingClasses = H.getUserLeadingClasses(state, u.schoolId, u.id);
         const leadingBadge = leadingClasses.length > 0 ? (
             <div className="mt-1 flex flex-wrap gap-1 items-center justify-center">
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-[10px] font-bold dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-300 flex items-center gap-1">
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-[10px] font-bold dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-300 flex items-center gap-1 whitespace-nowrap">
                     <GraduationCap size={11} className="text-blue-600 dark:text-blue-400 shrink-0" />
                     <span>{lang === 'ru' ? 'Кл. рук: ' : 'Class Teacher: '}{leadingClasses.map(c => `${c.class}${c.letter}`).join(', ')}</span>
                 </span>
@@ -1036,20 +1043,27 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             const activeClasses = (u.classes || []).filter(ck => validKeys.has(ck)); 
             return (
                 <div className="flex flex-col items-center gap-1">
-                    <div className="flex flex-wrap gap-1.5 items-center justify-center">
-                        {activeClasses.slice(0, 3).map(ck => <span key={ck} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-lg text-[10px] font-bold dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300 shadow-sm">{ck.replace('_','')}</span>)}
-                        {activeClasses.length > 3 && <span className="text-[10px] text-slate-400 font-bold bg-slate-100 px-1.5 py-1 rounded-lg dark:bg-slate-800">+{activeClasses.length - 3}</span>}
+                    <div className="flex flex-nowrap gap-1 items-center justify-center whitespace-nowrap">
+                        {activeClasses.slice(0, 3).map(ck => <span key={ck} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-lg text-[10px] font-bold dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300 shadow-xs shrink-0 whitespace-nowrap">{ck.replace('_','')}</span>)}
+                        {activeClasses.length > 3 && <span className="text-[10px] text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded-lg dark:bg-slate-800 shrink-0 whitespace-nowrap">+{activeClasses.length - 3}</span>}
                         {activeClasses.length === 0 && <span className="text-xs text-slate-300 italic">{t('no_classes')}</span>}
                     </div>
                     {leadingBadge}
                 </div>
             );
         } else if (u.role === 'employee') {
+            const validKeys = new Set((rowSchoolClasses || []).map(c => `${c.class}_${c.letter}`));
+            const activeClasses = u.employeePermissions?.isTeacher ? (u.classes || []).filter(ck => validKeys.has(ck)) : [];
             return (
                 <div className="flex flex-col items-center gap-1">
-                    <span className="text-xs text-slate-500 font-medium">
-                        {u.employeePermissions?.messagingScope?.includes('ALL') ? t('all_classes') : `${u.employeePermissions?.messagingScope?.length || 0} ${t('classes_count_suffix')}`}
-                    </span>
+                    {activeClasses.length > 0 ? (
+                        <div className="flex flex-nowrap gap-1 items-center justify-center whitespace-nowrap">
+                            {activeClasses.slice(0, 3).map(ck => <span key={ck} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-lg text-[10px] font-bold dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300 shadow-xs shrink-0 whitespace-nowrap">{ck.replace('_','')}</span>)}
+                            {activeClasses.length > 3 && <span className="text-[10px] text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded-lg dark:bg-slate-800 shrink-0 whitespace-nowrap">+{activeClasses.length - 3}</span>}
+                        </div>
+                    ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                    )}
                     {leadingBadge}
                 </div>
             );
@@ -1082,8 +1096,21 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     )}
                     <div className="col-span-1">
                         <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('fio')}</label>
-                        <Input maxLength={100} placeholder={t('fio')} value={newUser.fio} onChange={e => setNewUser({...newUser, fio: e.target.value})} className="h-8 sm:h-10 text-xs sm:text-sm" />
-                        {validationErrors.some(e => e.includes(t('already_exists'))) && <p className="text-[10px] text-red-500 mt-1 font-bold animate-pulse">{t('already_exists')}</p>}
+                        <div className="flex flex-col gap-1.5 sm:gap-2">
+                            <Input maxLength={100} placeholder={t('fio')} value={newUser.fio} onChange={e => setNewUser({...newUser, fio: e.target.value})} className="h-8 sm:h-10 text-xs sm:text-sm" />
+                            {validationErrors.some(e => e.includes(t('already_exists'))) && <p className="text-[10px] text-red-500 font-bold animate-pulse">{t('already_exists')}</p>}
+                            {newUser.role === 'employee' && (
+                                <label className="hidden md:flex items-center gap-2 text-xs cursor-pointer bg-emerald-50 px-3 h-10 rounded-lg border border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-900/30 w-full mt-0.5">
+                                    <input
+                                        type="checkbox"
+                                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                                        checked={!!newUser.isTeacher}
+                                        onChange={(e) => setNewUser({ ...newUser, isTeacher: e.target.checked, teacherClasses: e.target.checked ? newUser.teacherClasses : [] })}
+                                    />
+                                    <span className="font-semibold text-emerald-900 dark:text-emerald-400 flex items-center gap-1.5"><GraduationCap size={14} className="shrink-0"/> {t('can_be_teacher')}</span>
+                                </label>
+                            )}
+                        </div>
                     </div>
                     <div className="col-span-1">
                         <label className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 sm:mb-2 block">{t('role')}</label>
@@ -1095,17 +1122,8 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                 <option value="employee">{t('employee')}</option>
                             </Select>
                             {newUser.role === 'employee' && (
-                                <div className="mt-0.5 sm:mt-1 flex items-center gap-1.5 sm:gap-2">
-                                    <label className="flex items-center gap-1.5 text-[11px] sm:text-xs cursor-pointer bg-emerald-50 px-2 sm:px-2.5 h-8 sm:h-10 rounded-lg border border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-900/30 shrink-0 whitespace-nowrap" title={t('can_be_teacher')}>
-                                        <input
-                                            type="checkbox"
-                                            className="rounded text-emerald-600 focus:ring-emerald-500"
-                                            checked={!!newUser.isTeacher}
-                                            onChange={(e) => setNewUser({ ...newUser, isTeacher: e.target.checked, teacherClasses: e.target.checked ? newUser.teacherClasses : [] })}
-                                        />
-                                        <span className="font-semibold text-emerald-900 dark:text-emerald-400 flex items-center gap-1"><GraduationCap size={13} className="shrink-0"/> {t('can_be_teacher')}</span>
-                                    </label>
-                                    <div className="flex-1 min-w-0">
+                                <div className="mt-0.5 flex flex-col gap-1.5">
+                                    <div className="w-full">
                                         {newRoleInputOpen || newUser.customRole ? (
                                             <div className="relative group animate-in zoom-in duration-200">
                                                 <input autoFocus={newRoleInputOpen && !newUser.customRole} maxLength={80} className="text-xs sm:text-sm border border-blue-300 rounded-lg px-2.5 h-8 sm:h-10 w-full bg-white dark:bg-slate-900 dark:text-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all placeholder-slate-400" value={newUser.customRole || ''} onChange={e => setNewUser({...newUser, customRole: e.target.value.slice(0, 80)})} placeholder={t('user_position')} />
@@ -1115,6 +1133,15 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                                             <button onClick={() => setNewRoleInputOpen(true)} className="w-full h-8 sm:h-10 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-bold text-slate-500 border border-dashed border-slate-300 rounded-lg px-2 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-all dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800 truncate"><PlusCircle size={12} className="shrink-0" /> <span className="truncate">{t('user_position')}</span></button>
                                         )}
                                     </div>
+                                    <label className="flex md:hidden items-center gap-1.5 text-[11px] cursor-pointer bg-emerald-50 px-2.5 h-8 rounded-lg border border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-900/30 w-full">
+                                        <input
+                                            type="checkbox"
+                                            className="rounded text-emerald-600 focus:ring-emerald-500"
+                                            checked={!!newUser.isTeacher}
+                                            onChange={(e) => setNewUser({ ...newUser, isTeacher: e.target.checked, teacherClasses: e.target.checked ? newUser.teacherClasses : [] })}
+                                        />
+                                        <span className="font-semibold text-emerald-900 dark:text-emerald-400 flex items-center gap-1"><GraduationCap size={13} className="shrink-0"/> {t('can_be_teacher')}</span>
+                                    </label>
                                 </div>
                             )}
                         </div>

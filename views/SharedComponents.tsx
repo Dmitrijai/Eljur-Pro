@@ -1445,7 +1445,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
                     .map(a => a.subject)
             ));
             const parts: string[] = [];
-            if (u.role === 'employee' && u.customRole) parts.push(u.customRole);
+            if (u.role === 'employee' && u.customRole) parts.push(H.formatShortPosition(u.customRole));
             if (assignedSubjects.length > 0) parts.push(assignedSubjects.join(', '));
             if (parts.length > 0) {
                 label += ` (${parts.join(' • ')})`;
@@ -1453,7 +1453,7 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         } else if (u.role === 'director') {
             label += ` (${t('director')})`;
         } else if (u.customRole) {
-            label += ` (${u.customRole})`;
+            label += ` (${H.formatShortPosition(u.customRole)})`;
         }
 
         userOptions.push({ value: u.id, label: label, group: groupName });

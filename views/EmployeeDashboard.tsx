@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { AppState, User } from '../types';
 import { Messaging } from './SharedComponents';
 import * as H from '../utils/helpers';
@@ -24,6 +24,8 @@ interface Props {
   setMobileMenuOpen?: (v: boolean) => void;
 }
 
+type EmpTabItem = { id: string; label: string; badgeCount?: number; iconOnlyOnDesktop?: boolean };
+
 export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpen, setMobileMenuOpen }: Props) {
   const leadingClasses = H.getUserLeadingClasses(state, user.schoolId, user.id);
   const hasHomeroom = leadingClasses.length > 0;
@@ -38,7 +40,7 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
   const unreadMessagesCount = H.getUnreadMessagesCount(state, user);
   const unreadAnnouncementsCount = H.getUnreadAnnouncementsCount(state, user);
 
-  const tabs: { id: string; label: string; badgeCount?: number; iconOnlyOnDesktop?: boolean }[] = useMemo(() => [
+  const tabs: EmpTabItem[] = useMemo(() => [
     ...(isAlsoTeacher ? [
       { id: 'my_schedule', label: allowedTabs.includes('schedule') ? t('my_schedule') : t('schedule') },
       { id: 'homework', label: t('homework') },
@@ -62,6 +64,76 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
   const [hasUnsavedGrades, setHasUnsavedGrades] = useState(false);
   const [hasUnsavedCanvasChanges, setHasUnsavedCanvasChanges] = useState(false);
   const [pendingView, setPendingView] = useState<string | null>(null);
+
+  const barWrapperRef = useRef<HTMLDivElement | null>(null);
+  const measureBarRef = useRef<HTMLDivElement | null>(null);
+  const [topRowSplitIndex, setTopRowSplitIndex] = useState<number | null>(null);
+
+  const nonIconTabs = useMemo(() => tabs.filter(tb => !tb.iconOnlyOnDesktop), [tabs]);
+  const schoolInfoTab = useMemo(() => tabs.find(tb => tb.iconOnlyOnDesktop) || null, [tabs]);
+
+  const recalcTopRowSplit = useCallback(() => {
+    if (!schoolInfoTab || !barWrapperRef.current || !measureBarRef.current) {
+      setTopRowSplitIndex(null);
+      return;
+    }
+    const maxRowWidth = barWrapperRef.current.clientWidth;
+    if (maxRowWidth <= 0) {
+      setTopRowSplitIndex(null);
+      return;
+    }
+    const children = Array.from(measureBarRef.current.children) as HTMLElement[];
+    if (children.length !== nonIconTabs.length + 1) {
+      setTopRowSplitIndex(null);
+      return;
+    }
+    const nonIconWidths = children.slice(0, nonIconTabs.length).map(el => el.offsetWidth);
+    const iconWidth = children[nonIconTabs.length].offsetWidth;
+    const gap = 6; // gap-1.5 = 6px
+    const horizontalChrome = 14; // p-1.5 (12px) + border (2px)
+    const availWidth = maxRowWidth - horizontalChrome;
+
+    const totalAllWidth =
+      nonIconWidths.reduce((sum, w) => sum + w, 0) +
+      iconWidth +
+      gap * nonIconWidths.length;
+
+    if (totalAllWidth <= availWidth) {
+      // Everything fits on a single row; schoolInfo is naturally at the end
+      setTopRowSplitIndex(null);
+      return;
+    }
+
+    // Tabs wrap into 2+ rows: find how many nonIconTabs fit on row 1 junto with schoolInfoTab at the end of row 1
+    let used = 0;
+    let fitCount = 0;
+    for (let i = 0; i < nonIconWidths.length; i++) {
+      const w = nonIconWidths[i];
+      const nextUsed = used + (i > 0 ? gap : 0) + w;
+      if (nextUsed + gap + iconWidth <= availWidth) {
+        used = nextUsed;
+        fitCount = i + 1;
+      } else {
+        break;
+      }
+    }
+    setTopRowSplitIndex(Math.max(1, fitCount));
+  }, [nonIconTabs, schoolInfoTab]);
+
+  useLayoutEffect(() => {
+    recalcTopRowSplit();
+    const wrapperEl = barWrapperRef.current;
+    if (!wrapperEl || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      recalcTopRowSplit();
+    });
+    ro.observe(wrapperEl);
+    window.addEventListener('resize', recalcTopRowSplit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', recalcTopRowSplit);
+    };
+  }, [recalcTopRowSplit]);
 
   useEffect(() => {
     if (view === 'school_info' && effectiveAllowedTabs.includes('schoolInfo')) {
@@ -95,7 +167,8 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
     setPendingView(null);
   };
 
-  const roleLabel = `${user.customRole || t('employee')}${isAlsoTeacher ? ` • ${t('teacher')}` : ''}`;
+  const shortPos = H.formatShortPosition(user.customRole || t('employee'));
+  const roleLabel = `${shortPos}${isAlsoTeacher ? ` • ${t('teacher')}` : ''}`;
 
   return (
     <div className="space-y-2.5 sm:space-y-6">
@@ -112,18 +185,82 @@ export default function EmployeeDashboard({ state, onUpdate, user, mobileMenuOpe
         lang={lang}
       />
 
-      {/* Tablet & PC Tab Bar (md and up) */}
-      <div className="hidden md:inline-flex md:flex-wrap bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 gap-1.5 no-print w-auto dark:bg-slate-900 dark:border-slate-800">
-        {tabs.map(tb => (
+      {/* Hidden measurement bar for desktop row calculation */}
+      {schoolInfoTab && (
+        <div
+          ref={measureBarRef}
+          aria-hidden="true"
+          className="hidden md:inline-flex fixed -top-[9999px] left-0 pointer-events-none opacity-0 p-1.5 gap-1.5 border border-slate-200"
+        >
+          {nonIconTabs.map(tb => (
+            <TabButton
+              key={`measure_${tb.id}`}
+              active={view === tb.id}
+              onClick={() => {}}
+              label={tb.label}
+              badgeCount={tb.badgeCount}
+              iconOnly={false}
+            />
+          ))}
           <TabButton
-            key={tb.id}
-            active={view === tb.id}
-            onClick={() => handleSelectTab(tb.id)}
-            label={tb.label}
-            badgeCount={tb.badgeCount}
-            iconOnly={tb.iconOnlyOnDesktop}
+            key={`measure_${schoolInfoTab.id}`}
+            active={view === schoolInfoTab.id}
+            onClick={() => {}}
+            label={schoolInfoTab.label}
+            badgeCount={schoolInfoTab.badgeCount}
+            iconOnly={true}
           />
-        ))}
+        </div>
+      )}
+
+      {/* Tablet & PC Tab Bar (md and up) */}
+      <div ref={barWrapperRef} className="hidden md:block no-print w-full">
+        <div className="inline-flex flex-wrap bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 gap-1.5 w-auto max-w-full dark:bg-slate-900 dark:border-slate-800">
+          {schoolInfoTab && topRowSplitIndex !== null ? (
+            <>
+              {nonIconTabs.slice(0, topRowSplitIndex).map(tb => (
+                <TabButton
+                  key={tb.id}
+                  active={view === tb.id}
+                  onClick={() => handleSelectTab(tb.id)}
+                  label={tb.label}
+                  badgeCount={tb.badgeCount}
+                  iconOnly={false}
+                />
+              ))}
+              <TabButton
+                key={schoolInfoTab.id}
+                active={view === schoolInfoTab.id}
+                onClick={() => handleSelectTab(schoolInfoTab.id)}
+                label={schoolInfoTab.label}
+                badgeCount={schoolInfoTab.badgeCount}
+                iconOnly={true}
+              />
+              <div className="basis-full h-0 -my-[3px]" aria-hidden="true" />
+              {nonIconTabs.slice(topRowSplitIndex).map(tb => (
+                <TabButton
+                  key={tb.id}
+                  active={view === tb.id}
+                  onClick={() => handleSelectTab(tb.id)}
+                  label={tb.label}
+                  badgeCount={tb.badgeCount}
+                  iconOnly={false}
+                />
+              ))}
+            </>
+          ) : (
+            tabs.map(tb => (
+              <TabButton
+                key={tb.id}
+                active={view === tb.id}
+                onClick={() => handleSelectTab(tb.id)}
+                label={tb.label}
+                badgeCount={tb.badgeCount}
+                iconOnly={tb.iconOnlyOnDesktop}
+              />
+            ))
+          )}
+        </div>
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">

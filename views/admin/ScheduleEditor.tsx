@@ -1333,13 +1333,13 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              <div>
-                <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
+            <div className="flex items-center justify-between gap-2 sm:grid sm:grid-cols-2 sm:gap-3">
+              <div className="flex items-center justify-between sm:block gap-1.5 flex-1">
+                <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 sm:mb-1 leading-tight">
                   {t('lesson_start_time')}
                 </label>
                 <BufferedSingleTimeInput
-                  className="h-8 sm:h-9 text-center font-mono font-bold text-xs sm:text-sm px-2"
+                  className="w-16 sm:w-full h-6 sm:h-9 !py-0.5 sm:!py-1.5 !px-1.5 sm:!px-2 text-center font-mono font-bold text-[11px] sm:text-sm shrink-0"
                   value={activeClassTimeConfig.startTime}
                   onCommit={newStart => {
                     updateScheduleSettings(s => {
@@ -1357,12 +1357,12 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                   }}
                 />
               </div>
-              <div>
-                <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
+              <div className="flex items-center justify-between sm:block gap-1.5 flex-1">
+                <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 sm:mb-1 leading-tight">
                   {t('lesson_duration_min')}
                 </label>
                 <BufferedDurationInput
-                  className="h-8 sm:h-9 text-center font-bold text-xs sm:text-sm px-2"
+                  className="w-12 sm:w-full h-6 sm:h-9 !py-0.5 sm:!py-1.5 !px-1.5 sm:!px-2 text-center font-bold text-[11px] sm:text-sm shrink-0"
                   value={activeClassTimeConfig.lessonDuration}
                   onCommit={newDur => {
                     updateScheduleSettings(s => {
@@ -1416,7 +1416,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
               min="1"
               max="7"
               maxLength={2}
-              className="w-16 sm:w-20 h-7 sm:h-[42px] text-center font-bold text-xs sm:text-sm px-2"
+              className="w-12 sm:w-20 h-6 sm:h-[42px] !py-0.5 sm:!py-1.5 !px-1.5 sm:!px-2 text-center font-bold text-[11px] sm:text-sm"
               value={scheduleSettings.daysToAddBatch}
               onChange={e => {
                 updateScheduleSettings(s => {

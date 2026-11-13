@@ -630,7 +630,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
       : user.role === 'student'
         ? `${t('student')}${user.class ? ` • ${user.class}${user.letter || ''}` : ''}`
         : user.role === 'employee'
-          ? `${user.customRole || t('employee')}${user.employeePermissions?.isTeacher ? ` • ${t('teacher')}` : ''}`
+          ? `${H.formatShortPosition(user.customRole || t('employee'))}${user.employeePermissions?.isTeacher ? ` • ${t('teacher')}` : ''}`
           : t('creator');
 
   const schoolDisplayName = user.role === 'creator'

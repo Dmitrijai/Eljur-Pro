@@ -1952,7 +1952,7 @@ export default function App() {
                     </p>
                     <div className="flex justify-end mt-0.5">
                        <p className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full inline-block dark:bg-slate-800 dark:text-slate-400">
-                         {currentUser.role === 'director' ? t('director') : currentUser.role === 'teacher' ? t('teacher') : currentUser.role === 'student' ? `${t('student')}${currentUser.class ? ` • ${currentUser.class}${currentUser.letter || ''}` : ''}` : currentUser.role === 'employee' ? `${currentUser.customRole || t('employee')}${currentUser.employeePermissions?.isTeacher ? ` • ${t('teacher')}` : ''}` : t('creator')}
+                         {currentUser.role === 'director' ? t('director') : currentUser.role === 'teacher' ? t('teacher') : currentUser.role === 'student' ? `${t('student')}${currentUser.class ? ` • ${currentUser.class}${currentUser.letter || ''}` : ''}` : currentUser.role === 'employee' ? `${H.formatShortPosition(currentUser.customRole || t('employee'))}${currentUser.employeePermissions?.isTeacher ? ` • ${t('teacher')}` : ''}` : t('creator')}
                        </p>
                     </div>
                   </div>
