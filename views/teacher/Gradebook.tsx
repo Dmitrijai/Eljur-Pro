@@ -474,7 +474,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
        if ((!user.schoolId || user.schoolId === 'school_1') && cls && targetKey !== cls && localState.finalGrades[cls]) {
            delete localState.finalGrades[cls];
        }
-       if (!localState.finalGrades[targetKey][subj]) localState.finalGrades[targetKey][subj] = [];
+       if (!Array.isArray(localState.finalGrades[targetKey][subj])) localState.finalGrades[targetKey][subj] = [];
        const found = localState.finalGrades[targetKey][subj].find(entry => entry.studentId === studentId);
        if (found) return found;
        const newEntry = { studentId }; localState.finalGrades[targetKey][subj].push(newEntry); return newEntry;

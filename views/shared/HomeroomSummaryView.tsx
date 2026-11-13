@@ -135,7 +135,8 @@ export const HomeroomSummaryView: React.FC<Props> = ({ state, user, onUpdate }) 
       const subjectData: Record<string, any> = {};
 
       subjects.forEach(subj => {
-        const finalEntry = (classFinalGrades[subj] || []).find(e => e.studentId === student.id) || {} as FinalGradeEntry;
+        const subjFinals = Array.isArray(classFinalGrades[subj]) ? classFinalGrades[subj] : [];
+        const finalEntry = subjFinals.find(e => e.studentId === student.id) || {} as FinalGradeEntry;
         const q1 = computeQuarterAvg(student.id, subj, 'Q1');
         const q2 = computeQuarterAvg(student.id, subj, 'Q2');
         const q3 = computeQuarterAvg(student.id, subj, 'Q3');

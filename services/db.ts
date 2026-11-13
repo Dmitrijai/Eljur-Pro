@@ -1571,8 +1571,19 @@ export const subscribeToSchool = (
       snap.docs.forEach(d => {
         const data = d.data();
         const key = `${schoolId}__${d.id}`;
-        finalGrades[key] = data.entries || {};
-        docSnapshots.set(`schools/${schoolId}/finalGrades/${d.id}`, stableSerialize({ id: d.id, entries: data.entries || {} }));
+        const rawEntries = data.entries && typeof data.entries === 'object' ? data.entries : {};
+        const normalizedEntries: Record<string, any[]> = {};
+        for (const [subj, val] of Object.entries(rawEntries)) {
+          if (Array.isArray(val)) {
+            normalizedEntries[subj] = val;
+          } else if (val && typeof val === 'object') {
+            normalizedEntries[subj] = Object.values(val).filter((item: any) => item && typeof item === 'object' && typeof item.studentId === 'string');
+          } else {
+            normalizedEntries[subj] = [];
+          }
+        }
+        finalGrades[key] = normalizedEntries;
+        docSnapshots.set(`schools/${schoolId}/finalGrades/${d.id}`, stableSerialize({ id: d.id, entries: normalizedEntries }));
       });
       onUpdate({ finalGrades });
     }, (err) => handleSubError(err, OperationType.LIST, `schools/${schoolId}/finalGrades`));

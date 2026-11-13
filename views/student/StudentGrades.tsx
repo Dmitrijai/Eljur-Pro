@@ -330,7 +330,8 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                         {isFinalGradesOpen && (
                         <div className="md:hidden print:hidden space-y-2 animate-in slide-in-from-top-2">
                             {subjects.map(s => {
-                                const entry = classFinalGrades[s]?.find(e => e.studentId === user.id) || {} as FinalGradeEntry;
+                                const subjFinals = Array.isArray(classFinalGrades[s]) ? classFinalGrades[s] : [];
+                                const entry = subjFinals.find(e => e.studentId === user.id) || {} as FinalGradeEntry;
                                 const showQ1 = entry.isQ1Confirmed ? entry.q1 : '—'; 
                                 const showQ2 = entry.isQ2Confirmed ? entry.q2 : '—'; 
                                 const showQ3 = entry.isQ3Confirmed ? entry.q3 : '—'; 
@@ -385,7 +386,8 @@ export const StudentGrades = ({ state, user }: { state: AppState, user: User }) 
                                     </thead>
                                     <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-900">
                                         {subjects.map(s => {
-                                            const entry = classFinalGrades[s]?.find(e => e.studentId === user.id) || {} as FinalGradeEntry;
+                                            const subjFinals = Array.isArray(classFinalGrades[s]) ? classFinalGrades[s] : [];
+                                            const entry = subjFinals.find(e => e.studentId === user.id) || {} as FinalGradeEntry;
                                             const showQ1 = entry.isQ1Confirmed ? entry.q1 : '—'; 
                                             const showQ2 = entry.isQ2Confirmed ? entry.q2 : '—'; 
                                             const showQ3 = entry.isQ3Confirmed ? entry.q3 : '—'; 

@@ -2437,11 +2437,21 @@ export const setSchoolClassGrades = (state: AppState, schoolId: string | undefin
 export const getSchoolClassFinalGrades = (state: AppState, schoolId: string | undefined, classKey: string): Record<string, FinalGradeEntry[]> => {
     if (!state.finalGrades || !classKey) return {};
     const pureKey = classKey.includes('__') ? classKey.split('__').pop() || classKey : classKey;
-    if (schoolId) {
-        const scopedKey = `${schoolId}__${pureKey}`;
-        return state.finalGrades[scopedKey] || (schoolId === 'school_1' ? state.finalGrades[pureKey] : undefined) || {};
+    const rawMap = schoolId
+        ? (state.finalGrades[`${schoolId}__${pureKey}`] || (schoolId === 'school_1' ? state.finalGrades[pureKey] : undefined) || {})
+        : (state.finalGrades[pureKey] || {});
+    if (!rawMap || typeof rawMap !== 'object') return {};
+    const normalized: Record<string, FinalGradeEntry[]> = {};
+    for (const [subj, val] of Object.entries(rawMap)) {
+        if (Array.isArray(val)) {
+            normalized[subj] = val;
+        } else if (val && typeof val === 'object') {
+            normalized[subj] = Object.values(val).filter((item: any) => item && typeof item === 'object' && typeof item.studentId === 'string') as FinalGradeEntry[];
+        } else {
+            normalized[subj] = [];
+        }
     }
-    return state.finalGrades[pureKey] || {};
+    return normalized;
 };
 
 export const setSchoolClassFinalGrades = (state: AppState, schoolId: string | undefined, classKey: string, finalGrades: Record<string, FinalGradeEntry[]>): void => {
@@ -2614,7 +2624,7 @@ export const clearSchoolGrades = (state: AppState, schoolId: string | undefined)
             delete state.finalGrades[scopedKey];
             if (state.finalGrades[pureKey]) {
                 const hasOtherSchoolFinalGrades = Object.values(state.finalGrades[pureKey]).some(fgArr => 
-                    fgArr.some(fg => {
+                    Array.isArray(fgArr) && fgArr.some(fg => {
                         const student = state.users.find(u => u.id === fg.studentId);
                         return student && student.schoolId && student.schoolId !== schoolId;
                     })
