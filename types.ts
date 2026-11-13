@@ -191,6 +191,7 @@ export interface ScheduleSettings {
   defaultLessonDuration?: number; // Default lesson duration in minutes (e.g. 45)
   classTimeSettings?: Record<string, ClassScheduleTimeConfig>; // Per-class overrides keyed by classKey (e.g. '10_А')
   classCopyCounts?: Record<string, number>; // Popularity counts of source classes used for schedule copying
+  teacherSubjectCounts?: Record<string, Record<string, number>>; // Popularity counts of teachers selected per subject
 }
 
 // --- NEW ASSIGNMENTS & GROUPS ---

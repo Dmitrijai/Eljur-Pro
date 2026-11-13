@@ -46,6 +46,22 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
 
+  const formatSchoolClock = () => {
+    const now = H.getSchoolNow(state, isCreator ? 'global' : user.schoolId);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  };
+
+  const [liveSchoolClock, setLiveSchoolClock] = useState<string>(() => formatSchoolClock());
+
+  useEffect(() => {
+    setLiveSchoolClock(formatSchoolClock());
+    const timer = setInterval(() => {
+      setLiveSchoolClock(formatSchoolClock());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [state, isCreator, user.schoolId]);
+
   const serializedSchoolEduResources = JSON.stringify(currentSchool?.educationalResources ?? currentSchool?.educationalResourceUrl ?? '');
 
   useEffect(() => {
@@ -743,54 +759,67 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
              
              <div>
                 <label className="block text-xs sm:text-sm font-bold text-slate-600 mb-1 sm:mb-2 dark:text-slate-300">{t('timezone')}</label>
-                <Select 
-                   value={H.getSchoolTimezone(state, isCreator ? 'global' : user.schoolId)} 
-                   onChange={(e) => {
-                     const tz = e.target.value;
-                     if (isCreator) {
-                       try {
-                         localStorage.setItem('eljur_creator_timezone', tz);
-                       } catch {}
-                       (state.settings as any).creatorTimezone = tz;
-                       H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
-                       const updatedNow = H.getSchoolNow(state, 'global');
-                       const pad = (n: number) => n.toString().padStart(2, '0');
-                       setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
-                       setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
-                       onUpdate({ ...state });
-                     } else if (isDirector && user.schoolId && user.schoolId !== 'global') {
-                       const targetSid = user.schoolId;
-                       state.settings.timezone = tz;
-                       if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
-                       if (!(state.settings as any).schoolsSettings[targetSid]) (state.settings as any).schoolsSettings[targetSid] = {};
-                       (state.settings as any).schoolsSettings[targetSid].timezone = tz;
-                       if (currentSchool && currentSchool.id === targetSid) {
-                         (currentSchool as any).timezone = tz;
-                       }
-                       state.schools = state.schools.map(s => s.id === targetSid ? ({ ...s, timezone: tz } as any) : s);
-                       H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
-                       const updatedNow = H.getSchoolNow(state, targetSid);
-                       const pad = (n: number) => n.toString().padStart(2, '0');
-                       setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
-                       setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
-                       onUpdate({ ...state });
-                       DB.saveSchoolState(targetSid, state).catch(() => {});
-                       DB.saveSchoolCache(targetSid, state).catch(() => {});
-                     }
-                   }}
-                >
-                   <option value="UTC+2">{lang === 'en' ? 'Kaliningrad (MSK-1)' : 'Калининград (MSK-1)'}</option>
-                   <option value="UTC+3">{lang === 'en' ? 'Moscow (MSK)' : 'Москва (MSK)'}</option>
-                   <option value="UTC+4">{lang === 'en' ? 'Samara (MSK+1)' : 'Самара (MSK+1)'}</option>
-                   <option value="UTC+5">{lang === 'en' ? 'Yekaterinburg (MSK+2)' : 'Екатеринбург (MSK+2)'}</option>
-                   <option value="UTC+6">{lang === 'en' ? 'Omsk (MSK+3)' : 'Омск (MSK+3)'}</option>
-                   <option value="UTC+7">{lang === 'en' ? 'Krasnoyarsk (MSK+4)' : 'Красноярск (MSK+4)'}</option>
-                   <option value="UTC+8">{lang === 'en' ? 'Irkutsk (MSK+5)' : 'Иркутск (MSK+5)'}</option>
-                   <option value="UTC+9">{lang === 'en' ? 'Yakutsk (MSK+6)' : 'Якутск (MSK+6)'}</option>
-                   <option value="UTC+10">{lang === 'en' ? 'Vladivostok (MSK+7)' : 'Владивосток (MSK+7)'}</option>
-                   <option value="UTC+11">{lang === 'en' ? 'Magadan (MSK+8)' : 'Магадан (MSK+8)'}</option>
-                   <option value="UTC+12">{lang === 'en' ? 'Kamchatka (MSK+9)' : 'Камчатка (MSK+9)'}</option>
-                </Select>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="flex-1 min-w-0">
+                    <Select 
+                       value={H.getSchoolTimezone(state, isCreator ? 'global' : user.schoolId)} 
+                       onChange={(e) => {
+                         const tz = e.target.value;
+                         if (isCreator) {
+                           try {
+                             localStorage.setItem('eljur_creator_timezone', tz);
+                           } catch {}
+                           (state.settings as any).creatorTimezone = tz;
+                           H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
+                           const updatedNow = H.getSchoolNow(state, 'global');
+                           const pad = (n: number) => n.toString().padStart(2, '0');
+                           setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
+                           setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                           setLiveSchoolClock(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                           onUpdate({ ...state });
+                         } else if (isDirector && user.schoolId && user.schoolId !== 'global') {
+                           const targetSid = user.schoolId;
+                           state.settings.timezone = tz;
+                           if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
+                           if (!(state.settings as any).schoolsSettings[targetSid]) (state.settings as any).schoolsSettings[targetSid] = {};
+                           (state.settings as any).schoolsSettings[targetSid].timezone = tz;
+                           if (currentSchool && currentSchool.id === targetSid) {
+                             (currentSchool as any).timezone = tz;
+                           }
+                           state.schools = state.schools.map(s => s.id === targetSid ? ({ ...s, timezone: tz } as any) : s);
+                           H.setActiveTimeContext(state.settings.systemTimeOffset || 0, tz);
+                           const updatedNow = H.getSchoolNow(state, targetSid);
+                           const pad = (n: number) => n.toString().padStart(2, '0');
+                           setVirtualDatePart(`${updatedNow.getFullYear()}-${pad(updatedNow.getMonth()+1)}-${pad(updatedNow.getDate())}`);
+                           setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                           setLiveSchoolClock(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
+                           onUpdate({ ...state });
+                           DB.saveSchoolState(targetSid, state).catch(() => {});
+                           DB.saveSchoolCache(targetSid, state).catch(() => {});
+                         }
+                       }}
+                    >
+                       <option value="UTC+2">{lang === 'en' ? 'Kaliningrad (MSK-1)' : 'Калининград (MSK-1)'}</option>
+                       <option value="UTC+3">{lang === 'en' ? 'Moscow (MSK)' : 'Москва (MSK)'}</option>
+                       <option value="UTC+4">{lang === 'en' ? 'Samara (MSK+1)' : 'Самара (MSK+1)'}</option>
+                       <option value="UTC+5">{lang === 'en' ? 'Yekaterinburg (MSK+2)' : 'Екатеринбург (MSK+2)'}</option>
+                       <option value="UTC+6">{lang === 'en' ? 'Omsk (MSK+3)' : 'Омск (MSK+3)'}</option>
+                       <option value="UTC+7">{lang === 'en' ? 'Krasnoyarsk (MSK+4)' : 'Красноярск (MSK+4)'}</option>
+                       <option value="UTC+8">{lang === 'en' ? 'Irkutsk (MSK+5)' : 'Иркутск (MSK+5)'}</option>
+                       <option value="UTC+9">{lang === 'en' ? 'Yakutsk (MSK+6)' : 'Якутск (MSK+6)'}</option>
+                       <option value="UTC+10">{lang === 'en' ? 'Vladivostok (MSK+7)' : 'Владивосток (MSK+7)'}</option>
+                       <option value="UTC+11">{lang === 'en' ? 'Magadan (MSK+8)' : 'Магадан (MSK+8)'}</option>
+                       <option value="UTC+12">{lang === 'en' ? 'Kamchatka (MSK+9)' : 'Камчатка (MSK+9)'}</option>
+                    </Select>
+                  </div>
+                  <div
+                    className="shrink-0 h-8 sm:h-10 px-2.5 sm:px-3.5 rounded-xl bg-blue-50/80 border border-blue-200 text-blue-700 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300 flex items-center gap-1.5 sm:gap-2 font-mono font-bold text-xs sm:text-sm tabular-nums shadow-2xs"
+                    title={lang === 'ru' ? 'Точное время школы' : 'Exact school time'}
+                  >
+                    <Clock size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span>{liveSchoolClock}</span>
+                  </div>
+                </div>
                 <p className="text-[11px] sm:text-xs text-slate-400 mt-1">{isCreator ? t('timezone_creator_desc') : t('timezone_desc')}</p>
              </div>
           </div>

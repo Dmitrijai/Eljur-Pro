@@ -778,10 +778,33 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
     (currentDay as any)[field] = val; 
     onUpdate(state); 
   };
+  const incrementTeacherSubjectPopularity = (subjectName: string, teacherId: string) => {
+    const subj = (subjectName || '').trim();
+    const tId = (teacherId || '').trim();
+    if (!subj || !tId) return;
+    const currentSettings: ScheduleSettings = JSON.parse(JSON.stringify(H.getSchoolScheduleSettings(state, user.schoolId)));
+    if (!currentSettings.teacherSubjectCounts) currentSettings.teacherSubjectCounts = {};
+    if (!currentSettings.teacherSubjectCounts[subj]) currentSettings.teacherSubjectCounts[subj] = {};
+    currentSettings.teacherSubjectCounts[subj][tId] = (currentSettings.teacherSubjectCounts[subj][tId] || 0) + 1;
+    H.setSchoolScheduleSettings(state, user.schoolId, currentSettings);
+    try {
+      const storageKey = `eljur_teacher_subj_counts_${user.schoolId || 'school_1'}`;
+      const raw = localStorage.getItem(storageKey);
+      const localMap = raw ? JSON.parse(raw) : {};
+      if (!localMap[subj]) localMap[subj] = {};
+      localMap[subj][tId] = Math.max(localMap[subj][tId] || 0, currentSettings.teacherSubjectCounts[subj][tId]);
+      localStorage.setItem(storageKey, JSON.stringify(localMap));
+    } catch {}
+  };
+
   const updateLesson = (dayId: string, lIndex: number, field: keyof Lesson, val: string) => { 
     if (!targetScheduleKey || !state.schedules[targetScheduleKey]?.[dayId]?.lessons?.[lIndex]) return;
     if (isDayInPast(state.schedules[targetScheduleKey][dayId].date)) return; 
-    (state.schedules[targetScheduleKey][dayId].lessons[lIndex] as any)[field] = val; 
+    const lesson = state.schedules[targetScheduleKey][dayId].lessons[lIndex];
+    (lesson as any)[field] = val; 
+    if ((field === 'teacherId' || field === 'lesson') && lesson.lesson && lesson.teacherId) {
+      incrementTeacherSubjectPopularity(lesson.lesson, lesson.teacherId);
+    }
     onUpdate(state); 
   };
   
@@ -815,6 +838,9 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                   const siblingSg = lesson.subgroups.find(sg => sg !== currentSg && sg.teacherId === tId);
                   if (siblingSg) { currentSg.room = siblingSg.room; currentSg.subject = siblingSg.subject; }
               }
+          }
+          if ((field === 'teacherId' || field === 'subject') && currentSg.subject && currentSg.teacherId) {
+              incrementTeacherSubjectPopularity(currentSg.subject, currentSg.teacherId);
           }
           onUpdate(state);
       }
@@ -890,10 +916,112 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       setLabelModal({...labelModal, isOpen: false});
   };
 
+  const validClassKeys = new Set(schoolClasses.map(c => `${c.class}_${c.letter}`));
+
   const getTeacherDisplay = (u: any) => {
-      const subjects = state.teacherAssignments.filter(a => a.teacherId === u.id).map(a => a.subject);
+      const subjects = state.teacherAssignments
+        .filter(a => a.teacherId === u.id && (!a.schoolId || !user.schoolId || a.schoolId === user.schoolId) && validClassKeys.has(a.classId))
+        .map(a => a.subject);
       const uniqueSubjs = Array.from(new Set(subjects));
       return `${H.formatShortName(u.fio)}${uniqueSubjs.length > 0 ? ` (${uniqueSubjs.slice(0,2).join(', ')}${uniqueSubjs.length>2?'...':''})` : ''}`;
+  };
+
+  const getTeachersSortedForSubject = (subjectName: string) => {
+      const schoolTeachers = state.users.filter(u => H.isUserTeacherCapable(u) && (!user.schoolId || u.schoolId === user.schoolId));
+      const subj = (subjectName || '').trim();
+      if (!subj) {
+          return [...schoolTeachers].sort((a, b) => a.fio.localeCompare(b.fio));
+      }
+      let localMap: Record<string, Record<string, number>> = {};
+      try {
+          const raw = localStorage.getItem(`eljur_teacher_subj_counts_${user.schoolId || 'school_1'}`);
+          if (raw) localMap = JSON.parse(raw);
+      } catch {}
+      const settingsSubjMap = scheduleSettings.teacherSubjectCounts?.[subj] || {};
+      const localSubjMap = localMap[subj] || {};
+
+      const scheduleUsageMap: Record<string, number> = {};
+      schoolClasses.forEach(c => {
+          const ck = `${c.class}_${c.letter}`;
+          const sKey = H.getSchoolClassKey(user.schoolId, ck);
+          const classSched = state.schedules[sKey] || {};
+          Object.values(classSched).forEach(dayObj => {
+              if (!dayObj || !dayObj.lessons) return;
+              dayObj.lessons.forEach(les => {
+                  if (les.subgroups && les.subgroups.length > 0) {
+                      les.subgroups.forEach(sg => {
+                          if (sg.subject === subj && sg.teacherId) {
+                              scheduleUsageMap[sg.teacherId] = (scheduleUsageMap[sg.teacherId] || 0) + 1;
+                          }
+                      });
+                  } else if (les.lesson === subj && les.teacherId) {
+                      scheduleUsageMap[les.teacherId] = (scheduleUsageMap[les.teacherId] || 0) + 1;
+                  }
+              });
+          });
+      });
+
+      return [...schoolTeachers].sort((a, b) => {
+          const explicitA = Math.max(settingsSubjMap[a.id] || 0, localSubjMap[a.id] || 0);
+          const explicitB = Math.max(settingsSubjMap[b.id] || 0, localSubjMap[b.id] || 0);
+          const schedUsageA = scheduleUsageMap[a.id] || 0;
+          const schedUsageB = scheduleUsageMap[b.id] || 0;
+          const assignedActiveA = state.teacherAssignments.some(ta => ta.teacherId === a.id && ta.subject === subj && ta.classId === activeClass && (!ta.schoolId || !user.schoolId || ta.schoolId === user.schoolId)) ? 1 : 0;
+          const assignedActiveB = state.teacherAssignments.some(ta => ta.teacherId === b.id && ta.subject === subj && ta.classId === activeClass && (!ta.schoolId || !user.schoolId || ta.schoolId === user.schoolId)) ? 1 : 0;
+          const assignedTotalA = state.teacherAssignments.filter(ta => ta.teacherId === a.id && ta.subject === subj && validClassKeys.has(ta.classId) && (!ta.schoolId || !user.schoolId || ta.schoolId === user.schoolId)).length;
+          const assignedTotalB = state.teacherAssignments.filter(ta => ta.teacherId === b.id && ta.subject === subj && validClassKeys.has(ta.classId) && (!ta.schoolId || !user.schoolId || ta.schoolId === user.schoolId)).length;
+
+          const popularityA = explicitA * 100 + schedUsageA * 10 + assignedActiveA * 5 + assignedTotalA;
+          const popularityB = explicitB * 100 + schedUsageB * 10 + assignedActiveB * 5 + assignedTotalB;
+          if (popularityB !== popularityA) return popularityB - popularityA;
+          return a.fio.localeCompare(b.fio);
+      });
+  };
+
+  const renderTeacherSelect = (
+      currentTeacherId: string,
+      subjectName: string,
+      onChangeVal: (newTeacherId: string) => void,
+      dayDate: string,
+      timeRange: string,
+      lessonId: string,
+      isPastDay: boolean,
+      selectClassName: string,
+      overlayTextClassName: string = 'text-xs sm:text-sm justify-center'
+  ) => {
+      const sortedTeachers = getTeachersSortedForSubject(subjectName);
+      const selectedTeacher = state.users.find(u => u.id === currentTeacherId);
+      const selectedShortName = selectedTeacher ? H.formatShortName(selectedTeacher.fio) : '';
+      return (
+          <div className="relative flex-1 min-w-0 w-full print:hidden">
+              <Select
+                  disabled={isPastDay}
+                  value={currentTeacherId}
+                  onChange={e => onChangeVal(e.target.value)}
+                  className={`${selectClassName} ${selectedShortName ? '!text-transparent selection:bg-transparent' : ''}`}
+              >
+                  <option value="" className="text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900">-- {t('teacher')} --</option>
+                  {sortedTeachers.map(u => {
+                      const tConflict = getTeacherConflictDetails(u.id, dayDate, timeRange, activeClass, lessonId);
+                      return (
+                          <option
+                              key={u.id}
+                              value={u.id}
+                              disabled={!!tConflict}
+                              className="text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900"
+                          >
+                              {getTeacherDisplay(u)} {tConflict ? `🔒 (${t('in_class_short')} ${tConflict})` : ''}
+                          </option>
+                      );
+                  })}
+              </Select>
+              {selectedShortName && (
+                  <div className={`pointer-events-none absolute inset-y-[2px] left-[2px] right-7 flex items-center px-2 truncate font-medium text-slate-800 dark:text-slate-100 ${overlayTextClassName}`}>
+                      <span className="truncate">{selectedShortName}</span>
+                  </div>
+              )}
+          </div>
+      );
   };
 
   const updateScheduleSettings = (updater: (s: ScheduleSettings) => void) => {
@@ -1074,7 +1202,6 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                 <div className="md:hidden print:hidden divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
                   {day.lessons.map((lesson, idx) => {
                     const isSplit = lesson.subgroups && lesson.subgroups.length > 0;
-                    const schoolTeachers = state.users.filter(u => H.isUserTeacherCapable(u) && (!user.schoolId || u.schoolId === user.schoolId));
                     return (
                       <div key={lesson.id} className="p-2.5 space-y-1.5">
                         <div className="flex items-center justify-between gap-1.5">
@@ -1100,13 +1227,17 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                                       {schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}
                                     </Select>
                                     <div className="flex items-center gap-1">
-                                      <Select disabled={isPast} value={sg.teacherId} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', e.target.value)} className="text-[11px] h-7 flex-1 py-0">
-                                        <option value="">-- {t('teacher')} --</option>
-                                        {schoolTeachers.map(u => {
-                                          const tConflict = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id);
-                                          return <option key={u.id} value={u.id} disabled={!!tConflict}>{getTeacherDisplay(u)} {tConflict ? `🔒 (${t('in_class_short')} ${tConflict})` : ''}</option>;
-                                        })}
-                                      </Select>
+                                      {renderTeacherSelect(
+                                        sg.teacherId,
+                                        sg.subject,
+                                        val => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', val),
+                                        day.date,
+                                        lesson.timeRange,
+                                        lesson.id,
+                                        isPast,
+                                        'text-[11px] h-7 w-full py-0',
+                                        'text-[11px] justify-start'
+                                      )}
                                       {!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, sgIdx)} className="p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-blue-500 shrink-0" title={t('add_label')}><Type size={12}/></button>}
                                       <Input maxLength={25} disabled={isPast} value={sg.room} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'room', e.target.value)} className={`text-[11px] w-16 h-7 px-1 text-center shrink-0 ${conflictClass ? '!border-red-500 !text-red-600' : ''}`} placeholder={t('cabinet')} />
                                     </div>
@@ -1126,13 +1257,17 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                                 {schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}
                               </Select>
                               <div className="flex items-center gap-1">
-                                <Select disabled={isPast} value={lesson.teacherId} onChange={e => updateLesson(dayKey, idx, 'teacherId', e.target.value)} className="text-[11px] h-7 flex-1 py-0">
-                                  <option value="">-- {t('teacher')} --</option>
-                                  {schoolTeachers.map(u => {
-                                    const tConflict = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id);
-                                    return <option key={u.id} value={u.id} disabled={!!tConflict}>{getTeacherDisplay(u)} {tConflict ? `🔒 (${t('in_class_short')} ${tConflict})` : ''}</option>;
-                                  })}
-                                </Select>
+                                {renderTeacherSelect(
+                                  lesson.teacherId,
+                                  lesson.lesson,
+                                  val => updateLesson(dayKey, idx, 'teacherId', val),
+                                  day.date,
+                                  lesson.timeRange,
+                                  lesson.id,
+                                  isPast,
+                                  'text-[11px] h-7 w-full py-0',
+                                  'text-[11px] justify-start'
+                                )}
                                 {!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, null)} className="p-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-slate-500 shrink-0" title={t('add_label')}><Type size={12}/></button>}
                                 <Input maxLength={25} disabled={isPast} value={lesson.room} onChange={e => updateLesson(dayKey, idx, 'room', e.target.value)} className={`text-[11px] w-16 h-7 px-1 text-center shrink-0 ${conflictClass ? '!border-red-500 !text-red-600' : ''}`} placeholder={t('cabinet')} />
                               </div>
@@ -1168,7 +1303,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                           </td>
                           {isGroupColVisible && (<td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map(sg => { const groupName = classGroups.find(g => g.id === sg.groupId)?.name || t('subgroup_label'); return (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center justify-center text-[9px] font-bold text-blue-600 dark:text-blue-400 px-1 truncate bg-blue-50/10" title={groupName}>{groupName}</div>); })}</div>) : (<div className="min-h-[42px] flex items-center justify-center text-slate-300">-</div>)}</td>)}
                           <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Select disabled={isPast} value={sg.subject} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'subject', e.target.value)} className="text-sm text-center border-blue-100 dark:border-slate-700 w-full print:hidden"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{sg.subject || '—'}</span></div>))}</div>) : (<div className="p-2"><Select disabled={isPast} value={lesson.lesson} onChange={e => updateLesson(dayKey, idx, 'lesson', e.target.value)} className="text-sm text-center print:hidden"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{lesson.lesson || '—'}</span></div>)}</td>
-                          <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => { const teacherObj = state.users.find(u => u.id === sg.teacherId); const teacherName = teacherObj ? getTeacherDisplay(teacherObj) : ''; return (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10 gap-0.5"><div className="flex gap-1 items-center w-full"><Select disabled={isPast} value={sg.teacherId} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', e.target.value)} className="text-sm text-center border-blue-100 dark:border-slate-700 w-full print:hidden"><option value="">-- {t('teacher')} --</option>{state.users.filter(u => H.isUserTeacherCapable(u) && (!user.schoolId || u.schoolId === user.schoolId)).map(u => { const conflictClass = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id); return (<option key={u.id} value={u.id} disabled={!!conflictClass}>{getTeacherDisplay(u)} {conflictClass ? `🔒 (${t('in_class_short')} ${conflictClass})` : ''}</option>); })}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{teacherName || '—'}</span>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, sgIdx)} className="p-1 hover:bg-blue-200 rounded text-blue-500 flex-shrink-0 no-print" title={t('add_label')}><Type size={12}/></button>}</div>{sg.teacherLabel && <div className="text-[9px] text-red-500 font-bold text-center leading-none mt-0.5 break-words">{sg.teacherLabel}</div>}</div>); })}</div>) : (() => { const teacherObj = state.users.find(u => u.id === lesson.teacherId); const teacherName = teacherObj ? getTeacherDisplay(teacherObj) : ''; return (<div className="p-2 flex flex-col gap-0.5"><div className="flex gap-1 items-center w-full"><Select disabled={isPast} value={lesson.teacherId} onChange={e => updateLesson(dayKey, idx, 'teacherId', e.target.value)} className="text-sm text-center w-full print:hidden"><option value="">-- {t('teacher')} --</option>{state.users.filter(u => H.isUserTeacherCapable(u) && (!user.schoolId || u.schoolId === user.schoolId)).map(u => { const conflictClass = getTeacherConflictDetails(u.id, day.date, lesson.timeRange, activeClass, lesson.id); return (<option key={u.id} value={u.id} disabled={!!conflictClass}>{getTeacherDisplay(u)} {conflictClass ? `🔒 (${t('in_class_short')} ${conflictClass})` : ''}</option>); })}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{teacherName || '—'}</span>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, null)} className="p-1.5 hover:bg-slate-200 rounded text-slate-400 hover:text-blue-500 flex-shrink-0 no-print" title={t('add_label')}><Type size={14}/></button>}</div>{lesson.teacherLabel && <div className="text-[10px] text-red-500 font-bold text-center break-words">{lesson.teacherLabel}</div>}</div>); })()}</td>
+                          <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => { const teacherObj = state.users.find(u => u.id === sg.teacherId); const teacherName = teacherObj ? H.formatShortName(teacherObj.fio) : ''; return (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10 gap-0.5"><div className="flex gap-1 items-center w-full">{renderTeacherSelect(sg.teacherId, sg.subject, val => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', val), day.date, lesson.timeRange, lesson.id, isPast, 'text-sm text-center border-blue-100 dark:border-slate-700 w-full', 'text-sm justify-center')}<span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{teacherName || '—'}</span>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, sgIdx)} className="p-1 hover:bg-blue-200 rounded text-blue-500 flex-shrink-0 no-print" title={t('add_label')}><Type size={12}/></button>}</div>{sg.teacherLabel && <div className="text-[9px] text-red-500 font-bold text-center leading-none mt-0.5 break-words">{sg.teacherLabel}</div>}</div>); })}</div>) : (() => { const teacherObj = state.users.find(u => u.id === lesson.teacherId); const teacherName = teacherObj ? H.formatShortName(teacherObj.fio) : ''; return (<div className="p-2 flex flex-col gap-0.5"><div className="flex gap-1 items-center w-full">{renderTeacherSelect(lesson.teacherId, lesson.lesson, val => updateLesson(dayKey, idx, 'teacherId', val), day.date, lesson.timeRange, lesson.id, isPast, 'text-sm text-center w-full', 'text-sm justify-center')}<span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{teacherName || '—'}</span>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, null)} className="p-1.5 hover:bg-slate-200 rounded text-slate-400 hover:text-blue-500 flex-shrink-0 no-print" title={t('add_label')}><Type size={14}/></button>}</div>{lesson.teacherLabel && <div className="text-[10px] text-red-500 font-bold text-center break-words">{lesson.teacherLabel}</div>}</div>); })()}</td>
                           <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => { const conflictClass = getRoomConflictDetails(sg.room, day.date, lesson.timeRange, activeClass, lesson.id); return (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Input maxLength={25} disabled={isPast} value={sg.room} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'room', e.target.value)} className={`text-sm w-full text-center border-blue-100 dark:border-slate-700 print:hidden ${conflictClass ? '!border-red-500 !text-red-600 dark:!border-red-500' : ''}`} placeholder={t('room_placeholder')} title={conflictClass ? `${t('room_busy_in')} ${conflictClass}` : undefined} /><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{sg.room || '—'}</span>{conflictClass && <span className="text-[9px] text-red-500 font-bold text-center no-print">{t('busy_short')}: {conflictClass}</span>}</div>); })}</div>) : (() => { const conflictClass = getRoomConflictDetails(lesson.room, day.date, lesson.timeRange, activeClass, lesson.id); return (<div className="p-2 flex flex-col gap-0.5"><Input maxLength={25} disabled={isPast} value={lesson.room} onChange={e => updateLesson(dayKey, idx, 'room', e.target.value)} className={`text-sm w-full text-center print:hidden ${conflictClass ? '!border-red-500 !text-red-600 dark:!border-red-500' : ''}`} placeholder={t('room_placeholder')} title={conflictClass ? `${t('room_busy_in')} ${conflictClass}` : undefined} /><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{lesson.room || '—'}</span>{conflictClass && <span className="text-[10px] text-red-500 font-bold text-center no-print">{t('busy_short')}: {conflictClass}</span>}</div>); })()}</td>
                           <td className="p-2 no-print text-center align-middle">{!isPast && <button onClick={() => deleteLesson(dayKey, idx)} className="text-slate-300 hover:text-red-500 transition-colors dark:text-slate-600 dark:hover:text-red-400">&times;</button>}</td>
                         </tr>

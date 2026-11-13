@@ -117,7 +117,8 @@ export const TeacherLoadManager = ({ state, onUpdate, user }: { state: AppState,
             </div>
             <div className="space-y-2 sm:space-y-3">
                 {teachers.map(teacher => {
-                    const assignments = state.teacherAssignments.filter(a => a.teacherId === teacher.id && (!a.schoolId || !schoolId || a.schoolId === schoolId));
+                    const validClassKeys = new Set(schoolClasses.map(c => `${c.class}_${c.letter}`));
+                    const assignments = state.teacherAssignments.filter(a => a.teacherId === teacher.id && (!a.schoolId || !schoolId || a.schoolId === schoolId) && validClassKeys.has(a.classId));
                     const isExpanded = expandedTeacher === teacher.id;
                     const currentClass = getTeacherClass(teacher.id);
                     const currentSubj = getTeacherSubj(teacher.id);

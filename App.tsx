@@ -878,10 +878,36 @@ export default function App() {
                 : rawResolvedInfo
             };
           });
+          const validClassesBySchool = new Map<string, Set<string>>();
+          hydratedSchools.forEach((s: any) => {
+            if (s?.id && Array.isArray(s.classes) && s.classes.length > 0) {
+              validClassesBySchool.set(s.id, new Set(s.classes.map((c: any) => `${c.class}_${c.letter}`)));
+            }
+          });
+          const hasCachedSchool1Users = Array.isArray(cached.users) && cached.users.some((u: any) => (u.schoolId || 'school_1') === 'school_1');
+          const baseUsers = hasCachedSchool1Users
+            ? defaultState.users.filter(u => u.role === 'creator' || (u.schoolId && u.schoolId !== 'school_1'))
+            : defaultState.users;
           const mergedCachedUsers = mergeById(
-            defaultState.users,
+            baseUsers,
             mergeById(prev?.users || [], cached.users)
-          );
+          ).filter((u: any) => {
+            if (u.role !== 'student') return true;
+            const sid = u.schoolId || 'school_1';
+            const validSet = validClassesBySchool.get(sid);
+            if (validSet && validSet.size > 0) {
+              if (!u.class || !u.letter || !validSet.has(`${u.class}_${u.letter}`)) return false;
+            }
+            return true;
+          });
+          const rawCachedAssignments = mergeById(
+            hasCachedSchool1Users ? [] : defaultState.teacherAssignments,
+            mergeById(prev?.teacherAssignments || [], cached.teacherAssignments)
+          ).filter((a: any) => {
+            const sid = a.schoolId || 'school_1';
+            const validSet = validClassesBySchool.get(sid);
+            return !validSet || validSet.size === 0 || validSet.has(a.classId);
+          });
           const cachedUserPrefs = H.getUserPreferences(currentUser?.id, null);
           return {
             ...defaultState,
@@ -890,13 +916,13 @@ export default function App() {
             classes: (Array.isArray(cached.classes) && cached.classes.length > 0) ? cached.classes : defaultState.classes,
             subjects: (Array.isArray(cached.subjects) && cached.subjects.length > 0) ? cached.subjects : defaultState.subjects,
             users: mergedCachedUsers,
-            schedules: { ...defaultState.schedules, ...(prev?.schedules || {}), ...(cached.schedules || {}) },
-            grades: { ...defaultState.grades, ...(prev?.grades || {}), ...(cached.grades || {}) },
-            finalGrades: { ...defaultState.finalGrades, ...(prev?.finalGrades || {}), ...(cached.finalGrades || {}) },
-            homework: mergeById(defaultState.homework, mergeById(prev?.homework || [], cached.homework)),
+            schedules: { ...(hasCachedSchool1Users ? {} : defaultState.schedules), ...(prev?.schedules || {}), ...(cached.schedules || {}) },
+            grades: { ...(hasCachedSchool1Users ? {} : defaultState.grades), ...(prev?.grades || {}), ...(cached.grades || {}) },
+            finalGrades: { ...(hasCachedSchool1Users ? {} : defaultState.finalGrades), ...(prev?.finalGrades || {}), ...(cached.finalGrades || {}) },
+            homework: mergeById(hasCachedSchool1Users ? [] : defaultState.homework, mergeById(prev?.homework || [], cached.homework)),
             messages: mergeMessagesById(defaultState.messages, mergeMessagesById(prev?.messages || [], cached.messages)),
             announcements: mergeMessagesById(defaultState.announcements, mergeMessagesById(prev?.announcements || [], cached.announcements)),
-            teacherAssignments: mergeById(defaultState.teacherAssignments, mergeById(prev?.teacherAssignments || [], cached.teacherAssignments)),
+            teacherAssignments: rawCachedAssignments,
             quarters: (cached.quarters?.Q1 && cached.quarters.Q1.length > 2) ? cached.quarters : defaultState.quarters,
             scheduleSettings: cached.scheduleSettings?.quarterDefinitions?.Q1?.start ? H.normalizeScheduleSettings(cached.scheduleSettings) : defaultState.scheduleSettings,
             settings: {
@@ -997,11 +1023,43 @@ export default function App() {
       setAppState(prev => {
         const cur = prev || defaultState;
 
+        let mergedSchools = [...(cur.schools && cur.schools.length > 0 ? cur.schools : [defaultSchool])];
+        if (schoolUpdate.schools && schoolUpdate.schools.length > 0) {
+          schoolUpdate.schools.forEach((incS: any) => {
+            if (incS.id) cloudSyncedSchoolsRef.current.add(incS.id);
+            const idx = mergedSchools.findIndex(s => s.id === incS.id);
+            const enriched = {
+              ...(idx > -1 ? mergedSchools[idx] : {}),
+              ...incS,
+              subjects: (incS.subjects && incS.subjects.length > 0) ? incS.subjects : (idx > -1 && mergedSchools[idx].subjects?.length ? mergedSchools[idx].subjects : defaultState.subjects),
+              classes: Array.isArray(incS.classes)
+                ? (incS.classes.length > 0 || incS.id !== 'school_1' ? incS.classes : defaultState.classes)
+                : (idx > -1 && Array.isArray(mergedSchools[idx].classes) ? mergedSchools[idx].classes : (incS.id === 'school_1' ? defaultState.classes : []))
+            };
+            if (idx > -1) mergedSchools[idx] = enriched;
+            else mergedSchools.push(enriched);
+          });
+        }
+
+        const targetSchoolObj = mergedSchools.find(s => s.id === targetSid);
+        const validTargetClassKeys = targetSchoolObj && Array.isArray(targetSchoolObj.classes) && targetSchoolObj.classes.length > 0
+          ? new Set(targetSchoolObj.classes.map((c: any) => `${c.class}_${c.letter}`))
+          : null;
+
         let mergedUsers = cur.users || [];
         if (schoolUpdate.users) {
           const otherUsers = mergedUsers.filter(u => (u.schoolId || 'school_1') !== targetSid);
           mergedUsers = [...otherUsers, ...schoolUpdate.users];
           if (mergedUsers.length === 0) mergedUsers = defaultState.users;
+        }
+        if (validTargetClassKeys) {
+          mergedUsers = mergedUsers.filter(u => {
+            if ((u.schoolId || 'school_1') !== targetSid) return true;
+            if (u.role === 'student' && u.class && u.letter && !validTargetClassKeys.has(`${u.class}_${u.letter}`)) {
+              return false;
+            }
+            return true;
+          });
         }
 
         const existingOrder = cur.userOrder || [];
@@ -1022,11 +1080,17 @@ export default function App() {
           const otherAssigns = mergedAssignments.filter(a => (a.schoolId || 'school_1') !== targetSid);
           mergedAssignments = [...otherAssigns, ...schoolUpdate.teacherAssignments];
         }
+        if (validTargetClassKeys) {
+          mergedAssignments = mergedAssignments.filter(a => (a.schoolId || 'school_1') !== targetSid || validTargetClassKeys.has(a.classId));
+        }
 
         let mergedHomework = cur.homework || [];
         if (schoolUpdate.homework !== undefined) {
           const otherHw = mergedHomework.filter(h => (h.schoolId || 'school_1') !== targetSid);
           mergedHomework = [...otherHw, ...schoolUpdate.homework];
+        }
+        if (validTargetClassKeys) {
+          mergedHomework = mergedHomework.filter(h => (h.schoolId || 'school_1') !== targetSid || validTargetClassKeys.has(`${h.class}_${h.letter}`));
         }
 
         let mergedMessages = cur.messages || [];
@@ -1076,22 +1140,61 @@ export default function App() {
           const otherGrps = mergedGroups.filter(g => (g.schoolId || 'school_1') !== targetSid);
           mergedGroups = [...otherGrps, ...schoolUpdate.studentGroups];
         }
+        if (validTargetClassKeys) {
+          mergedGroups = mergedGroups.filter(g => (g.schoolId || 'school_1') !== targetSid || validTargetClassKeys.has(g.classId));
+        }
 
-        let mergedSchools = [...(cur.schools && cur.schools.length > 0 ? cur.schools : [defaultSchool])];
-        if (schoolUpdate.schools && schoolUpdate.schools.length > 0) {
-          schoolUpdate.schools.forEach((incS: any) => {
-            if (incS.id) cloudSyncedSchoolsRef.current.add(incS.id);
-            const idx = mergedSchools.findIndex(s => s.id === incS.id);
-            const enriched = {
-              ...(idx > -1 ? mergedSchools[idx] : {}),
-              ...incS,
-              subjects: (incS.subjects && incS.subjects.length > 0) ? incS.subjects : (idx > -1 && mergedSchools[idx].subjects?.length ? mergedSchools[idx].subjects : defaultState.subjects),
-              classes: Array.isArray(incS.classes)
-                ? (incS.classes.length > 0 || incS.id !== 'school_1' ? incS.classes : defaultState.classes)
-                : (idx > -1 && Array.isArray(mergedSchools[idx].classes) ? mergedSchools[idx].classes : (incS.id === 'school_1' ? defaultState.classes : []))
-            };
-            if (idx > -1) mergedSchools[idx] = enriched;
-            else mergedSchools.push(enriched);
+        let nextSchedules = { ...(cur.schedules || {}) };
+        if (schoolUpdate.schedules !== undefined) {
+          Object.keys(nextSchedules).forEach(k => {
+            if (k.startsWith(`${targetSid}__`) || (targetSid === 'school_1' && !k.includes('__'))) {
+              delete nextSchedules[k];
+            }
+          });
+          nextSchedules = { ...nextSchedules, ...schoolUpdate.schedules };
+        }
+        if (validTargetClassKeys) {
+          Object.keys(nextSchedules).forEach(k => {
+            if (k.startsWith(`${targetSid}__`) || (targetSid === 'school_1' && !k.includes('__'))) {
+              const ck = k.includes('__') ? k.split('__').pop()! : k;
+              if (!validTargetClassKeys.has(ck)) delete nextSchedules[k];
+            }
+          });
+        }
+
+        let nextGrades = { ...(cur.grades || {}) };
+        if (schoolUpdate.grades !== undefined) {
+          Object.keys(nextGrades).forEach(k => {
+            if (k.startsWith(`${targetSid}__`) || (targetSid === 'school_1' && !k.includes('__'))) {
+              delete nextGrades[k];
+            }
+          });
+          nextGrades = { ...nextGrades, ...schoolUpdate.grades };
+        }
+        if (validTargetClassKeys) {
+          Object.keys(nextGrades).forEach(k => {
+            if (k.startsWith(`${targetSid}__`) || (targetSid === 'school_1' && !k.includes('__'))) {
+              const ck = k.includes('__') ? k.split('__').pop()! : k;
+              if (!validTargetClassKeys.has(ck)) delete nextGrades[k];
+            }
+          });
+        }
+
+        let nextFinalGrades = { ...(cur.finalGrades || {}) };
+        if (schoolUpdate.finalGrades !== undefined) {
+          Object.keys(nextFinalGrades).forEach(k => {
+            if (k.startsWith(`${targetSid}__`) || (targetSid === 'school_1' && !k.includes('__'))) {
+              delete nextFinalGrades[k];
+            }
+          });
+          nextFinalGrades = { ...nextFinalGrades, ...schoolUpdate.finalGrades };
+        }
+        if (validTargetClassKeys) {
+          Object.keys(nextFinalGrades).forEach(k => {
+            if (k.startsWith(`${targetSid}__`) || (targetSid === 'school_1' && !k.includes('__'))) {
+              const ck = k.includes('__') ? k.split('__').pop()! : k;
+              if (!validTargetClassKeys.has(ck)) delete nextFinalGrades[k];
+            }
           });
         }
 
@@ -1134,9 +1237,9 @@ export default function App() {
           users: mergedUsers,
           userOrder: mergedUserOrder,
           teacherAssignments: mergedAssignments,
-          schedules: { ...cur.schedules, ...(schoolUpdate.schedules || {}) },
-          grades: { ...cur.grades, ...(schoolUpdate.grades || {}) },
-          finalGrades: { ...cur.finalGrades, ...(schoolUpdate.finalGrades || {}) },
+          schedules: nextSchedules,
+          grades: nextGrades,
+          finalGrades: nextFinalGrades,
           homework: mergedHomework,
           messages: mergedMessages,
           announcements: mergedAnnouncements,

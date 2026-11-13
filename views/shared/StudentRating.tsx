@@ -107,16 +107,20 @@ export const StudentRating = ({ state, schoolId, isGlobal = false }: { state: Ap
 
     const students = useMemo(() => state.users.filter(u => {
         if (u.role !== 'student') return false;
+        if (!u.class || !u.letter) return false;
+        const targetSid = u.schoolId || 'school_1';
         if (isGlobal) {
-            if (filterSchool && u.schoolId !== filterSchool) return false;
+            if (filterSchool && targetSid !== filterSchool) return false;
         } else {
-            if (schoolId && u.schoolId !== schoolId) return false;
+            if (schoolId && targetSid !== schoolId) return false;
         }
+        const validSchoolClasses = H.getSchoolClasses(state, targetSid);
+        if (!validSchoolClasses.some(c => c.class === u.class && c.letter === u.letter)) return false;
         if (filterClass) {
             if (`${u.class}_${u.letter}` !== filterClass) return false;
         }
         return true;
-    }), [state.users, isGlobal, filterSchool, schoolId, filterClass]);
+    }), [state, state.users, isGlobal, filterSchool, schoolId, filterClass]);
 
     const activeFilterTargets = useMemo(() => {
         const targets: string[] = [];
