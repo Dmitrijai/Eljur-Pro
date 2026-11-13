@@ -13,7 +13,7 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
     const systemNow = H.getSchoolNow(state, user.schoolId);
     const defaultWeekIso = H.dateToIso(H.getStartOfWeek(systemNow));
     const [scheduleWeekIso, setScheduleWeekIso] = H.useSyncedState<string>(`eljur_st_sched_week_${user.id}`, defaultWeekIso);
-    const scheduleWeekStart = new Date(scheduleWeekIso || defaultWeekIso);
+    const scheduleWeekStart = H.getStartOfWeek(H.parseIsoDateLocal(scheduleWeekIso || defaultWeekIso));
 
     const goPrevWeek = () => setScheduleWeekIso(H.dateToIso(H.addDays(scheduleWeekStart, -7)));
     const goNextWeek = () => setScheduleWeekIso(H.dateToIso(H.addDays(scheduleWeekStart, 7)));
@@ -22,6 +22,12 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
     const scheduleDays = Object.values(schedule).filter(d => H.isDateInWeek(d.date, scheduleWeekStart)).sort((a,b) => a.date.localeCompare(b.date));
     const scheduleDates = scheduleDays.map(d => d.date);
     const scheduleVacation = H.getVacationForWeek(scheduleWeekStart, scheduleSettings, scheduleDates);
+
+    const myGroupIds = new Set(
+        H.getSchoolStudentGroups(state, user.schoolId, classKey)
+            .filter(g => Array.isArray(g.studentIds) && g.studentIds.includes(user.id))
+            .map(g => g.id)
+    );
 
     return (
         <div className="space-y-3 sm:space-y-6">
@@ -67,17 +73,12 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
                       let displayTeacherLabel = l.teacherLabel;
                       let isUnassigned = false;
                       if (l.subgroups && l.subgroups.length > 0) {
-                        const studentGroup = H.getSchoolStudentGroups(state, user.schoolId, classKey).find(g => g.studentIds.includes(user.id));
-                        if (studentGroup) {
-                          const subgroupLesson = l.subgroups.find(sg => sg.groupId === studentGroup.id);
-                          if (subgroupLesson) {
-                            displaySubject = subgroupLesson.subject;
-                            displayRoom = subgroupLesson.room;
-                            teacherId = subgroupLesson.teacherId;
-                            displayTeacherLabel = subgroupLesson.teacherLabel;
-                          } else {
-                            isUnassigned = true;
-                          }
+                        const subgroupLesson = l.subgroups.find(sg => sg.groupId && myGroupIds.has(sg.groupId));
+                        if (subgroupLesson) {
+                          displaySubject = subgroupLesson.subject;
+                          displayRoom = subgroupLesson.room;
+                          teacherId = subgroupLesson.teacherId;
+                          displayTeacherLabel = subgroupLesson.teacherLabel;
                         } else {
                           isUnassigned = true;
                         }
@@ -145,19 +146,14 @@ export const StudentSchedule = ({ state, user }: { state: AppState, user: User }
                             let displayTeacherLabel = l.teacherLabel;
                             let isUnassigned = false;
                             if (l.subgroups && l.subgroups.length > 0) {
-                                const studentGroup = H.getSchoolStudentGroups(state, user.schoolId, classKey).find(g => g.studentIds.includes(user.id));
-                                if (studentGroup) { 
-                                    const subgroupLesson = l.subgroups.find(sg => sg.groupId === studentGroup.id); 
-                                    if (subgroupLesson) { 
-                                        displaySubject = subgroupLesson.subject; 
-                                        displayRoom = subgroupLesson.room; 
-                                        teacherId = subgroupLesson.teacherId; 
-                                        displayTeacherLabel = subgroupLesson.teacherLabel; 
-                                    } else { 
-                                        isUnassigned = true; 
-                                    } 
-                                } else { 
-                                    isUnassigned = true; 
+                                const subgroupLesson = l.subgroups.find(sg => sg.groupId && myGroupIds.has(sg.groupId));
+                                if (subgroupLesson) {
+                                    displaySubject = subgroupLesson.subject;
+                                    displayRoom = subgroupLesson.room;
+                                    teacherId = subgroupLesson.teacherId;
+                                    displayTeacherLabel = subgroupLesson.teacherLabel;
+                                } else {
+                                    isUnassigned = true;
                                 }
                                 if (isUnassigned) {
                                     displaySubject = l.lesson;

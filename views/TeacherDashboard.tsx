@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppState, User } from '../types';
 import * as H from '../utils/helpers';
 import { Messaging } from './SharedComponents';
@@ -19,6 +18,12 @@ export default function TeacherDashboard({ state, onUpdate, user, mobileMenuOpen
   const [pendingView, setPendingView] = useState<any>(null);
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
+
+  useEffect(() => {
+    if (view === 'homeroom' && !hasHomeroom) {
+      setView('schedule');
+    }
+  }, [view, hasHomeroom]);
 
   const unreadMessagesCount = H.getUnreadMessagesCount(state, user);
   const unreadAnnouncementsCount = H.getUnreadAnnouncementsCount(state, user);

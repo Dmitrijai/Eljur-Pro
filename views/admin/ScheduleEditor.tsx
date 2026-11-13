@@ -316,7 +316,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   const systemNow = H.getSchoolNow(state, user.schoolId);
   const [currentWeekStartIso, setCurrentWeekStartIso] = H.useSyncedState<string>(`eljur_admin_sched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
   const currentWeekStart = React.useMemo(() => {
-      const parsed = new Date(currentWeekStartIso);
+      const parsed = H.parseIsoDateLocal(currentWeekStartIso);
       return isNaN(parsed.getTime()) ? H.getStartOfWeek(systemNow) : H.getStartOfWeek(parsed);
   }, [currentWeekStartIso]);
   const setCurrentWeekStart = (val: Date | ((prev: Date) => Date)) => {
@@ -355,7 +355,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       let baseDate: Date;
       if (visibleDayKeys.length > 0) {
           const lastKey = visibleDayKeys[visibleDayKeys.length - 1];
-          baseDate = new Date(schedule[lastKey].date);
+          baseDate = H.parseIsoDateLocal(schedule[lastKey].date);
       } else {
           baseDate = new Date(currentWeekStart);
           baseDate.setDate(baseDate.getDate() - 1);
@@ -587,7 +587,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       let updated = false;
 
       daysToCopy.forEach(srcDay => {
-          const srcDate = new Date(srcDay.date);
+          const srcDate = H.parseIsoDateLocal(srcDay.date);
           const newDate = shiftDays !== 0 ? H.addDays(srcDate, shiftDays) : srcDate;
           const newDateStr = H.dateToIso(newDate);
           const exists = Object.values(targetClassSchedule).some(d => d && d.date === newDateStr);
@@ -643,7 +643,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
         if (prevWeekKeys.length > 0) {
             prevWeekKeys.forEach(prevKey => {
                 const prevDay = classSchedule[prevKey];
-                const prevDate = new Date(prevDay.date);
+                const prevDate = H.parseIsoDateLocal(prevDay.date);
                 const newDate = H.addDays(prevDate, 7);
                 const newDateStr = H.dateToIso(newDate);
                 const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
@@ -658,7 +658,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
             const daysToCopy = activeCurrentWeekDays.length > 0 ? activeCurrentWeekDays : activePrevWeekDays;
             const shiftDays = activeCurrentWeekDays.length > 0 ? 0 : 7;
             daysToCopy.forEach(srcDay => {
-                const srcDate = new Date(srcDay.date);
+                const srcDate = H.parseIsoDateLocal(srcDay.date);
                 const newDate = shiftDays !== 0 ? H.addDays(srcDate, shiftDays) : srcDate;
                 const newDateStr = H.dateToIso(newDate);
                 const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
@@ -694,7 +694,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       let updated = false;
       prevWeekKeys.forEach(prevKey => {
             const prevDay = classSchedule[prevKey];
-            const prevDate = new Date(prevDay.date);
+            const prevDate = H.parseIsoDateLocal(prevDay.date);
             const newDate = H.addDays(prevDate, 7);
             const newDateStr = H.dateToIso(newDate);
             const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
@@ -720,7 +720,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
     if (curVisibleKeys.length > 0) {
         const lastKey = curVisibleKeys[curVisibleKeys.length - 1];
         const lastDateStr = curSchedule[lastKey].date;
-        baseDate = new Date(lastDateStr);
+        baseDate = H.parseIsoDateLocal(lastDateStr);
     } else {
         baseDate = new Date(currentWeekStart);
         baseDate.setDate(baseDate.getDate() - 1);
@@ -1302,7 +1302,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                             <span className="hidden print:inline font-mono font-medium text-slate-800 text-xs">{lesson.timeRange || '—'}</span>
                           </td>
                           {isGroupColVisible && (<td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map(sg => { const groupName = classGroups.find(g => g.id === sg.groupId)?.name || t('subgroup_label'); return (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center justify-center text-[9px] font-bold text-blue-600 dark:text-blue-400 px-1 truncate bg-blue-50/10" title={groupName}>{groupName}</div>); })}</div>) : (<div className="min-h-[42px] flex items-center justify-center text-slate-300">-</div>)}</td>)}
-                          <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Select disabled={isPast} value={sg.subject} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'subject', e.target.value)} className="text-sm text-center border-blue-100 dark:border-slate-700 w-full print:hidden"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{sg.subject || '—'}</span></div>))}</div>) : (<div className="p-2"><Select disabled={isPast} value={lesson.lesson} onChange={e => updateLesson(dayKey, idx, 'lesson', e.target.value)} className="text-sm text-center print:hidden"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs">{lesson.lesson || '—'}</span></div>)}</td>
+                          <td className="p-0 align-middle border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Select disabled={isPast} value={sg.subject} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'subject', e.target.value)} className="text-sm text-center justify-center border-blue-100 dark:border-slate-700 w-full print:hidden"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{sg.subject || '—'}</span></div>))}</div>) : (<div className="p-2 flex items-center justify-center"><Select disabled={isPast} value={lesson.lesson} onChange={e => updateLesson(dayKey, idx, 'lesson', e.target.value)} className="text-sm text-center justify-center w-full print:hidden"><option value="">-- {t('subject')} --</option>{schoolSubjects.map(s => <option key={s} value={s}>{s}</option>)}</Select><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{lesson.lesson || '—'}</span></div>)}</td>
                           <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => { const teacherObj = state.users.find(u => u.id === sg.teacherId); const teacherName = teacherObj ? H.formatShortName(teacherObj.fio) : ''; return (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10 gap-0.5"><div className="flex gap-1 items-center w-full">{renderTeacherSelect(sg.teacherId, sg.subject, val => updateSubgroup(dayKey, idx, sgIdx, 'teacherId', val), day.date, lesson.timeRange, lesson.id, isPast, 'text-sm text-center border-blue-100 dark:border-slate-700 w-full', 'text-sm justify-center')}<span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{teacherName || '—'}</span>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, sgIdx)} className="p-1 hover:bg-blue-200 rounded text-blue-500 flex-shrink-0 no-print" title={t('add_label')}><Type size={12}/></button>}</div>{sg.teacherLabel && <div className="text-[9px] text-red-500 font-bold text-center leading-none mt-0.5 break-words">{sg.teacherLabel}</div>}</div>); })}</div>) : (() => { const teacherObj = state.users.find(u => u.id === lesson.teacherId); const teacherName = teacherObj ? H.formatShortName(teacherObj.fio) : ''; return (<div className="p-2 flex flex-col gap-0.5"><div className="flex gap-1 items-center w-full">{renderTeacherSelect(lesson.teacherId, lesson.lesson, val => updateLesson(dayKey, idx, 'teacherId', val), day.date, lesson.timeRange, lesson.id, isPast, 'text-sm text-center w-full', 'text-sm justify-center')}<span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{teacherName || '—'}</span>{!isPast && <button onClick={() => openTeacherLabelModal(dayKey, idx, null)} className="p-1.5 hover:bg-slate-200 rounded text-slate-400 hover:text-blue-500 flex-shrink-0 no-print" title={t('add_label')}><Type size={14}/></button>}</div>{lesson.teacherLabel && <div className="text-[10px] text-red-500 font-bold text-center break-words">{lesson.teacherLabel}</div>}</div>); })()}</td>
                           <td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map((sg, sgIdx) => { const conflictClass = getRoomConflictDetails(sg.room, day.date, lesson.timeRange, activeClass, lesson.id); return (<div key={sg.groupId} className="min-h-[42px] h-auto flex flex-col justify-center p-1 bg-blue-50/20 dark:bg-blue-900/10"><Input maxLength={25} disabled={isPast} value={sg.room} onChange={e => updateSubgroup(dayKey, idx, sgIdx, 'room', e.target.value)} className={`text-sm w-full text-center border-blue-100 dark:border-slate-700 print:hidden ${conflictClass ? '!border-red-500 !text-red-600 dark:!border-red-500' : ''}`} placeholder={t('room_placeholder')} title={conflictClass ? `${t('room_busy_in')} ${conflictClass}` : undefined} /><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{sg.room || '—'}</span>{conflictClass && <span className="text-[9px] text-red-500 font-bold text-center no-print">{t('busy_short')}: {conflictClass}</span>}</div>); })}</div>) : (() => { const conflictClass = getRoomConflictDetails(lesson.room, day.date, lesson.timeRange, activeClass, lesson.id); return (<div className="p-2 flex flex-col gap-0.5"><Input maxLength={25} disabled={isPast} value={lesson.room} onChange={e => updateLesson(dayKey, idx, 'room', e.target.value)} className={`text-sm w-full text-center print:hidden ${conflictClass ? '!border-red-500 !text-red-600 dark:!border-red-500' : ''}`} placeholder={t('room_placeholder')} title={conflictClass ? `${t('room_busy_in')} ${conflictClass}` : undefined} /><span className="hidden print:inline font-medium text-slate-800 text-xs w-full text-center">{lesson.room || '—'}</span>{conflictClass && <span className="text-[10px] text-red-500 font-bold text-center no-print">{t('busy_short')}: {conflictClass}</span>}</div>); })()}</td>
                           <td className="p-2 no-print text-center align-middle">{!isPast && <button onClick={() => deleteLesson(dayKey, idx)} className="text-slate-300 hover:text-red-500 transition-colors dark:text-slate-600 dark:hover:text-red-400">&times;</button>}</td>

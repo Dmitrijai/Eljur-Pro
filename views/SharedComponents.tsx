@@ -44,11 +44,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
   const editorUser = item.editedById
     ? state.users.find((u) => u.id === item.editedById)
     : (realAuthor || state.users.find((u) => u.id === item.fromId));
-  const editedByDisplay = editorUser
-    ? (editorUser.role === 'employee' || (item.editedById && item.editedById !== item.fromId)
-        ? `${t('executed_by')} ${H.formatShortName(editorUser.fio)}`
-        : H.formatShortName(editorUser.fio))
-    : '';
+  const editedByDisplay = editorUser ? H.formatShortName(editorUser.fio) : '';
   const beforeSet = new Set(item.readBeforeEditBy || []);
   const afterSet = new Set(item.readAfterEditBy || []);
 
@@ -117,7 +113,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                     <div className="absolute right-0 top-7 z-30 whitespace-nowrap bg-slate-900 text-white dark:bg-slate-800 text-[10px] sm:text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-lg border border-slate-700 flex flex-col gap-0.5">
                       {realAuthor && (
                         <div className="text-amber-200 font-semibold">
-                          {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {t('executed_by')} {H.formatShortName(realAuthor.fio)}
+                          {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {H.formatShortName(realAuthor.fio)}
                         </div>
                       )}
                       {item.editedAt && (
@@ -385,7 +381,7 @@ const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
                   <div className="absolute right-0 top-7 z-30 whitespace-nowrap bg-slate-900 text-white dark:bg-slate-800 text-[10px] sm:text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-lg border border-slate-700 flex flex-col gap-0.5">
                     {realAuthor && (
                       <div className="text-amber-200 font-semibold">
-                        {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {t('executed_by')} {H.formatShortName(realAuthor.fio)}
+                        {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {H.formatShortName(realAuthor.fio)}
                       </div>
                     )}
                     {item.editedAt && (
@@ -625,17 +621,39 @@ const MessageCard: React.FC<MessageCardProps> = ({
   const editorUser = item.editedById
     ? state.users.find((u) => u.id === item.editedById)
     : (realAuthor || sender || null);
-  const editedByDisplay = editorUser
-    ? (editorUser.role === 'employee' || (item.editedById && item.editedById !== item.fromId)
-        ? `${t('executed_by')} ${H.formatShortName(editorUser.fio)}`
-        : H.formatShortName(editorUser.fio))
-    : '';
-  const canReply = activeTab === 'inbox' && !isAnnounce && sender && userOptions.some((opt) => opt.value === sender.id);
+  const editedByDisplay = editorUser ? H.formatShortName(editorUser.fio) : '';
+  const senderSchoolName =
+    sender?.schoolId && sender.schoolId !== currentUser.schoolId && (sender.role as string) !== 'creator'
+      ? state.schools.find((s) => s.id === sender.schoolId)?.name
+      : undefined;
+  const senderDisplay = sender?.fio
+    ? `${H.formatShortName(sender.fio)}${senderSchoolName ? ` (${senderSchoolName})` : ''}`
+    : isAnnounce
+    ? t('school_admin')
+    : 'Unknown';
+
+  const canReply =
+    activeTab === 'inbox' &&
+    !isAnnounce &&
+    sender &&
+    (userOptions.some((opt) => opt.value === sender.id) ||
+      ((currentUser.role === 'director' ||
+        (currentUser.role === 'employee' && currentUser.employeePermissions?.canSendAsDirector)) &&
+        sender.role === 'director'));
   const recipients = !isAnnounce
-    ? item.toIds.map((id) => {
-        const fio = state.users.find((u) => u.id === id)?.fio;
-        return fio ? H.formatShortName(fio) : '';
-      }).filter(Boolean).join(', ')
+    ? item.toIds
+        .map((id) => {
+          const u = state.users.find((usr) => usr.id === id);
+          if (!u?.fio) return '';
+          const shortFio = H.formatShortName(u.fio);
+          if (u.schoolId && u.schoolId !== currentUser.schoolId && (u.role as string) !== 'creator') {
+            const sName = state.schools.find((s) => s.id === u.schoolId)?.name;
+            return sName ? `${shortFio} (${sName})` : shortFio;
+          }
+          return shortFio;
+        })
+        .filter(Boolean)
+        .join(', ')
     : t('all_filter');
 
   // Read status calculation for sent tab or author view
@@ -723,7 +741,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
                   <div className="absolute right-0 top-7 sm:top-8 z-30 whitespace-nowrap bg-slate-900 text-white dark:bg-slate-800 text-[10px] sm:text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-lg border border-slate-700 flex flex-col gap-0.5">
                     {realAuthor && (
                       <div className="text-amber-200 font-semibold">
-                        {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {t('executed_by')} {H.formatShortName(realAuthor.fio)}
+                        {lang === 'ru' ? 'Отправил:' : 'Sent by:'} {H.formatShortName(realAuthor.fio)}
                       </div>
                     )}
                     {item.editedAt && (
@@ -764,7 +782,7 @@ const MessageCard: React.FC<MessageCardProps> = ({
             <span className="flex items-center gap-2">
               {t('from')}:{' '}
               <span className="font-bold text-slate-700 dark:text-slate-300">
-                {sender?.fio ? H.formatShortName(sender.fio) : (isAnnounce ? t('school_admin') : 'Unknown')}
+                {senderDisplay}
               </span>
             </span>
 
@@ -1001,11 +1019,20 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
           const collectionName = isAnnounce ? 'announcements' : 'messages';
           updatedItems.forEach((item) => {
             const senderSchoolId = state.users.find(u => u.id === item.fromId)?.schoolId;
-            const resolvedSid = (item.schoolId && item.schoolId !== 'global')
-              ? item.schoolId
-              : ((senderSchoolId && senderSchoolId !== 'global') ? senderSchoolId : fallbackSchoolId);
-            DB.saveReadReceipt(resolvedSid, collectionName, item).catch((e) => {
-              console.warn('Failed to persist read receipt:', e);
+            const recipientSchools = !isAnnounce
+              ? (item.toIds || []).map(uid => state.users.find(u => u.id === uid)?.schoolId).filter((s): s is string => !!s && s !== 'global')
+              : [];
+            const schoolsToUpdate = Array.from(new Set([
+              item.schoolId,
+              currentUser.schoolId,
+              senderSchoolId,
+              ...recipientSchools
+            ].filter((s): s is string => !!s && s !== 'global')));
+            if (schoolsToUpdate.length === 0) schoolsToUpdate.push(fallbackSchoolId);
+            schoolsToUpdate.forEach((sId) => {
+              DB.saveReadReceipt(sId, collectionName, item).catch((e) => {
+                console.warn('Failed to persist read receipt:', e);
+              });
             });
           });
           onUpdate({ ...state });
@@ -1036,11 +1063,14 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
     setSending(true);
     try {
       // RESOLVE RECIPIENTS (GROUPS -> INDIVIDUALS)
+      const isActingAsDirectorNow = isDirector || (isEmployee && sendAsDirector && currentUser.employeePermissions?.canSendAsDirector);
       let finalToIds: string[] = [];
       if (!isAnnounce) {
         composeTo.forEach(val => {
           if (val === 'GROUP_ALL_DIRECTORS') {
             finalToIds.push(...state.users.filter(u => u.role === 'director').map(u => u.id));
+          } else if (val === 'GROUP_OTHER_DIRECTORS') {
+            finalToIds.push(...state.users.filter(u => u.role === 'director' && u.schoolId !== currentUser.schoolId).map(u => u.id));
           } else if (val.startsWith('GROUP_SCHOOL_')) {
             const sId = val.replace('GROUP_SCHOOL_', '');
             finalToIds.push(...state.users.filter(u => u.schoolId === sId && (u.role as string) !== 'creator').map(u => u.id));
@@ -1059,17 +1089,32 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             finalToIds.push(val); // Single User ID
           }
         });
-        // Unique IDs
-        finalToIds = Array.from(new Set(finalToIds));
+        // Unique IDs, excluding self and own school's director when sending as director
+        finalToIds = Array.from(new Set(finalToIds)).filter(uid => {
+          if (uid === currentUser.id) return false;
+          if (isActingAsDirectorNow) {
+            if (director && uid === director.id) return false;
+            const targetU = state.users.find(u => u.id === uid);
+            if (targetU && targetU.role === 'director' && targetU.schoolId === currentUser.schoolId) return false;
+          }
+          return true;
+        });
+        if (finalToIds.length === 0) {
+          setSending(false);
+          return alert(t('select_recipient_alert'));
+        }
       }
 
-      const recipientSchoolIds = isCreator
+      const senderSchoolId = (currentUser.schoolId && currentUser.schoolId !== 'global')
+        ? currentUser.schoolId
+        : (state.schools[0]?.id || 'school_1');
+      const recipientSchoolIds = !isAnnounce
         ? Array.from(new Set(finalToIds.map(uid => state.users.find(u => u.id === uid)?.schoolId).filter((s): s is string => !!s && s !== 'global')))
         : [];
-      const targetSchoolIds = recipientSchoolIds.length > 0
-        ? recipientSchoolIds
-        : [(currentUser.schoolId && currentUser.schoolId !== 'global') ? currentUser.schoolId : (state.schools[0]?.id || 'school_1')];
-      const targetSchoolId = targetSchoolIds[0];
+      const targetSchoolIds = isCreator
+        ? (recipientSchoolIds.length > 0 ? recipientSchoolIds : [senderSchoolId])
+        : Array.from(new Set([senderSchoolId, ...recipientSchoolIds]));
+      const targetSchoolId = isCreator ? (targetSchoolIds[0] || senderSchoolId) : senderSchoolId;
 
       const newAttachments: Attachment[] = [];
       for (const f of files) {
@@ -1100,6 +1145,9 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
         const idx = list.findIndex(m => m.id === editId);
         if (idx > -1) {
           const existing = list[idx];
+          const prevRecipientSchoolIds = !isAnnounce && existing.toIds
+            ? existing.toIds.map(uid => state.users.find(u => u.id === uid)?.schoolId).filter((s): s is string => !!s && s !== 'global')
+            : [];
           const mergedAtts = [...existingAttachments, ...newAttachments];
 
           const prevReadBefore = Array.from(
@@ -1124,6 +1172,11 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
           list[idx] = updated;
           for (const sId of targetSchoolIds) {
             await DB.saveSchoolEntity(sId, collectionName, updated.id, { ...updated, schoolId: sId });
+          }
+          for (const oldSid of prevRecipientSchoolIds) {
+            if (!targetSchoolIds.includes(oldSid)) {
+              await DB.deleteSchoolEntity(oldSid, collectionName, updated.id).catch(() => {});
+            }
           }
         }
         setEditId(null);
@@ -1194,6 +1247,10 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   };
 
   const handleReply = (m: Message, senderId: string) => {
+     const senderUser = state.users.find(u => u.id === senderId);
+     if (isEmployee && currentUser.employeePermissions?.canSendAsDirector && senderUser && ((senderUser.role as string) === 'creator' || (senderUser.role === 'director' && senderUser.schoolId !== currentUser.schoolId))) {
+       setSendAsDirector(true);
+     }
      setComposeTitle(`Re: ${m.title}`);
      setComposeBody(`\n\n--- ${t('original_message')} ---\n${m.body}`);
      setComposeTo([senderId]);
@@ -1215,15 +1272,18 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      } else {
         state.messages = state.messages.filter(m => m.id !== id);
      }
-     if (isCreator) {
-        (state.schools || []).forEach(s => {
-           DB.deleteSchoolEntity(s.id, collectionName, id).catch(() => {});
-        });
-     } else {
-        DB.deleteSchoolEntity(targetSchoolId, collectionName, id).catch(e => {
+     const recipientSchools = !isAnnounce && existingItem?.toIds
+       ? existingItem.toIds.map(uid => state.users.find(u => u.id === uid)?.schoolId).filter((s): s is string => !!s && s !== 'global')
+       : [];
+     const senderSchool = existingItem?.fromId ? state.users.find(u => u.id === existingItem.fromId)?.schoolId : undefined;
+     const schoolsToDeleteFrom = isCreator
+       ? (state.schools || []).map(s => s.id)
+       : Array.from(new Set([targetSchoolId, currentUser.schoolId, senderSchool, ...recipientSchools].filter((s): s is string => !!s && s !== 'global')));
+     schoolsToDeleteFrom.forEach(sId => {
+        DB.deleteSchoolEntity(sId, collectionName, id).catch(e => {
            console.warn('Failed to delete message entity:', e);
         });
-     }
+     });
      onUpdate({ ...state });
   };
 
@@ -1302,6 +1362,13 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
      });
   } else if (isDirector || currentUser.role === 'teacher' || isEmployee) {
      if (isDirector || isEmployee) {
+        if (actingAsDirector && state.users.some(u => u.role === 'director' && u.schoolId !== currentUser.schoolId)) {
+           userOptions.push({
+               value: 'GROUP_OTHER_DIRECTORS',
+               label: lang === 'ru' ? 'Все директора других школ' : 'All Other School Directors',
+               group: t('groups')
+           });
+        }
         userOptions.push({ value: 'GROUP_TEACHERS', label: t('all_teachers'), group: t('groups') });
         userOptions.push({ value: 'GROUP_HEADMASTERS', label: t('all_class_teachers'), group: t('groups') });
      }
@@ -1326,6 +1393,10 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
   // 2. Individuals
   state.users.forEach(u => {
      if (u.id === currentUser.id) return;
+
+     // Employee acting on behalf of Director cannot message their own school's Director
+     if (actingAsDirector && u.role === 'director' && u.schoolId === currentUser.schoolId) return;
+     if (isEmployee && sendAsDirector && director && u.id === director.id) return;
      
      // CREATOR Logic - Cast role to string to fix potential type overlap issues
      if ((u.role as string) === 'creator') {
@@ -1347,8 +1418,12 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
          return; 
      }
      
-     // NORMAL SCHOOL LOGIC (Same School Only, except Creator who can message across all schools)
-     if (!isCreator && u.schoolId !== currentUser.schoolId && (u.role as string) !== 'creator') return;
+     const isOtherSchoolDirector = u.role === 'director' && u.schoolId !== currentUser.schoolId;
+
+     // NORMAL SCHOOL LOGIC (Same School Only, except Creator who can message across all schools, and Directors/Employees-as-Director who can message Directors of other schools)
+     if (!isCreator && u.schoolId !== currentUser.schoolId && (u.role as string) !== 'creator') {
+         if (!(actingAsDirector && isOtherSchoolDirector)) return;
+     }
 
      let canSee = false;
      
@@ -1411,7 +1486,9 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
             }
         } else {
             // Non-student (Creator, Director, Teacher, Employee)
-            if (uLeadingClasses.length > 0 && u.role !== 'student') {
+            if (isOtherSchoolDirector && !isCreator) {
+                groupName = lang === 'ru' ? 'Директора других школ' : 'Other School Directors';
+            } else if (uLeadingClasses.length > 0 && u.role !== 'student') {
                 const classNames = uLeadingClasses.map(c => `${c.class}${c.letter}`).join(lang === 'ru' ? ' и ' : ' & ');
                 groupName = lang === 'ru' ? `Клас. рук. ${classNames}` : `Class Teacher ${classNames}`;
             } else if ((u.role as string) === 'creator') {
@@ -1451,7 +1528,12 @@ export const Messaging: React.FC<MessagingProps> = ({ state, onUpdate, currentUs
                 label += ` (${parts.join(' • ')})`;
             }
         } else if (u.role === 'director') {
-            label += ` (${t('director')})`;
+            if (isOtherSchoolDirector) {
+                const uSchoolName = state.schools.find(s => s.id === u.schoolId)?.name;
+                label += uSchoolName ? ` (${t('director')} • ${uSchoolName})` : ` (${t('director')})`;
+            } else {
+                label += ` (${t('director')})`;
+            }
         } else if (u.customRole) {
             label += ` (${H.formatShortPosition(u.customRole)})`;
         }

@@ -137,6 +137,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
             // EXECUTE SAVE AND WIPE
             H.setSchoolGradingSystem(state, schoolId, gradingSettings);
             if (schoolId) {
+                H.clearSchoolGrades(state, schoolId);
                 const prefix = `${schoolId}__`;
                 if (state.grades) {
                     Object.keys(state.grades).forEach(k => {
@@ -181,7 +182,7 @@ export const GradingSetup = ({ state, onUpdate, user }: { state: AppState, onUpd
                 if (l.subgroups && l.subgroups.some(sg => sg.subject === subject)) dayMatches++;
             });
             if (dayMatches > 0) {
-                const ws = H.getStartOfWeek(new Date(day.date)).toISOString().slice(0, 10);
+                const ws = H.dateToIso(H.getStartOfWeek(H.parseIsoDateLocal(day.date)));
                 weekCounts[ws] = (weekCounts[ws] || 0) + dayMatches;
             }
             if (H.isDateInWeek(day.date, weekStart)) {

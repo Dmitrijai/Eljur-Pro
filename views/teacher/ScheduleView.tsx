@@ -11,7 +11,7 @@ export const ScheduleView = ({ state, user, lang }: { state: AppState, user: Use
     const systemNow = H.getSchoolNow(state, user.schoolId);
     const [weekStartIso, setWeekStartIso] = H.useSyncedState<string>(`eljur_tsched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
     const weekStart = useMemo(() => {
-        const parsed = new Date(weekStartIso);
+        const parsed = H.parseIsoDateLocal(weekStartIso);
         return isNaN(parsed.getTime()) ? H.getStartOfWeek(systemNow) : H.getStartOfWeek(parsed);
     }, [weekStartIso]);
     const setWeekStart = (val: Date | ((prev: Date) => Date)) => {

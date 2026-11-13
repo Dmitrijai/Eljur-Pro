@@ -779,7 +779,9 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            onUpdate({ ...state });
                          } else if (isDirector && user.schoolId && user.schoolId !== 'global') {
                            const targetSid = user.schoolId;
-                           state.settings.timezone = tz;
+                           if (targetSid === 'school_1') {
+                             state.settings.timezone = tz;
+                           }
                            if (!(state.settings as any).schoolsSettings) (state.settings as any).schoolsSettings = {};
                            if (!(state.settings as any).schoolsSettings[targetSid]) (state.settings as any).schoolsSettings[targetSid] = {};
                            (state.settings as any).schoolsSettings[targetSid].timezone = tz;
@@ -794,6 +796,7 @@ export default function Settings({ state, onUpdate, onBack, user }: SettingsProp
                            setVirtualTimePart(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
                            setLiveSchoolClock(`${pad(updatedNow.getHours())}:${pad(updatedNow.getMinutes())}:${pad(updatedNow.getSeconds())}`);
                            onUpdate({ ...state });
+                           DB.saveSchoolMetadata(targetSid, { timezone: tz } as any).catch(() => {});
                            DB.saveSchoolState(targetSid, state).catch(() => {});
                            DB.saveSchoolCache(targetSid, state).catch(() => {});
                          }

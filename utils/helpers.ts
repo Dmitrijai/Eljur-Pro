@@ -1243,6 +1243,19 @@ export const dateToIso = (date: Date): string => {
   return `${y}-${m}-${d}`;
 };
 
+export const parseIsoDateLocal = (dateStr: string): Date => {
+  if (!dateStr) return new Date(NaN);
+  const parts = String(dateStr).trim().slice(0, 10).split('-').map(Number);
+  if (parts.length === 3 && !parts.some(isNaN)) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+  }
+  const fallback = new Date(dateStr);
+  if (!isNaN(fallback.getTime())) {
+    fallback.setHours(0, 0, 0, 0);
+  }
+  return fallback;
+};
+
 export const addDays = (date: Date, days: number): Date => {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
@@ -1259,8 +1272,7 @@ export const getStartOfWeek = (date: Date): Date => {
 };
 
 export const isDateInWeek = (dateStr: string, weekStartDate: Date): boolean => {
-  const d = new Date(dateStr);
-  d.setHours(0, 0, 0, 0);
+  const d = parseIsoDateLocal(dateStr);
   const start = new Date(weekStartDate);
   start.setHours(0, 0, 0, 0);
   const end = addDays(start, 6);
@@ -1280,7 +1292,7 @@ export const getNextWorkingDate = (date: Date, skippedDays?: number[]): Date => 
 };
 
 export const getDayOfWeek = (dateStr: string, lang: string): string => {
-    const date = new Date(dateStr);
+    const date = parseIsoDateLocal(dateStr);
     const day = date.getDay(); // 0=Sun, 1=Mon
     const keys = ['days_sun', 'days_mon', 'days_tue', 'days_wed', 'days_thu', 'days_fri', 'days_sat'];
     return t(keys[day], lang as 'ru' | 'en');
@@ -1474,13 +1486,10 @@ const getGapVacation = (dateStr: string, settings?: ScheduleSettings): { title: 
 
 export const getVacationForDay = (dateStr: string, settings?: ScheduleSettings): { title: string } | null => {
     // 1. Explicit vacations
-    const d = new Date(dateStr);
     const vacations = Array.isArray(settings?.vacations) ? settings!.vacations : [];
     const explicit = vacations.find(vac => {
         if (!vac || !vac.start || !vac.end) return false;
-        const start = new Date(vac.start);
-        const end = new Date(vac.end);
-        return d >= start && d <= end;
+        return dateStr >= vac.start && dateStr <= vac.end;
     });
     if (explicit) return { title: explicit.title };
 
@@ -1491,20 +1500,18 @@ export const getVacationForDay = (dateStr: string, settings?: ScheduleSettings):
 export const getVacationForWeek = (weekStart: Date, settings: ScheduleSettings | undefined, visibleDates: string[]): { isFullWeek: boolean, title: string, emoji: string, range: string } | null => {
     // Determine if the majority of the week is a vacation
     const weekEnd = addDays(weekStart, 6);
+    const weekStartIso = dateToIso(weekStart);
+    const weekEndIso = dateToIso(weekEnd);
     const vacations = Array.isArray(settings?.vacations) ? settings!.vacations : [];
     
     // Check explicit vacations
     const overlappingVacation = vacations.find(v => {
         if (!v || !v.start || !v.end) return false;
-        const vStart = new Date(v.start);
-        const vEnd = new Date(v.end);
-        return vStart <= weekEnd && vEnd >= weekStart;
+        return v.start <= weekEndIso && v.end >= weekStartIso;
     });
 
     if (overlappingVacation) {
-        const vStart = new Date(overlappingVacation.start);
-        const vEnd = new Date(overlappingVacation.end);
-        const isFullWeek = vStart <= weekStart && vEnd >= weekEnd;
+        const isFullWeek = overlappingVacation.start <= weekStartIso && overlappingVacation.end >= weekEndIso;
         return {
             isFullWeek,
             title: overlappingVacation.title,
@@ -1778,11 +1785,12 @@ export const isMessageUnreadByUser = (m: Message, userOrId: User | string, allUs
     // Must be addressed to user
     if (!m.toIds || !m.toIds.includes(userId)) return false;
 
-    // Defense-in-depth: check schoolId matching (creator messages can be cross-school or global)
+    // Defense-in-depth: check schoolId matching (creator and cross-school director messages can cross school boundaries)
     if (currentUser) {
         const sender = allUsers?.find(u => u.id === m.fromId);
         const isFromCreator = (sender && (sender.role as string) === 'creator') || m.fromId === 'u_creator' || m.schoolId === 'global';
-        if (!isFromCreator) {
+        const isCrossSchoolDirectorMsg = (sender?.role === 'director' && currentUser.role === 'director');
+        if (!isFromCreator && !isCrossSchoolDirectorMsg) {
             if (m.schoolId && currentUser.schoolId && (currentUser.role as string) !== 'creator') {
                 if (m.schoolId !== currentUser.schoolId) return false;
             } else if (!m.schoolId && sender && currentUser.schoolId && (currentUser.role as string) !== 'creator') {
@@ -2446,7 +2454,12 @@ export const getSchoolClassFinalGrades = (state: AppState, schoolId: string | un
         if (Array.isArray(val)) {
             normalized[subj] = val;
         } else if (val && typeof val === 'object') {
-            normalized[subj] = Object.values(val).filter((item: any) => item && typeof item === 'object' && typeof item.studentId === 'string') as FinalGradeEntry[];
+            normalized[subj] = Object.entries(val)
+                .filter(([, item]: [string, any]) => item && typeof item === 'object')
+                .map(([k, item]: [string, any]) => ({
+                    ...item,
+                    studentId: typeof item.studentId === 'string' && item.studentId ? item.studentId : k
+                })) as FinalGradeEntry[];
         } else {
             normalized[subj] = [];
         }

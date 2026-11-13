@@ -150,14 +150,24 @@ service cloud.firestore {
       match /messages/{msgId} {
         allow read: if isSchoolMember(schoolId);
         allow create: if isSchoolMember(schoolId);
-        allow update: if isDirector(schoolId) || (
+        allow update: if isDirector(schoolId) || isEmployee(schoolId) || (
+          hasAuthMap() && (
+            currentUserData().get('role', '') == 'director' ||
+            currentUserData().get('role', '') == 'employee'
+          )
+        ) || (
           isSchoolMember(schoolId) && (
             resource.data.fromId == currentUserData().get('userId', '') ||
             resource.data.get('realAuthorId', '') == currentUserData().get('userId', '') ||
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readBy', 'readBeforeEditBy', 'readAfterEditBy', 'schoolId'])
           )
         );
-        allow delete: if isDirector(schoolId) || (
+        allow delete: if isDirector(schoolId) || isEmployee(schoolId) || (
+          hasAuthMap() && (
+            currentUserData().get('role', '') == 'director' ||
+            currentUserData().get('role', '') == 'employee'
+          )
+        ) || (
           isSchoolMember(schoolId) && (
             resource.data.fromId == currentUserData().get('userId', '') ||
             resource.data.get('realAuthorId', '') == currentUserData().get('userId', '')

@@ -119,6 +119,7 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (
   onClick,
 }) => {
   const hasWidth = /\bw-\w+/.test(className);
+  const isCentered = /\b(?:text-center|justify-center)\b/.test(className);
   const [isOpen, setIsOpen] = useState(false);
   const [internalVal, setInternalVal] = useState<string>(() =>
     defaultValue !== undefined ? String(defaultValue) : ''
@@ -233,9 +234,9 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (
           if (!isOpen) updatePosition();
           setIsOpen((prev) => !prev);
         }}
-        className={`relative flex items-center justify-between text-left ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-xs focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm py-0.5 sm:py-1 pl-2 sm:pl-2.5 pr-6 sm:pr-7 leading-normal min-h-[32px] sm:min-h-[36px] border cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`}
+        className={`relative flex items-center ${isCentered ? 'justify-center text-center pl-6 sm:pl-7 pr-6 sm:pr-7' : 'justify-between text-left pl-2 sm:pl-2.5 pr-6 sm:pr-7'} ${hasWidth ? '' : 'w-full'} rounded-lg border-slate-300 bg-white text-slate-900 shadow-xs focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm py-0.5 sm:py-1 leading-normal min-h-[32px] sm:min-h-[36px] border cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${className}`}
       >
-        <span className="block truncate">
+        <span className={`block truncate ${isCentered ? 'w-full text-center' : ''}`}>
           {selectedOption ? selectedOption.label : ''}
         </span>
         <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5 sm:pr-2 text-slate-400">

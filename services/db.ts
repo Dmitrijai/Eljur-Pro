@@ -1577,7 +1577,12 @@ export const subscribeToSchool = (
           if (Array.isArray(val)) {
             normalizedEntries[subj] = val;
           } else if (val && typeof val === 'object') {
-            normalizedEntries[subj] = Object.values(val).filter((item: any) => item && typeof item === 'object' && typeof item.studentId === 'string');
+            normalizedEntries[subj] = Object.entries(val as Record<string, any>)
+              .filter(([, item]) => item && typeof item === 'object')
+              .map(([k, item]) => ({
+                ...item,
+                studentId: typeof item.studentId === 'string' && item.studentId ? item.studentId : k
+              }));
           } else {
             normalizedEntries[subj] = [];
           }
@@ -1774,6 +1779,57 @@ export const subscribeToAllSchools = (callback: (schools: any[]) => void): (() =
   return () => {
     isCancelled = true;
     if (unsub) unsub();
+  };
+};
+
+export const subscribeToSchoolUsersOnly = (
+  schoolId: string,
+  onUpdate: (data: Partial<AppState>) => void
+): (() => void) => {
+  if (!schoolId || schoolId === 'global') return () => {};
+  let isCancelled = false;
+  let unsub: (() => void) | null = null;
+  const synced = getOrCreateSyncedIds(schoolId);
+
+  const start = () => {
+    if (isCancelled || !auth.currentUser) return;
+    unsub = onSnapshot(collection(db, 'schools', schoolId, 'users'), (snap) => {
+      if (isCancelled) return;
+      synced.users = new Set(snap.docs.map(d => d.id));
+      const users = snap.docs.map(d => {
+        const uData = d.data() as any;
+        const cleanDoc = { ...uData, schoolId: uData.schoolId || schoolId };
+        delete cleanDoc.theme;
+        delete cleanDoc.language;
+        delete cleanDoc.showSeasonalAnimations;
+        delete cleanDoc.bodyFontId;
+        delete cleanDoc.headingFontId;
+        delete cleanDoc.fcmTokens;
+        delete cleanDoc.notificationsEnabled;
+        delete cleanDoc.pushToken;
+        delete cleanDoc.notificationSettings;
+        docSnapshots.set(`schools/${schoolId}/users/${d.id}`, stableSerialize(cleanDoc));
+        return cleanDoc;
+      });
+      onUpdate({ users });
+    }, () => {});
+  };
+
+  if (auth.currentUser) {
+    start();
+  } else {
+    auth.authStateReady().then(() => {
+      if (!isCancelled && auth.currentUser) {
+        start();
+      }
+    });
+  }
+
+  return () => {
+    isCancelled = true;
+    if (unsub) {
+      try { unsub(); } catch {}
+    }
   };
 };
 
@@ -2120,6 +2176,8 @@ export const saveSchoolState = async (schoolId: string, state: AppState): Promis
     const schoolMessages = (plainState.messages || []).filter((m: any) =>
       m.schoolId === schoolId ||
       (!m.schoolId && schoolId === 'school_1') ||
+      schoolUserIdSet.has(m.fromId) ||
+      (m.realAuthorId && schoolUserIdSet.has(m.realAuthorId)) ||
       (Array.isArray(m.toIds) && m.toIds.some((tid: string) => schoolUserIdSet.has(tid)))
     );
     const currentMsgIds = new Set(schoolMessages.map((m: any) => m.id));

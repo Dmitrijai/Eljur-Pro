@@ -20,7 +20,7 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
     const systemNow = H.getSchoolNow(state, user.schoolId);
     const defaultWeekIso = H.dateToIso(H.getStartOfWeek(systemNow));
     const [journalWeekIso, setJournalWeekIso] = H.useSyncedState<string>(`eljur_st_journal_week_${user.id}`, defaultWeekIso);
-    const journalWeekStart = new Date(journalWeekIso || defaultWeekIso);
+    const journalWeekStart = H.getStartOfWeek(H.parseIsoDateLocal(journalWeekIso || defaultWeekIso));
     const journalDays = Object.values(schedule).filter(d => H.isDateInWeek(d.date, journalWeekStart)).sort((a,b) => a.date.localeCompare(b.date));
     const [selectedGradeDetails, setSelectedGradeDetails] = useState<{grade: Grade, subject: string} | null>(null);
 
@@ -84,6 +84,12 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
         }
     };
 
+    const myGroupIds = new Set(
+        H.getSchoolStudentGroups(state, user.schoolId, classKey)
+            .filter(g => Array.isArray(g.studentIds) && g.studentIds.includes(user.id))
+            .map(g => g.id)
+    );
+
     return (
         <div className="space-y-3 sm:space-y-6">
             <div className="hidden print:block p-3 mb-3 border-b-2 border-black text-center">
@@ -123,11 +129,8 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                       day.lessons.forEach(l => {
                           let sub = l.lesson;
                           if (l.subgroups && l.subgroups.length > 0) {
-                              const studentGroup = H.getSchoolStudentGroups(state, user.schoolId, classKey).find(g => g.studentIds.includes(user.id));
-                              if (studentGroup) {
-                                  const sg = l.subgroups.find(s => s.groupId === studentGroup.id);
-                                  if (sg) sub = sg.subject;
-                              }
+                              const sg = l.subgroups.find(s => s.groupId && myGroupIds.has(s.groupId));
+                              if (sg) sub = sg.subject;
                           }
                           if (!totalSubjectOccurrences[sub]) totalSubjectOccurrences[sub] = 0;
                           totalSubjectOccurrences[sub]++;
@@ -137,15 +140,10 @@ export const StudentJournal = ({ state, user }: { state: AppState, user: User })
                           let subject = l.lesson;
                           let teacherLabel = l.teacherLabel;
                           if (l.subgroups && l.subgroups.length > 0) {
-                              const studentGroup = H.getSchoolStudentGroups(state, user.schoolId, classKey).find(g => g.studentIds.includes(user.id));
-                              if (studentGroup) {
-                                  const sg = l.subgroups.find(s => s.groupId === studentGroup.id);
-                                  if (sg) {
-                                      subject = sg.subject;
-                                      teacherLabel = sg.teacherLabel;
-                                  } else {
-                                      teacherLabel = t('unassigned_subgroup');
-                                  }
+                              const sg = l.subgroups.find(s => s.groupId && myGroupIds.has(s.groupId));
+                              if (sg) {
+                                  subject = sg.subject;
+                                  teacherLabel = sg.teacherLabel;
                               } else {
                                   teacherLabel = t('unassigned_subgroup');
                               }

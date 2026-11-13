@@ -260,7 +260,7 @@ export const Gradebook = ({ state, onUpdate, user, lang, setHasUnsavedGrades, ha
                currentWeekCount += dayCount;
            }
            if (dayCount > 0) {
-               const wsIso = H.dateToIso(H.getStartOfWeek(new Date(day.date)));
+               const wsIso = H.dateToIso(H.getStartOfWeek(H.parseIsoDateLocal(day.date)));
                weekBuckets.set(wsIso, (weekBuckets.get(wsIso) || 0) + dayCount);
            }
        });

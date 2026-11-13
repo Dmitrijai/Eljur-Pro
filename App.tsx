@@ -1109,7 +1109,11 @@ export default function App() {
           schoolUpdate.messages.forEach((m: any) => {
             if (!m?.id) return;
             const prevMsg = existingTargetMap.get(m.id) || msgMap.get(m.id);
-            msgMap.set(m.id, H.mergeMessageReadState(prevMsg, m));
+            const mergedMsg = H.mergeMessageReadState(prevMsg, m);
+            if (!isPrimarySchool && prevMsg?.schoolId && prevMsg.schoolId !== targetSid) {
+              mergedMsg.schoolId = prevMsg.schoolId;
+            }
+            msgMap.set(m.id, mergedMsg);
           });
           mergedMessages = Array.from(msgMap.values());
         }
@@ -1287,48 +1291,52 @@ export default function App() {
       ).catch(() => {}).finally(() => {
         if (isCancelledEffect) return;
 
-        if (currentUser.role === 'creator') {
-          unsubAllSchools = DB.subscribeToAllSchools((schools) => {
-            if (schools && schools.length > 0) {
-              setAppState(prev => {
-                const cur = prev || defaultState;
-                const prevMap = new Map((cur.schools || []).map(s => [s.id, s]));
-                const updatedSchools = schools.map((s: any) => {
-                  const existing = prevMap.get(s.id) || ({} as any);
-                  return {
-                    ...existing,
-                    ...s,
-                    id: s.id,
-                    name: s.name || existing.name || 'Школа',
-                    directorId: s.directorId ?? existing.directorId ?? '',
-                    educationalResourceUrl: s.educationalResourceUrl ?? existing.educationalResourceUrl ?? '',
-                    educationalResources: s.educationalResources ?? existing.educationalResources,
-                    schoolInfo: s.schoolInfo ?? existing.schoolInfo,
-                    classes: Array.isArray(s.classes) ? s.classes : (existing.classes || []),
-                    subjects: (Array.isArray(s.subjects) && s.subjects.length > 0) ? s.subjects : (existing.subjects || defaultState.subjects)
-                  };
-                });
+        unsubAllSchools = DB.subscribeToAllSchools((schools) => {
+          if (schools && schools.length > 0) {
+            const activeIdsSet = new Set(schools.map((s: any) => s.id));
+            setAppState(prev => {
+              const cur = prev || defaultState;
+              const prevMap = new Map((cur.schools || []).map(s => [s.id, s]));
+              const updatedSchools = schools.map((s: any) => {
+                const existing = prevMap.get(s.id) || ({} as any);
                 return {
-                  ...cur,
-                  schools: updatedSchools
+                  ...existing,
+                  ...s,
+                  id: s.id,
+                  name: s.name || existing.name || 'Школа',
+                  directorId: s.directorId ?? existing.directorId ?? '',
+                  educationalResourceUrl: s.educationalResourceUrl ?? existing.educationalResourceUrl ?? '',
+                  educationalResources: s.educationalResources ?? existing.educationalResources,
+                  schoolInfo: s.schoolInfo ?? existing.schoolInfo,
+                  classes: Array.isArray(s.classes) ? s.classes : (existing.classes || []),
+                  subjects: (Array.isArray(s.subjects) && s.subjects.length > 0) ? s.subjects : (existing.subjects || defaultState.subjects)
                 };
               });
-              const activeIdsSet = new Set(schools.map((s: any) => s.id));
-              extraSchoolUnsubs.forEach((unsubFn, sIdKey) => {
-                if (!activeIdsSet.has(sIdKey)) {
-                  try { unsubFn(); } catch {}
-                  extraSchoolUnsubs.delete(sIdKey);
-                }
-              });
-              schools.forEach((s: any) => {
-                if (s.id && s.id !== sId && s.id !== 'global' && !extraSchoolUnsubs.has(s.id)) {
-                  const uSub = DB.subscribeToSchool(s.id, (upd) => mergeSchoolUpdate(s.id, upd, false));
-                  extraSchoolUnsubs.set(s.id, uSub);
-                }
-              });
-            }
-          });
-        }
+              const cleanedUsers = (cur.users || []).filter(u =>
+                (u.role as string) === 'creator' || !u.schoolId || activeIdsSet.has(u.schoolId)
+              );
+              return {
+                ...cur,
+                schools: updatedSchools,
+                users: cleanedUsers
+              };
+            });
+            extraSchoolUnsubs.forEach((unsubFn, sIdKey) => {
+              if (!activeIdsSet.has(sIdKey)) {
+                try { unsubFn(); } catch {}
+                extraSchoolUnsubs.delete(sIdKey);
+              }
+            });
+            schools.forEach((s: any) => {
+              if (s.id && s.id !== sId && s.id !== 'global' && !extraSchoolUnsubs.has(s.id)) {
+                const uSub = currentUser.role === 'creator'
+                  ? DB.subscribeToSchool(s.id, (upd) => mergeSchoolUpdate(s.id, upd, false))
+                  : DB.subscribeToSchoolUsersOnly(s.id, (upd) => mergeSchoolUpdate(s.id, upd, false));
+                extraSchoolUnsubs.set(s.id, uSub);
+              }
+            });
+          }
+        });
 
         unsubSchool = DB.subscribeToSchool(sId, (schoolUpdate) => {
           mergeSchoolUpdate(sId, schoolUpdate, true);
