@@ -77,6 +77,12 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         }
         return errors; 
     }, [newUser.fio, newUser.login, newUser.password, state.users, targetAddUserSchoolId, isGlobal, lang]);
+    useEffect(() => {
+        if (!isGlobal && filterRole === 'director') {
+            setFilterRole('');
+        }
+    }, [isGlobal, filterRole]);
+
     let filteredUsers = state.users.filter(u => {
         if (isGlobal) {
             if (u.role === 'creator') return false;
@@ -84,8 +90,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
         } else {
             if (u.schoolId !== currentUser.schoolId) return false;
             if (u.id === currentUser.id) return false;
-            if (u.role === 'creator') return false;
-            if (currentUser.role === 'employee' && u.role === 'director') return false;
+            if (u.role === 'creator' || u.role === 'director') return false;
         }
         if (filterRole) {
             if (filterRole === 'teacher') {
@@ -512,6 +517,18 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
             if (school && school.subjectRequirements && school.subjectRequirements[clsKey]) {
                 delete school.subjectRequirements[clsKey];
             }
+            if (school && school.scheduleSettings?.classTimeSettings && school.scheduleSettings.classTimeSettings[clsKey]) {
+                delete school.scheduleSettings.classTimeSettings[clsKey];
+            }
+            if (school && school.scheduleSettings?.classCopyCounts && school.scheduleSettings.classCopyCounts[clsKey]) {
+                delete school.scheduleSettings.classCopyCounts[clsKey];
+            }
+        }
+        if (state.scheduleSettings?.classTimeSettings && state.scheduleSettings.classTimeSettings[clsKey]) {
+            delete state.scheduleSettings.classTimeSettings[clsKey];
+        }
+        if (state.scheduleSettings?.classCopyCounts && state.scheduleSettings.classCopyCounts[clsKey]) {
+            delete state.scheduleSettings.classCopyCounts[clsKey];
         }
         // Also cleanup teacher and student class references within this school
         state.users.forEach(u => {
@@ -670,7 +687,7 @@ export const UserManagement = ({ state, onUpdate, currentUser, isGlobal = false 
                     <h1 className="text-lg font-bold uppercase">{isGlobal ? t('global_list') : `${H.getSchool(state, currentUser.schoolId)?.name || ''} — ${t('school_users')}`}</h1>
                     <p className="text-xs text-slate-600">{t('date')}: {H.getSchoolNow(state, currentUser.schoolId).toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US')}</p>
                 </div>
-                <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col gap-4 bg-slate-50/50 dark:bg-slate-900 dark:border-slate-700 no-print"><div className="flex flex-wrap gap-3 sm:gap-4 justify-between items-center"><div className="flex flex-wrap items-center gap-3 w-full lg:w-auto"><h3 className="font-bold text-slate-800 text-lg dark:text-white mr-2 font-heading w-full sm:w-auto">{isGlobal ? t('global_list') : t('school_users')}</h3><div className="w-full sm:w-64"><SearchableSelect lang={lang as 'ru'|'en'} placeholder={t('search_fio')} options={filteredUsers.map(u => ({ value: u.id, label: u.fio }))} value="" onChange={handleSearchSelect} className="h-10 text-xs" /></div>{isGlobal && <Select value={filterSchool} onChange={e => { setFilterSchool(e.target.value); setFilterClass(''); }} className="w-full sm:w-40 text-xs py-1.5 h-auto"><option value="">{t('all_schools')}</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>}<Select value={filterRole} onChange={e => setFilterRole(e.target.value)} className="flex-1 sm:w-32 text-xs py-1.5 h-auto"><option value="">{t('all_roles')}</option><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option><option value="director">{t('director')}</option><option value="employee">{t('employee')}</option></Select>{(!isGlobal || filterSchool) && <Select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="flex-1 sm:w-32 text-xs py-1.5 h-auto"><option value="">{t('all_classes')}</option>{(isGlobal ? H.getSchoolClasses(state, filterSchool) : schoolClasses).map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select>}<Select value={sortField} onChange={e => setSortField(e.target.value as any)} className="w-full sm:w-40 text-xs py-1.5 h-auto"><option value="default">{t('sort_manual')}</option><option value="fio">{t('sort_fio')}</option><option value="role">{t('sort_role')}</option></Select></div><Button size="sm" onClick={() => window.print()} className="no-print w-full sm:w-auto"><Printer className="w-4 h-4 mr-2"/> {t('print')}</Button></div></div>
+                <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col gap-4 bg-slate-50/50 dark:bg-slate-900 dark:border-slate-700 no-print"><div className="flex flex-wrap gap-3 sm:gap-4 justify-between items-center"><div className="flex flex-wrap items-center gap-3 w-full lg:w-auto"><h3 className="font-bold text-slate-800 text-lg dark:text-white mr-2 font-heading w-full sm:w-auto">{isGlobal ? t('global_list') : t('school_users')}</h3><div className="w-full sm:w-64"><SearchableSelect lang={lang as 'ru'|'en'} placeholder={t('search_fio')} options={filteredUsers.map(u => ({ value: u.id, label: u.fio }))} value="" onChange={handleSearchSelect} className="h-10 text-xs" /></div>{isGlobal && <Select value={filterSchool} onChange={e => { setFilterSchool(e.target.value); setFilterClass(''); }} className="w-full sm:w-40 text-xs py-1.5 h-auto"><option value="">{t('all_schools')}</option>{state.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>}<Select value={filterRole} onChange={e => setFilterRole(e.target.value)} className="flex-1 sm:w-32 text-xs py-1.5 h-auto"><option value="">{t('all_roles')}</option><option value="student">{t('student')}</option><option value="teacher">{t('teacher')}</option>{isGlobal && <option value="director">{t('director')}</option>}<option value="employee">{t('employee')}</option></Select>{(!isGlobal || filterSchool) && <Select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="flex-1 sm:w-32 text-xs py-1.5 h-auto"><option value="">{t('all_classes')}</option>{(isGlobal ? H.getSchoolClasses(state, filterSchool) : schoolClasses).map(c => <option key={`${c.class}_${c.letter}`} value={`${c.class}_${c.letter}`}>{c.class}{c.letter}</option>)}</Select>}<Select value={sortField} onChange={e => setSortField(e.target.value as any)} className="w-full sm:w-40 text-xs py-1.5 h-auto"><option value="default">{t('sort_manual')}</option><option value="fio">{t('sort_fio')}</option><option value="role">{t('sort_role')}</option></Select></div><Button size="sm" onClick={() => window.print()} className="no-print w-full sm:w-auto"><Printer className="w-4 h-4 mr-2"/> {t('print')}</Button></div></div>
                 {/* Mobile User Cards (No horizontal scroll) */}
                 <div className="md:hidden print:hidden divide-y divide-slate-100 dark:divide-slate-800">
                   {sortedUsers.map(u => {

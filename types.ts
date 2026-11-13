@@ -173,6 +173,11 @@ export interface Message {
 export interface Announcement extends Message {}
 
 // --- NEW SCHEDULE SETTINGS ---
+export interface ClassScheduleTimeConfig {
+  startTime?: string; // e.g. '08:30'
+  lessonDuration?: number; // in minutes, e.g. 45
+}
+
 export interface ScheduleSettings {
   daysToAddBatch: number; // How many days to add at once (default 1 or 7)
   skippedWeekDays: number[]; // 0=Sunday, 1=Monday... Days to skip during auto-generation
@@ -182,6 +187,10 @@ export interface ScheduleSettings {
   quarterDefinitions?: {
       [key: string]: { start: string; end: string }; // 'Q1', 'Q2', 'Q3', 'Q4'
   };
+  defaultStartTime?: string; // Default start time of 1st lesson (e.g. '08:30')
+  defaultLessonDuration?: number; // Default lesson duration in minutes (e.g. 45)
+  classTimeSettings?: Record<string, ClassScheduleTimeConfig>; // Per-class overrides keyed by classKey (e.g. '10_А')
+  classCopyCounts?: Record<string, number>; // Popularity counts of source classes used for schedule copying
 }
 
 // --- NEW ASSIGNMENTS & GROUPS ---

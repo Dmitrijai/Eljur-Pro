@@ -107,6 +107,191 @@ const BufferedDateInput = ({
   );
 };
 
+const BufferedTimeRangeInput = ({
+  value,
+  lessonDuration = 45,
+  disabled,
+  className,
+  onCommit
+}: {
+  value: string;
+  lessonDuration?: number;
+  disabled?: boolean;
+  className?: string;
+  onCommit: (newRange: string) => void;
+}) => {
+  const [draft, setDraft] = useState(value);
+  const isFocusedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraft(value);
+    }
+  }, [value]);
+
+  const commitFormatted = (rawCandidate: string) => {
+    const formatted = H.normalizeLessonTimeRange(rawCandidate, lessonDuration, value || '08:30 - 09:15');
+    setDraft(formatted);
+    if (formatted !== value) {
+      onCommit(formatted);
+    }
+  };
+
+  return (
+    <Input
+      maxLength={25}
+      disabled={disabled}
+      className={className}
+      value={draft}
+      placeholder="08:30 - 09:15"
+      onFocus={() => {
+        isFocusedRef.current = true;
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitFormatted(draft);
+          (e.currentTarget as HTMLInputElement).blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setDraft(value);
+          (e.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={() => {
+        isFocusedRef.current = false;
+        commitFormatted(draft);
+      }}
+    />
+  );
+};
+
+const BufferedSingleTimeInput = ({
+  value,
+  disabled,
+  className,
+  onCommit
+}: {
+  value: string;
+  disabled?: boolean;
+  className?: string;
+  onCommit: (newTime: string) => void;
+}) => {
+  const [draft, setDraft] = useState(value);
+  const isFocusedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraft(value);
+    }
+  }, [value]);
+
+  const commitFormatted = (rawCandidate: string) => {
+    const formatted = H.normalizeSingleTimeInput(rawCandidate, value || '08:30');
+    setDraft(formatted);
+    if (formatted !== value) {
+      onCommit(formatted);
+    }
+  };
+
+  return (
+    <Input
+      maxLength={10}
+      disabled={disabled}
+      className={className}
+      value={draft}
+      placeholder="08:30"
+      onFocus={() => {
+        isFocusedRef.current = true;
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitFormatted(draft);
+          (e.currentTarget as HTMLInputElement).blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setDraft(value);
+          (e.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={() => {
+        isFocusedRef.current = false;
+        commitFormatted(draft);
+      }}
+    />
+  );
+};
+
+const BufferedDurationInput = ({
+  value,
+  disabled,
+  className,
+  onCommit
+}: {
+  value: number;
+  disabled?: boolean;
+  className?: string;
+  onCommit: (newDuration: number) => void;
+}) => {
+  const [draft, setDraft] = useState(String(value || 45));
+  const isFocusedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraft(String(value || 45));
+    }
+  }, [value]);
+
+  const commitFormatted = (rawCandidate: string) => {
+    const parsed = parseInt(rawCandidate.trim(), 10);
+    const clamped = !isNaN(parsed) ? Math.max(5, Math.min(240, parsed)) : (value || 45);
+    setDraft(String(clamped));
+    if (clamped !== value) {
+      onCommit(clamped);
+    }
+  };
+
+  return (
+    <Input
+      type="number"
+      min="5"
+      max="240"
+      maxLength={3}
+      disabled={disabled}
+      className={className}
+      value={draft}
+      onFocus={() => {
+        isFocusedRef.current = true;
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitFormatted(draft);
+          (e.currentTarget as HTMLInputElement).blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setDraft(String(value || 45));
+          (e.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={() => {
+        isFocusedRef.current = false;
+        commitFormatted(draft);
+      }}
+    />
+  );
+};
+
 export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onUpdate: (s: AppState) => void, user: import("../../types").User }) => {
   const schoolClasses = H.getSchoolClasses(state, user.schoolId);
   const schoolSubjects = H.getSchoolSubjects(state, user.schoolId);
@@ -120,10 +305,13 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   const [labelModal, setLabelModal] = useState<{isOpen: boolean, dayId: string, lIndex: number, sgIdx: number | null, text: string, canGrade: boolean}>({isOpen: false, dayId: '', lIndex: -1, sgIdx: null, text: '', canGrade: false});
   const [confirmCopyModal, setConfirmCopyModal] = useState(false);
   const [openDaySettings, setOpenDaySettings] = useState<string | null>(null);
+  const [appliedTimeAllToast, setAppliedTimeAllToast] = useState(false);
+  const [selectedSourceClassForCopy, setSelectedSourceClassForCopy] = useState<string>('');
   
   const lang = state.settings.language || 'ru';
   const t = (k: string) => H.t(k, lang);
   const scheduleSettings = H.getSchoolScheduleSettings(state, user.schoolId);
+  const activeClassTimeConfig = H.getClassScheduleTimeConfig(scheduleSettings, activeClass);
   
   const systemNow = H.getSchoolNow(state, user.schoolId);
   const [currentWeekStartIso, setCurrentWeekStartIso] = H.useSyncedState<string>(`eljur_admin_sched_week_${user.id}`, H.dateToIso(H.getStartOfWeek(systemNow)));
@@ -244,13 +432,87 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
   const sourceClassGroups = H.getSchoolStudentGroups(state, user.schoolId, activeClass);
   const allGroups = state.studentGroups || [];
 
-  const mapLessonsForTargetClass = (lessons: Lesson[], targetClsKey: string): Lesson[] => {
+  const getMergedClassCopyCounts = (): Record<string, number> => {
+      const fromSettings = scheduleSettings.classCopyCounts || {};
+      let fromLocal: Record<string, number> = {};
+      try {
+          const raw = localStorage.getItem(`eljur_sched_copy_counts_${user.schoolId || 'school_1'}`);
+          if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object') fromLocal = parsed;
+          }
+      } catch {}
+      const merged: Record<string, number> = { ...fromLocal, ...fromSettings };
+      Object.keys(fromLocal).forEach(k => {
+          merged[k] = Math.max(fromLocal[k] || 0, fromSettings[k] || 0);
+      });
+      return merged;
+  };
+
+  const incrementClassCopyCount = (sourceClsKey: string) => {
+      if (!sourceClsKey) return;
+      const merged = getMergedClassCopyCounts();
+      merged[sourceClsKey] = (merged[sourceClsKey] || 0) + 1;
+      try {
+          localStorage.setItem(`eljur_sched_copy_counts_${user.schoolId || 'school_1'}`, JSON.stringify(merged));
+      } catch {}
+      const currentSettings: ScheduleSettings = JSON.parse(JSON.stringify(H.getSchoolScheduleSettings(state, user.schoolId)));
+      currentSettings.classCopyCounts = merged;
+      H.setSchoolScheduleSettings(state, user.schoolId, currentSettings);
+  };
+
+  const hasScheduleOnCurrentWeek = (clsKey: string): boolean => {
+      const scopedKey = H.getSchoolClassKey(user.schoolId, clsKey);
+      const clsSched = state.schedules[scopedKey] || {};
+      return Object.values(clsSched).some(d => d && d.date && H.isDateInWeek(d.date, currentWeekStart));
+  };
+
+  const sortedClassesForCopyFrom = React.useMemo(() => {
+      const counts = getMergedClassCopyCounts();
+      return schoolClasses
+          .filter(c => `${c.class}_${c.letter}` !== activeClass)
+          .slice()
+          .sort((a, b) => {
+              const keyA = `${a.class}_${a.letter}`;
+              const keyB = `${b.class}_${b.letter}`;
+              const countA = counts[keyA] || 0;
+              const countB = counts[keyB] || 0;
+              if (countB !== countA) return countB - countA;
+              const hasCurrA = hasScheduleOnCurrentWeek(keyA) ? 1 : 0;
+              const hasCurrB = hasScheduleOnCurrentWeek(keyB) ? 1 : 0;
+              if (hasCurrB !== hasCurrA) return hasCurrB - hasCurrA;
+              return (parseInt(a.class, 10) - parseInt(b.class, 10)) || a.letter.localeCompare(b.letter);
+          });
+  }, [schoolClasses, activeClass, scheduleSettings.classCopyCounts, state.schedules, currentWeekStartIso, user.schoolId]);
+
+  const effectiveSourceClassForCopy = React.useMemo(() => {
+      if (
+          selectedSourceClassForCopy &&
+          selectedSourceClassForCopy !== activeClass &&
+          sortedClassesForCopyFrom.some(c => `${c.class}_${c.letter}` === selectedSourceClassForCopy)
+      ) {
+          return selectedSourceClassForCopy;
+      }
+      return sortedClassesForCopyFrom[0] ? `${sortedClassesForCopyFrom[0].class}_${sortedClassesForCopyFrom[0].letter}` : '';
+  }, [selectedSourceClassForCopy, activeClass, sortedClassesForCopyFrom]);
+
+  useEffect(() => {
+      if (sortedClassesForCopyFrom.length > 0) {
+          const topKey = `${sortedClassesForCopyFrom[0].class}_${sortedClassesForCopyFrom[0].letter}`;
+          setSelectedSourceClassForCopy(topKey);
+      } else {
+          setSelectedSourceClassForCopy('');
+      }
+  }, [activeClass]);
+
+  const mapLessonsForTargetClass = (lessons: Lesson[], targetClsKey: string, srcClsKey: string = activeClass): Lesson[] => {
+      const srcGroupsForClass = srcClsKey === activeClass ? sourceClassGroups : H.getSchoolStudentGroups(state, user.schoolId, srcClsKey);
       let targetGroups = H.getSchoolStudentGroups(state, user.schoolId, targetClsKey);
       
       const hasSubgroups = lessons.some(l => l.subgroups && l.subgroups.length > 0);
       if (hasSubgroups && targetGroups.length === 0) {
           const targetStudents = state.users.filter(u => u.schoolId === user.schoolId && u.role === 'student' && `${u.class}_${u.letter}` === targetClsKey);
-          const count = sourceClassGroups.length > 0 ? sourceClassGroups.length : 2;
+          const count = srcGroupsForClass.length > 0 ? srcGroupsForClass.length : 2;
           const chunkSize = targetStudents.length > 0 ? Math.ceil(targetStudents.length / count) : 0;
           for (let i = 0; i < count; i++) {
               const groupStudents = targetStudents.slice(i * chunkSize, (i + 1) * chunkSize).map(u => u.id);
@@ -258,7 +520,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                   id: H.uid('group'),
                   schoolId: user.schoolId,
                   classId: targetClsKey,
-                  name: sourceClassGroups[i]?.name || `Группа ${i + 1}`,
+                  name: srcGroupsForClass[i]?.name || `Группа ${i + 1}`,
                   studentIds: groupStudents
               };
               if (!state.studentGroups) state.studentGroups = [];
@@ -275,8 +537,8 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
               if (targetGroups.length > 0) {
                   const alreadyBelongs = targetGroups.some(tg => tg.id === sg.groupId);
                   if (!alreadyBelongs) {
-                      const srcGroupIdx = sourceClassGroups.findIndex(g => g.id === sg.groupId);
-                      const srcGroup = srcGroupIdx > -1 ? sourceClassGroups[srcGroupIdx] : allGroups.find(g => g.id === sg.groupId);
+                      const srcGroupIdx = srcGroupsForClass.findIndex(g => g.id === sg.groupId);
+                      const srcGroup = srcGroupIdx > -1 ? srcGroupsForClass[srcGroupIdx] : allGroups.find(g => g.id === sg.groupId);
                       if (srcGroup) {
                           const matchedByName = targetGroups.find(tg => tg.name.trim().toLowerCase() === srcGroup.name.trim().toLowerCase());
                           if (matchedByName) targetGroupId = matchedByName.id;
@@ -292,10 +554,81 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       }));
   };
 
+  const copyScheduleStructureFromClass = () => {
+      if (!targetScheduleKey || !effectiveSourceClassForCopy) return;
+      const srcClassKey = effectiveSourceClassForCopy;
+      const srcScopedKey = H.getSchoolClassKey(user.schoolId, srcClassKey);
+      const srcSchedule = state.schedules[srcScopedKey] || {};
+      const srcCurrentWeekDays = Object.values(srcSchedule)
+          .filter(d => d && d.date && H.isDateInWeek(d.date, currentWeekStart))
+          .sort((a, b) => a.date.localeCompare(b.date));
+
+      let daysToCopy = srcCurrentWeekDays;
+      let shiftDays = 0;
+
+      if (daysToCopy.length === 0) {
+          const prevWeekStart = H.addDays(currentWeekStart, -7);
+          const srcPrevWeekDays = Object.values(srcSchedule)
+              .filter(d => d && d.date && H.isDateInWeek(d.date, prevWeekStart))
+              .sort((a, b) => a.date.localeCompare(b.date));
+          if (srcPrevWeekDays.length > 0) {
+              daysToCopy = srcPrevWeekDays;
+              shiftDays = 7;
+          }
+      }
+
+      if (daysToCopy.length === 0) {
+          alert(t('copy_no_curr_week_in_class'));
+          return;
+      }
+
+      if (!state.schedules[targetScheduleKey]) state.schedules[targetScheduleKey] = {};
+      const targetClassSchedule = state.schedules[targetScheduleKey];
+      let updated = false;
+
+      daysToCopy.forEach(srcDay => {
+          const srcDate = new Date(srcDay.date);
+          const newDate = shiftDays !== 0 ? H.addDays(srcDate, shiftDays) : srcDate;
+          const newDateStr = H.dateToIso(newDate);
+          const exists = Object.values(targetClassSchedule).some(d => d && d.date === newDateStr);
+          if (!exists) {
+              const newId = H.uid('day');
+              const structureLessons: Lesson[] = (srcDay.lessons || []).map(l => ({
+                  id: H.uid('l'),
+                  timeRange: l.timeRange,
+                  lesson: '',
+                  teacherId: '',
+                  room: ''
+              }));
+              targetClassSchedule[newId] = {
+                  id: newId,
+                  title: H.getDayOfWeek(newDateStr, lang),
+                  date: newDateStr,
+                  lessons: structureLessons,
+                  showGroups: false
+              };
+              updated = true;
+          }
+      });
+
+      if (updated) {
+          incrementClassCopyCount(srcClassKey);
+          const currentSettings: ScheduleSettings = JSON.parse(JSON.stringify(H.getSchoolScheduleSettings(state, user.schoolId)));
+          if (currentSettings.classTimeSettings?.[srcClassKey] && activeClass && !currentSettings.classTimeSettings[activeClass]) {
+              currentSettings.classTimeSettings[activeClass] = { ...currentSettings.classTimeSettings[srcClassKey] };
+              H.setSchoolScheduleSettings(state, user.schoolId, currentSettings);
+          }
+          onUpdate(state);
+      } else {
+          alert(t('confirm_copy_empty'));
+      }
+  };
+
   const copyScheduleBatch = () => {
     if (selectedClassesForCopy.length === 0) return alert(t('select_classes'));
     const prevWeekStart = H.addDays(currentWeekStart, -7);
     let updated = false;
+    let copiedFromActiveClass = false;
 
     const activeSchedule = targetScheduleKey ? (state.schedules[targetScheduleKey] || {}) : {};
     const activeCurrentWeekDays = Object.values(activeSchedule).filter(d => H.isDateInWeek(d.date, currentWeekStart));
@@ -316,7 +649,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                 const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
                 if (!exists) {
                     const newId = H.uid('day');
-                    const newLessons = mapLessonsForTargetClass(prevDay.lessons, clsKey);
+                    const newLessons = mapLessonsForTargetClass(prevDay.lessons, clsKey, clsKey);
                     state.schedules[scopedKey][newId] = { id: newId, title: prevDay.title, date: newDateStr, lessons: newLessons, showGroups: prevDay.showGroups };
                     updated = true;
                 }
@@ -331,14 +664,24 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                 const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
                 if (!exists) {
                     const newId = H.uid('day');
-                    const newLessons = mapLessonsForTargetClass(srcDay.lessons, clsKey);
+                    const newLessons = mapLessonsForTargetClass(srcDay.lessons, clsKey, activeClass);
                     state.schedules[scopedKey][newId] = { id: newId, title: srcDay.title, date: newDateStr, lessons: newLessons, showGroups: srcDay.showGroups };
                     updated = true;
+                    copiedFromActiveClass = true;
                 }
             });
         }
     });
-    if (updated) { onUpdate(state); setShowBatchCopyModal(false); setSelectedClassesForCopy([]); } else { alert(t('confirm_copy_empty')); }
+    if (updated) {
+        if (copiedFromActiveClass && activeClass) {
+            incrementClassCopyCount(activeClass);
+        }
+        onUpdate(state);
+        setShowBatchCopyModal(false);
+        setSelectedClassesForCopy([]);
+    } else {
+        alert(t('confirm_copy_empty'));
+    }
   };
 
   const copyScheduleForCurrentClass = () => {
@@ -357,7 +700,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
             const exists = Object.values(classSchedule).some(d => d.date === newDateStr);
             if (!exists) {
                 const newId = H.uid('day');
-                const newLessons = mapLessonsForTargetClass(prevDay.lessons, activeClass);
+                const newLessons = mapLessonsForTargetClass(prevDay.lessons, activeClass, activeClass);
                 state.schedules[targetScheduleKey][newId] = { id: newId, title: prevDay.title, date: newDateStr, lessons: newLessons, showGroups: prevDay.showGroups };
                 updated = true;
             }
@@ -392,7 +735,8 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
         if (!exists) {
             const dayName = H.getDayOfWeek(dateStr, lang);
             const newId = H.uid('day');
-            const autoLessons = H.generateDefaultLessons(); 
+            const classTimeCfg = H.getClassScheduleTimeConfig(settings, activeClass);
+            const autoLessons = H.generateDefaultLessons(classTimeCfg.startTime, classTimeCfg.lessonDuration); 
             curSchedule[newId] = { id: newId, title: dayName, date: dateStr, lessons: autoLessons };
             addedCount++;
         }
@@ -480,8 +824,10 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
     if (isDayInPast(state.schedules[targetScheduleKey][dayId].date)) return; 
     const lessons = state.schedules[targetScheduleKey][dayId].lessons; 
     const lastLesson = lessons[lessons.length - 1]; 
-    const prevTime = lastLesson ? lastLesson.timeRange : '08:30 - 09:15'; 
-    const nextTime = lastLesson ? H.calculateNextTimeRange(prevTime) : '08:30 - 09:15'; 
+    const classTimeCfg = H.getClassScheduleTimeConfig(scheduleSettings, activeClass);
+    const nextTime = lastLesson
+        ? H.calculateNextTimeRange(lastLesson.timeRange, classTimeCfg.lessonDuration, classTimeCfg.startTime)
+        : H.calculateNextTimeRange('', classTimeCfg.lessonDuration, classTimeCfg.startTime); 
     lessons.push({ id: H.uid('l'), timeRange: nextTime, lesson: '', teacherId: '', room: '' }); 
     onUpdate(state); 
   };
@@ -646,9 +992,41 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
         {isPastWeek && <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 sm:px-4 sm:py-3 rounded-xl flex items-center gap-2 sm:gap-3 no-print"><Lock size={15} className="sm:w-[18px] sm:h-[18px] shrink-0" /><span className="text-xs sm:text-sm font-semibold">{t('past_edit_forbidden')}</span></div>}
         {visibleDayKeys.length === 0 && (
           <div className="text-slate-400 p-6 sm:p-12 border-2 border-dashed border-slate-200 rounded-2xl text-center bg-slate-50 dark:bg-slate-900 dark:border-slate-800 text-xs sm:text-base">
-            {t('empty_schedule_msg')} ({H.getWeekRangeString(currentWeekStart)})<br/>
-            {!isPastWeek && <div className="mt-3 sm:mt-4"><Button onClick={() => setConfirmCopyModal(true)} variant="primary" className="bg-indigo-600 hover:bg-indigo-700 h-8 sm:h-10 text-xs sm:text-sm px-3 sm:px-4"><Copy size={14} className="mr-1.5"/> {t('copy_prev_week')}</Button></div>}
-            {!isPastWeek && visibleDayKeys.length === 0 && <span className="mt-2 inline-block sm:ml-4 text-xs sm:text-sm">{t('add_days_hint')}</span>}
+            <div>{t('empty_schedule_msg')} ({H.getWeekRangeString(currentWeekStart)})</div>
+            {!isPastWeek && (
+              <div className="mt-3 sm:mt-4 flex flex-col sm:flex-row flex-wrap items-center justify-center gap-2 sm:gap-3">
+                <Button onClick={() => setConfirmCopyModal(true)} variant="primary" className="bg-indigo-600 hover:bg-indigo-700 h-8 sm:h-10 text-xs sm:text-sm px-3 sm:px-4 w-full sm:w-auto justify-center">
+                  <Copy size={14} className="mr-1.5 shrink-0"/> {t('copy_prev_week')}
+                </Button>
+                {sortedClassesForCopyFrom.length > 0 && (
+                  <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-center bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs">
+                    <Select
+                      value={effectiveSourceClassForCopy}
+                      onChange={e => setSelectedSourceClassForCopy(e.target.value)}
+                      className="h-7 sm:h-8 text-xs sm:text-sm py-0 px-2.5 w-24 sm:w-28 font-bold text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700"
+                      title={t('from_class_label')}
+                    >
+                      {sortedClassesForCopyFrom.map(c => {
+                        const ck = `${c.class}_${c.letter}`;
+                        return (
+                          <option key={ck} value={ck}>
+                            {c.class}{c.letter}
+                          </option>
+                        );
+                      })}
+                    </Select>
+                    <Button
+                      onClick={copyScheduleStructureFromClass}
+                      variant="primary"
+                      className="bg-blue-600 hover:bg-blue-700 h-7 sm:h-8 text-xs sm:text-sm px-2.5 sm:px-3.5 whitespace-nowrap"
+                    >
+                      <Copy size={13} className="mr-1.5 shrink-0"/> {t('copy_schedule_btn')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+            {!isPastWeek && visibleDayKeys.length === 0 && <div className="mt-2.5 text-xs sm:text-sm">{t('add_days_hint')}</div>}
           </div>
         )}
         {visibleDayKeys.map(dayKey => {
@@ -702,7 +1080,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                         <div className="flex items-center justify-between gap-1.5">
                           <div className="flex items-center gap-1.5 flex-1">
                             <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 text-[11px] font-bold shrink-0">{idx + 1}</span>
-                            <Input maxLength={25} disabled={isPast} value={lesson.timeRange} onChange={e => updateLesson(dayKey, idx, 'timeRange', e.target.value)} className="text-[11px] font-mono font-medium text-center h-7 px-2" />
+                            <BufferedTimeRangeInput disabled={isPast} lessonDuration={activeClassTimeConfig.lessonDuration} value={lesson.timeRange} onCommit={val => updateLesson(dayKey, idx, 'timeRange', val)} className="text-[11px] font-mono font-medium text-center h-7 px-2" />
                           </div>
                           {!isPast && (
                             <button onClick={() => deleteLesson(dayKey, idx)} className="p-1 text-slate-400 hover:text-red-500 transition-colors text-base leading-none shrink-0">&times;</button>
@@ -785,7 +1163,7 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
                         return (
                         <tr key={lesson.id} className="hover:bg-slate-50/80 transition-colors dark:hover:bg-slate-800/50">
                           <td className="p-2 pl-4 text-center align-top">
-                            <Input maxLength={25} disabled={isPast} value={lesson.timeRange} onChange={e => updateLesson(dayKey, idx, 'timeRange', e.target.value)} className="text-sm font-mono font-medium text-center print:hidden" />
+                            <BufferedTimeRangeInput disabled={isPast} lessonDuration={activeClassTimeConfig.lessonDuration} value={lesson.timeRange} onCommit={val => updateLesson(dayKey, idx, 'timeRange', val)} className="text-sm font-mono font-medium text-center print:hidden" />
                             <span className="hidden print:inline font-mono font-medium text-slate-800 text-xs">{lesson.timeRange || '—'}</span>
                           </td>
                           {isGroupColVisible && (<td className="p-0 align-top border-l border-slate-50 dark:border-slate-800">{isSplit ? (<div className="divide-y divide-slate-100 dark:divide-slate-800">{lesson.subgroups?.map(sg => { const groupName = classGroups.find(g => g.id === sg.groupId)?.name || t('subgroup_label'); return (<div key={sg.groupId} className="min-h-[42px] h-auto flex items-center justify-center text-[9px] font-bold text-blue-600 dark:text-blue-400 px-1 truncate bg-blue-50/10" title={groupName}>{groupName}</div>); })}</div>) : (<div className="min-h-[42px] flex items-center justify-center text-slate-300">-</div>)}</td>)}
@@ -808,7 +1186,94 @@ export const ScheduleEditor = ({ state, onUpdate, user }: { state: AppState, onU
       <Modal isOpen={confirmCopyModal} onClose={() => setConfirmCopyModal(false)} title={t('copy_schedule_short')}><div className="space-y-4 sm:space-y-6"><div className="bg-blue-50 text-blue-800 p-3 sm:p-4 rounded-xl border border-blue-100 flex items-start gap-2.5 sm:gap-3"><AlertCircle className="flex-shrink-0 mt-0.5 w-4 h-4 sm:w-5 sm:h-5" size={20}/><div><p className="font-bold text-xs sm:text-sm mb-0.5 sm:mb-1">{t('copy_from_prev_q')}</p><p className="text-[11px] sm:text-sm opacity-90">{t('copy_warning_msg').replace('%s', activeClass.replace('_', ''))}</p></div></div><div className="flex gap-2 sm:gap-3 justify-end"><Button variant="ghost" onClick={() => setConfirmCopyModal(false)} className="h-8 sm:h-10 text-xs sm:text-sm">{t('cancel')}</Button><Button variant="primary" onClick={copyScheduleForCurrentClass} className="h-8 sm:h-10 text-xs sm:text-sm">{t('confirm')}</Button></div></div></Modal>
       <Modal isOpen={labelModal.isOpen} onClose={() => setLabelModal({...labelModal, isOpen: false})} title={t('add_label_title')}><div className="space-y-3 sm:space-y-4"><p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300">{t('add_label_desc')}</p><div><label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 sm:mb-2 block">{t('label_text')}</label><Input maxLength={80} autoFocus value={labelModal.text} onChange={e => setLabelModal({...labelModal, text: e.target.value})} placeholder={t('label_placeholder')} className="h-8 sm:h-10 text-xs sm:text-sm" /></div><div><label className={`flex items-start gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all ${labelModal.canGrade ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-700' : 'bg-slate-50 border-slate-200 dark:bg-slate-800 dark:border-slate-700'}`}><div className="pt-0.5"><input type="checkbox" checked={labelModal.canGrade} onChange={e => setLabelModal({...labelModal, canGrade: e.target.checked})} className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300" /></div><div><span className={`block text-xs sm:text-sm font-bold mb-0.5 ${labelModal.canGrade ? 'text-blue-900 dark:text-blue-300' : 'text-slate-700 dark:text-slate-300'}`}>{t('substitution_confirm')}</span><span className={`text-[10px] sm:text-xs font-medium ${labelModal.canGrade ? 'text-blue-700 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}>{labelModal.canGrade ? t('access_granted') : t('access_denied')}</span></div></label></div><div className="flex gap-2 justify-end pt-1 sm:pt-2"><Button variant="ghost" onClick={() => setLabelModal({...labelModal, isOpen: false})} className="h-8 sm:h-10 text-xs sm:text-sm">{t('cancel')}</Button><Button variant="primary" onClick={saveTeacherLabel} className="h-8 sm:h-10 text-xs sm:text-sm">{t('save')}</Button></div></div></Modal>
       <Modal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t('setup_schedule')}>
-        <div className="space-y-3 sm:space-y-6">
+        <div className="space-y-3 sm:space-y-5">
+          <div className="p-2.5 sm:p-3.5 rounded-xl bg-slate-50 border border-slate-200 dark:bg-slate-800/60 dark:border-slate-700 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] sm:text-xs font-bold text-slate-700 dark:text-slate-200">
+                {t('lesson_time_settings')}
+              </span>
+              {activeClass && (
+                <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 shrink-0">
+                  {t('class')} {activeClass.replace('_', '')}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                  {t('lesson_start_time')}
+                </label>
+                <BufferedSingleTimeInput
+                  className="h-8 sm:h-9 text-center font-mono font-bold text-xs sm:text-sm px-2"
+                  value={activeClassTimeConfig.startTime}
+                  onCommit={newStart => {
+                    updateScheduleSettings(s => {
+                      if (activeClass) {
+                        if (!s.classTimeSettings) s.classTimeSettings = {};
+                        s.classTimeSettings[activeClass] = {
+                          ...(s.classTimeSettings[activeClass] || {}),
+                          startTime: newStart,
+                          lessonDuration: s.classTimeSettings[activeClass]?.lessonDuration ?? activeClassTimeConfig.lessonDuration
+                        };
+                      } else {
+                        s.defaultStartTime = newStart;
+                      }
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                  {t('lesson_duration_min')}
+                </label>
+                <BufferedDurationInput
+                  className="h-8 sm:h-9 text-center font-bold text-xs sm:text-sm px-2"
+                  value={activeClassTimeConfig.lessonDuration}
+                  onCommit={newDur => {
+                    updateScheduleSettings(s => {
+                      if (activeClass) {
+                        if (!s.classTimeSettings) s.classTimeSettings = {};
+                        s.classTimeSettings[activeClass] = {
+                          ...(s.classTimeSettings[activeClass] || {}),
+                          startTime: s.classTimeSettings[activeClass]?.startTime || activeClassTimeConfig.startTime,
+                          lessonDuration: newDur
+                        };
+                      } else {
+                        s.defaultLessonDuration = newDur;
+                      }
+                    });
+                  }}
+                />
+              </div>
+            </div>
+            {schoolClasses.length > 1 && (
+              <div className="flex items-center justify-end pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateScheduleSettings(s => {
+                      s.defaultStartTime = activeClassTimeConfig.startTime;
+                      s.defaultLessonDuration = activeClassTimeConfig.lessonDuration;
+                      if (!s.classTimeSettings) s.classTimeSettings = {};
+                      schoolClasses.forEach(c => {
+                        const ck = `${c.class}_${c.letter}`;
+                        s.classTimeSettings![ck] = {
+                          startTime: activeClassTimeConfig.startTime,
+                          lessonDuration: activeClassTimeConfig.lessonDuration
+                        };
+                      });
+                    });
+                    setAppliedTimeAllToast(true);
+                    setTimeout(() => setAppliedTimeAllToast(false), 2500);
+                  }}
+                  className="text-[10px] sm:text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline transition-colors"
+                >
+                  {appliedTimeAllToast ? `✓ ${t('time_applied_all_classes')}` : t('apply_time_all_classes')}
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center justify-between gap-2 sm:gap-3">
             <label className="text-[11px] sm:text-sm font-bold text-slate-700 dark:text-slate-300">{t('days_batch')}</label>
             <Input

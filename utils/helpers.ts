@@ -289,7 +289,15 @@ export const DICT: Record<string, Record<string, string>> = {
     back: 'Назад',
     timezone_desc: 'Определяет эталонное время для школы.',
     timezone_creator_desc: 'Устанавливает часовой пояс только для вашего аккаунта Создателя (не влияет на школы).',
-    can_be_teacher: 'Является также учителем (ведёт уроки и журнал)',
+    can_be_teacher: 'Является также учителем',
+    lesson_time_settings: 'Время уроков (при создании нового дня)',
+    lesson_start_time: 'Начало 1-го урока',
+    lesson_duration_min: 'Длительность урока (мин.)',
+    apply_time_all_classes: 'Применить ко всем классам',
+    time_applied_all_classes: 'Применено ко всем классам',
+    copy_schedule_btn: 'Скопировать расписание',
+    copy_no_curr_week_in_class: 'У выбранного класса нет расписания на этой неделе.',
+    from_class_label: 'С класса:',
     creator_settings: 'Настройки Создателя',
     secret_key: 'Секретная клавиша (Код)',
     secret_key_desc: 'Код клавиши (например: Space, Enter, KeyA)',
@@ -870,7 +878,15 @@ export const DICT: Record<string, Record<string, string>> = {
     back: 'Back',
     timezone_desc: 'Defines the reference time for the school.',
     timezone_creator_desc: 'Sets the timezone only for your Creator account (does not affect schools).',
-    can_be_teacher: 'Also a teacher (teaches lessons & gradebook)',
+    can_be_teacher: 'Also a teacher',
+    lesson_time_settings: 'Lesson Time (when creating a new day)',
+    lesson_start_time: '1st Lesson Start Time',
+    lesson_duration_min: 'Lesson Duration (min)',
+    apply_time_all_classes: 'Apply to all classes',
+    time_applied_all_classes: 'Applied to all classes',
+    copy_schedule_btn: 'Copy schedule',
+    copy_no_curr_week_in_class: 'The selected class has no schedule for this week.',
+    from_class_label: 'From class:',
     creator_settings: 'Creator Settings',
     secret_key: 'Secret Key (Code)',
     secret_key_desc: 'Key Code (e.g., Space, Enter, KeyA)',
@@ -1185,6 +1201,41 @@ export const formatShortName = (fioStr: string): string => {
   return `${parts[0]} ${parts[1][0]}. ${parts[2][0]}.`;
 };
 
+export const formatShortPosition = (roleStr: string): string => {
+  if (!roleStr) return '';
+  let s = roleStr.trim();
+  const replacements: [RegExp, string][] = [
+    [/заместитель\s+директора/gi, 'Зам. дир.'],
+    [/заместитель/gi, 'Зам.'],
+    [/по\s+учебно-воспитательной\s+работе/gi, 'по УВР'],
+    [/по\s+учебной\s+работе/gi, 'по УР'],
+    [/по\s+воспитательной\s+работе/gi, 'по ВР'],
+    [/по\s+научно-методической\s+работе/gi, 'по НМР'],
+    [/по\s+административно-хозяйственной\s+(работе|части)/gi, 'по АХЧ'],
+    [/по\s+информационным\s+технологиям/gi, 'по ИТ'],
+    [/по\s+информатизации/gi, 'по ИТ'],
+    [/по\s+безопасности/gi, 'по безоп.'],
+    [/педагог-психолог/gi, 'Психолог'],
+    [/социальный\s+педагог/gi, 'Соц. пед.'],
+    [/педагог-организатор/gi, 'Пед.-орг.'],
+    [/педагог\s+дополнительного\s+образования/gi, 'Пед. доп. обр.'],
+    [/системный\s+администратор/gi, 'Сис. админ.'],
+    [/администратор/gi, 'Админ.'],
+    [/заведующ(ий|ая)\s+библиотекой/gi, 'Зав. библ.'],
+    [/старш(ий|ая)\s+вожат(ый|ая)/gi, 'Ст. вожатый'],
+    [/секретарь\s+учебной\s+части/gi, 'Секретарь УЧ'],
+    [/преподаватель-организатор\s+обж/gi, 'Преп. ОБЖ'],
+  ];
+  for (const [regex, rep] of replacements) {
+    s = s.replace(regex, rep);
+  }
+  s = s.replace(/\s+/g, ' ').trim();
+  if (s.length > 18) {
+    return `${s.slice(0, 17).trim()}…`;
+  }
+  return s;
+};
+
 export const dateToIso = (date: Date): string => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -1235,40 +1286,149 @@ export const getDayOfWeek = (dateStr: string, lang: string): string => {
     return t(keys[day], lang as 'ru' | 'en');
 };
 
-export const generateDefaultLessons = (): Lesson[] => {
-    return [
-        { id: uid('l'), timeRange: '08:30 - 09:15', lesson: '', teacherId: '', room: '' },
-        { id: uid('l'), timeRange: '09:25 - 10:10', lesson: '', teacherId: '', room: '' },
-        { id: uid('l'), timeRange: '10:30 - 11:15', lesson: '', teacherId: '', room: '' },
-        { id: uid('l'), timeRange: '11:35 - 12:20', lesson: '', teacherId: '', room: '' },
-        { id: uid('l'), timeRange: '12:30 - 13:15', lesson: '', teacherId: '', room: '' },
-        { id: uid('l'), timeRange: '13:25 - 14:10', lesson: '', teacherId: '', room: '' },
-        { id: uid('l'), timeRange: '14:20 - 15:05', lesson: '', teacherId: '', room: '' },
-    ];
+export const parseFlexibleTimeToken = (token: string): number | null => {
+    if (!token) return null;
+    const clean = token.trim();
+    if (!clean) return null;
+
+    // Match HH:MM, H:MM, HH.MM, HH,MM, HH MM
+    const sepMatch = clean.match(/^(\d{1,2})\s*[:.,\s]\s*(\d{1,2})$/);
+    if (sepMatch) {
+        const h = parseInt(sepMatch[1], 10);
+        const m = parseInt(sepMatch[2], 10);
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return h * 60 + m;
+        return null;
+    }
+
+    // Match 3 or 4 digits without separator: e.g. 830 -> 08:30, 0830 -> 08:30, 1415 -> 14:15
+    const compactMatch = clean.match(/^(\d{3,4})$/);
+    if (compactMatch) {
+        const digits = compactMatch[1];
+        const h = digits.length === 3 ? parseInt(digits.slice(0, 1), 10) : parseInt(digits.slice(0, 2), 10);
+        const m = parseInt(digits.slice(-2), 10);
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return h * 60 + m;
+        return null;
+    }
+
+    // Match 1 or 2 digits (hours only): e.g. 8 -> 08:00, 14 -> 14:00
+    const hourOnlyMatch = clean.match(/^(\d{1,2})$/);
+    if (hourOnlyMatch) {
+        const h = parseInt(hourOnlyMatch[1], 10);
+        if (h >= 0 && h <= 23) return h * 60;
+        return null;
+    }
+
+    return null;
 };
 
-export const calculateNextTimeRange = (prevRange: string): string => {
-    const [start, end] = prevRange.split(' - ');
-    if (!end) return '00:00 - 00:00';
-    
-    const parseTime = (s: string) => {
-        const [h, m] = s.split(':').map(Number);
-        return h * 60 + m;
-    };
-    const formatTime = (m: number) => {
-        const h = Math.floor(m / 60);
-        const min = m % 60;
-        return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-    };
+export const formatMinutesToHHMM = (totalMinutes: number): string => {
+    const safe = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+    const h = Math.floor(safe / 60);
+    const m = safe % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
 
-    const endM = parseTime(end);
+export const normalizeSingleTimeInput = (raw: string | undefined, fallback: string = '08:30'): string => {
+    if (!raw) return fallback;
+    const mins = parseFlexibleTimeToken(raw);
+    if (mins === null) return fallback;
+    return formatMinutesToHHMM(mins);
+};
+
+export const normalizeLessonTimeRange = (raw: string, lessonDuration: number = 45, fallbackRange: string = '08:30 - 09:15'): string => {
+    if (!raw || !raw.trim()) return fallbackRange;
+    const clean = raw.trim();
+    const safeDur = typeof lessonDuration === 'number' && lessonDuration >= 5 && lessonDuration <= 240 ? lessonDuration : 45;
+
+    // Try explicit range separators: -, –, —, ~, /, "до", "to"
+    const dashParts = clean.split(/\s*(?:[-–—~/]|до|to)\s*/i).filter(Boolean);
+    if (dashParts.length === 2) {
+        const startM = parseFlexibleTimeToken(dashParts[0]);
+        const endM = parseFlexibleTimeToken(dashParts[1]);
+        if (startM !== null && endM !== null) {
+            return `${formatMinutesToHHMM(startM)} - ${formatMinutesToHHMM(endM)}`;
+        }
+        if (startM !== null) {
+            return `${formatMinutesToHHMM(startM)} - ${formatMinutesToHHMM(startM + safeDur)}`;
+        }
+    }
+
+    // Try two whitespace-separated time tokens (e.g. "8:30 9:15" or "830 915")
+    const spaceParts = clean.split(/\s+/).filter(Boolean);
+    if (spaceParts.length === 2) {
+        const startM = parseFlexibleTimeToken(spaceParts[0]);
+        const endM = parseFlexibleTimeToken(spaceParts[1]);
+        if (startM !== null && endM !== null) {
+            return `${formatMinutesToHHMM(startM)} - ${formatMinutesToHHMM(endM)}`;
+        }
+    }
+
+    // Try single start time token (e.g. "8:30", "8.30", "830", "8") -> auto-add lessonDuration
+    const singleStartM = parseFlexibleTimeToken(clean);
+    if (singleStartM !== null) {
+        return `${formatMinutesToHHMM(singleStartM)} - ${formatMinutesToHHMM(singleStartM + safeDur)}`;
+    }
+
+    // Fallback: extract any two HH:MM or H:MM patterns in string
+    const foundTimes = clean.match(/\d{1,2}[:.]\d{2}/g);
+    if (foundTimes && foundTimes.length >= 2) {
+        const sM = parseFlexibleTimeToken(foundTimes[0]);
+        const eM = parseFlexibleTimeToken(foundTimes[1]);
+        if (sM !== null && eM !== null) {
+            return `${formatMinutesToHHMM(sM)} - ${formatMinutesToHHMM(eM)}`;
+        }
+    }
+
+    return fallbackRange || clean;
+};
+
+export const getClassScheduleTimeConfig = (settings?: ScheduleSettings, classKey?: string): { startTime: string; lessonDuration: number } => {
+    const classCfg = classKey && settings?.classTimeSettings ? settings.classTimeSettings[classKey] : undefined;
+    const rawStart = classCfg?.startTime || settings?.defaultStartTime || '08:30';
+    const rawDur = classCfg?.lessonDuration ?? settings?.defaultLessonDuration ?? 45;
+    const startTime = normalizeSingleTimeInput(rawStart, '08:30');
+    const lessonDuration = typeof rawDur === 'number' && rawDur >= 5 && rawDur <= 240 ? Math.round(rawDur) : 45;
+    return { startTime, lessonDuration };
+};
+
+export const generateDefaultLessons = (startTime: string = '08:30', lessonDuration: number = 45): Lesson[] => {
+    const startMins = parseFlexibleTimeToken(startTime) ?? (8 * 60 + 30);
+    const safeDuration = typeof lessonDuration === 'number' && lessonDuration >= 5 && lessonDuration <= 240 ? Math.round(lessonDuration) : 45;
+    const breaks = [10, 20, 20, 10, 10, 10];
+    const lessons: Lesson[] = [];
+    let currentStart = startMins;
+    for (let i = 0; i < 7; i++) {
+        const currentEnd = currentStart + safeDuration;
+        lessons.push({
+            id: uid('l'),
+            timeRange: `${formatMinutesToHHMM(currentStart)} - ${formatMinutesToHHMM(currentEnd)}`,
+            lesson: '',
+            teacherId: '',
+            room: ''
+        });
+        currentStart = currentEnd + (breaks[i] ?? 10);
+    }
+    return lessons;
+};
+
+export const calculateNextTimeRange = (prevRange: string, lessonDuration: number = 45, defaultStartTime: string = '08:30'): string => {
+    const safeDuration = typeof lessonDuration === 'number' && lessonDuration >= 5 && lessonDuration <= 240 ? Math.round(lessonDuration) : 45;
+    if (!prevRange || !prevRange.trim()) {
+        const firstStart = parseFlexibleTimeToken(defaultStartTime) ?? (8 * 60 + 30);
+        return `${formatMinutesToHHMM(firstStart)} - ${formatMinutesToHHMM(firstStart + safeDuration)}`;
+    }
+    const normalizedPrev = normalizeLessonTimeRange(prevRange, safeDuration, '08:30 - 09:15');
+    const parts = normalizedPrev.split(' - ');
+    const endM = parts[1] ? parseFlexibleTimeToken(parts[1]) : null;
+    if (endM === null) {
+        const firstStart = parseFlexibleTimeToken(defaultStartTime) ?? (8 * 60 + 30);
+        return `${formatMinutesToHHMM(firstStart)} - ${formatMinutesToHHMM(firstStart + safeDuration)}`;
+    }
     const breakDuration = 10; // Default break
-    const lessonDuration = 45; // Default lesson
-
     const nextStartM = endM + breakDuration;
-    const nextEndM = nextStartM + lessonDuration;
+    const nextEndM = nextStartM + safeDuration;
 
-    return `${formatTime(nextStartM)} - ${formatTime(nextEndM)}`;
+    return `${formatMinutesToHHMM(nextStartM)} - ${formatMinutesToHHMM(nextEndM)}`;
 };
 
 export const formatDateDDMMYYYY = (dateStr: string): string => {

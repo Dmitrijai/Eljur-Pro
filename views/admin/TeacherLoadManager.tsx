@@ -123,18 +123,21 @@ export const TeacherLoadManager = ({ state, onUpdate, user }: { state: AppState,
                     const currentSubj = getTeacherSubj(teacher.id);
                     return (
                         <div key={teacher.id} className="border border-slate-200 rounded-lg sm:rounded-xl overflow-hidden dark:border-slate-700">
-                            <div className={`p-2.5 sm:p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${isExpanded ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'}`} onClick={() => setExpandedTeacher(isExpanded ? null : teacher.id)}>
-                                <div className="font-bold text-xs sm:text-base text-slate-700 dark:text-slate-200 flex flex-wrap items-center gap-2">
-                                    <span>{H.formatShortName(teacher.fio)}</span>
+                            <div className={`p-2.5 sm:p-4 flex flex-nowrap justify-between items-center gap-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${isExpanded ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'}`} onClick={() => setExpandedTeacher(isExpanded ? null : teacher.id)}>
+                                <div className="font-bold text-xs sm:text-base text-slate-700 dark:text-slate-200 flex flex-nowrap items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
+                                    <span className="truncate shrink-0">{H.formatShortName(teacher.fio)}</span>
                                     {teacher.role === 'employee' && (
-                                        <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800">
-                                            {teacher.customRole || t('employee')}
+                                        <span
+                                            title={teacher.customRole || t('employee')}
+                                            className="text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800 truncate max-w-[115px] sm:max-w-[240px]"
+                                        >
+                                            {H.formatShortPosition(teacher.customRole || t('employee'))}
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm text-slate-500">
+                                <div className="flex items-center gap-1.5 sm:gap-3 text-xs sm:text-sm text-slate-500 shrink-0 whitespace-nowrap">
                                     <span className="bg-slate-100 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold dark:bg-slate-800 dark:text-slate-400">{assignments.length} {t('items')}</span>
-                                    {isExpanded ? <ChevronUp size={14} className="sm:w-4 sm:h-4"/> : <ChevronDown size={14} className="sm:w-4 sm:h-4"/>}
+                                    {isExpanded ? <ChevronUp size={14} className="sm:w-4 sm:h-4 shrink-0"/> : <ChevronDown size={14} className="sm:w-4 sm:h-4 shrink-0"/>}
                                 </div>
                             </div>
                             {isExpanded && (
